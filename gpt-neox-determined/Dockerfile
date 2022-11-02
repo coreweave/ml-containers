@@ -45,14 +45,15 @@ RUN mkdir -p /tmp/build && \
         cd /tmp && \
         rm -r /tmp/build
 
-#### Clone GPT-Neox for requirements
-RUN git clone https://github.com/EleutherAI/gpt-neox.git && cd gpt-neox
-
 #### Python packages
 RUN python3.8 -m pip install --no-cache-dir determined==0.19.2
-RUN python3.8 -m pip install --no-cache-dir -r requirements/requirements.txt
-RUN python3.8 -m pip install --no-cache-dir -r requirements/requirements-onebitadam.txt
-RUN python3.8 -m pip install -r requirements/requirements-sparseattention.txt
+
+#### Clone GPT-Neox for requirements
+RUN git clone https://github.com/EleutherAI/gpt-neox.git && cd gpt-neox && \
+        python3.8 -m pip install --no-cache-dir -r requirements/requirements.txt && \
+        python3.8 -m pip install --no-cache-dir -r requirements/requirements-onebitadam.txt && \
+        python3.8 -m pip install -r requirements/requirements-sparseattention.txt
+
 RUN python3.8 -m pip install --no-cache-dir pybind11
 RUN python3.8 -m pip install --no-cache-dir protobuf==3.19.4
 RUN update-alternatives --install /usr/bin/python3 python /usr/bin/python3.8 2
