@@ -54,13 +54,6 @@ RUN curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add - && 
     apt-get update && \
     apt-get install -y nvidia-container-toolkit
 
-# Install Docker, system latest
-RUN apt-get install -y apt-transport-https ca-certificates curl gnupg-agent software-properties-common && \
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add - && \
-    add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" && \
-    apt-get update && \
-    apt-get install -y docker-ce docker-ce-cli containerd.io libopenmpi-dev
-
 # Install EFA Driver
 RUN curl -O https://s3-us-west-2.amazonaws.com/aws-efa-installer/aws-efa-installer-latest.tar.gz \
     && tar -xf aws-efa-installer-latest.tar.gz \
