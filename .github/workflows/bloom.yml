@@ -1,0 +1,16 @@
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "bloom/**"
+      - ".github/workflows/bloom.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with: 
+      image-name: bloom
+      folder: bloom
+      build-args: ""
