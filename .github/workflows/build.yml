@@ -56,10 +56,8 @@ jobs:
         id: PR
         with:
           filterOutClosed: true
-      - run: |
-          echo "${{ steps.PR.outputs }}"
       - name: Comment
-        if: steps.PR.outcome == 'success'
+        if: steps.PR.outputs.number
         uses: peter-evans/create-or-update-comment@v2.1.0
         with: 
           issue-number: ${{ steps.PR.outputs.number }}
