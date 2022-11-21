@@ -2,8 +2,9 @@ FROM coreweave/nccl-tests:2022-11-06_19-21-22.11_EST
 
 # setup python and conda
 
-RUN apt-get install -y --no-install-recommends \
-    python3 python3-dev python3-pip git libssl-dev pkg-config
+RUN DEBIAN_FRONTEND=noninteractive apt-get -qq update && \
+        DEBIAN_FRONTEND=noninteractive apt-get -qq install -y --no-install-recommends \
+        python3 python3-dev python3-pip git libssl-dev pkg-config
 
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
     bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda && \
