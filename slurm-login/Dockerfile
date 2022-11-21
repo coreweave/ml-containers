@@ -44,4 +44,4 @@ RUN echo "NCCL_SOCKET_IFNAME=eth0" >> /etc/environment && \
     echo "NCCL_IB_HCA=ibp" >> /etc/environment
 
 RUN rm /etc/update-motd.d/*
-ADD ./update-motd.d/* /etc/update-motd.d/
+ADD motd /etc/motd
