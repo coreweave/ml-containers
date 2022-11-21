@@ -1,0 +1,16 @@
+cat << EOF
+The cluster has the following tooling pre-installed on the login node:
+- Anaconda: Initialize in your shell with "/opt/conda/bin/conda init bash"
+- Micromamba: A fast, lightweight alternative to conda. Initialize in your shell with "micromamba shell init;source .bashrc".
+- Java OpenJDK
+- aws cli and s3cmd for interacting with object storage
+
+The login node is intentionally kept with minimal dependencies, allowing users to manage their own environments via conda.
+Users can install libraries, tools, different python versions and many other software in venv or conda environments, that will be available on all compute nodes via the home directory.
+
+Compute node images can include other depdendencies, including CUDA, MPI, HPC-X and PyTorch depending on the worker node partition.
+
+Do not execute compute or I/O intensive tasks directly on the login node. Instead, leverage an interactive shell on a compute node, ie:
+- srun -C gpu --gpus=8 --pty bash -i
+- srun -C cpu --pty bash -i
+EOF
