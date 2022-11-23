@@ -35,3 +35,9 @@ RUN git clone https://github.com/NVIDIA/apex && \
 # install deepspeed from here:
 # https://github.com/microsoft/DeepSpeed/tree/olruwase/elastic-ckpt-refresh
 RUN pip install git+https://github.com/microsoft/DeepSpeed.git@olruwase/elastic-ckpt-refresh --upgrade
+
+# clone bigscience repo
+RUN git clone https://github.com/bigscience-workshop/bigscience.git
+
+# https://github.com/bigscience-workshop/Megatron-DeepSpeed/tree/olruwase/ds_ckpt_reshape
+RUN git clone --single-branch --branch olruwase/ds_ckpt_reshape https://github.com/bigscience-workshop/Megatron-DeepSpeed.git
