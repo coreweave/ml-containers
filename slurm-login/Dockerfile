@@ -9,7 +9,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qq update && \
         apt-get -qq install -y --no-install-recommends \
         git vim nano less curl wget inetutils-ping inetutils-traceroute \
-        sudo libssl-dev s3cmd tmux libgl1-mesa-glx glances openjdk-8-jre psmisc bzip2
+        environment-modules sudo libssl-dev s3cmd tmux libgl1-mesa-glx glances openjdk-8-jre psmisc bzip2
 
 # Install conda
 # A user can initialize conda for their shell with: /opt/conda/bin/conda init bash --user
