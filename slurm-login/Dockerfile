@@ -13,7 +13,7 @@ RUN apt-get -qq update && \
 
 # Install conda
 # A user can initialize conda for their shell with: /opt/conda/bin/conda init bash --user
-RUN curl -o /tmp/conda_installer https://repo.anaconda.com/archive/Anaconda3-2022.10-Linux-x86_64.sh  && \
+RUN curl -o /tmp/conda_installer https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
        bash /tmp/conda_installer -b -p /opt/conda && \
        rm /tmp/conda_installer
 

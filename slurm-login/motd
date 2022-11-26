@@ -1,7 +1,7 @@
 Welcome to a CoreWeave SLURM HPC Cluster
 
 The cluster has the following tooling pre-installed on the login node:
-- Anaconda: Initialize in your shell with "/opt/conda/bin/conda init bash"
+- Miniconda: Initialize in your shell with "/opt/conda/bin/conda init bash"
 - Micromamba: A fast, lightweight alternative to conda. Initialize in your shell with "micromamba shell init;source .bashrc".
 - Java OpenJDK
 - aws cli and s3cmd for interacting with object storage
