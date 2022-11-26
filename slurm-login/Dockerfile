@@ -45,3 +45,6 @@ RUN echo "NCCL_SOCKET_IFNAME=eth0" >> /etc/environment && \
 
 RUN rm /etc/update-motd.d/*
 ADD motd /etc/motd
+
+# Set umask to read/write for user and group but noone else
+RUN echo "umask u=rwx,g=rwx,o=" > /etc/profile.d/set-umask-for-all-users.sh
