@@ -2,14 +2,14 @@
 # Should contain general tooling but not specific libraries as these live in the specific node images.
 # It is expected that the BASE_IMAGE is a CoreWeave SUNK artifact which already includes SLURM, SSSD and SSHD. 
 
-ARG BASE_IMAGE
+ARG BASE_IMAGE=registry.gitlab.com/coreweave/sunk/dev/controller:2022-11-06_20-38-02.338_EST
 FROM $BASE_IMAGE
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qq update && \
         apt-get -qq install -y --no-install-recommends \
         git vim nano less curl wget inetutils-ping inetutils-traceroute \
-        environment-modules sudo libssl-dev s3cmd tmux libgl1-mesa-glx glances openjdk-8-jre psmisc bzip2
+        environment-modules sudo libssl-dev s3cmd tmux libgl1-mesa-glx glances openjdk-8-jre psmisc bzip2 rsync
 
 # Install conda
 # A user can initialize conda for their shell with: /opt/conda/bin/conda init bash --user
