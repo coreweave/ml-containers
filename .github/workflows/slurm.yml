@@ -2,8 +2,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "slurm-login/**"
-      - ".github/workflows/slurm-login.yml"
+      - "slurm/**"
+      - ".github/workflows/slurm.yml"
       - ".github/workflows/build.yml"
 
 jobs:
@@ -12,9 +12,13 @@ jobs:
       matrix:
         image:
         - name: "slurm-login"
-          folder: slurm-login
+          folder: slurm
           build-args: |
-            BASE_IMAGE=registry.gitlab.com/coreweave/sunk/dev/controller:2022-11-10_00-37-11.54_EST
+            BASE_IMAGE=registry.gitlab.com/coreweave/sunk/controller-extras:0ec60fa0
+        - name: "slurm-cw-cu117"
+          folder: slurm
+          build-args: |
+            BASE_IMAGE=registry.gitlab.com/coreweave/sunk/slurmd-cw-cu117-extras:0ec60fa0
 
     uses: ./.github/workflows/build.yml
     with: 
