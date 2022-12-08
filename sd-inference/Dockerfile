@@ -9,8 +9,8 @@ RUN apt-get install -y cuda-nvcc-11-3 cuda-nvml-dev-11-3 libcurand-dev-11-3 \
 RUN mkdir /app
 WORKDIR /app
 
-RUN git clone https://github.com/coreweave/kubernetes-cloud
-RUN cp kubernetes-cloud/sd-finetuner-workflow/sd-finetuner/* .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN git clone https://github.com/coreweave/kubernetes-cloud && \
+    cp kubernetes-cloud/online-inference/stable-diffusion/service/* . && \
+    pip3 install --no-cache-dir -r requirements.txt
 
-CMD [ "/usr/bin/python3", "finetuner.py" ]
+CMD [ "/usr/bin/python3", "service.py" ]

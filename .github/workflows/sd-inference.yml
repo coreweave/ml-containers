@@ -1,0 +1,16 @@
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "sd-inference/**"
+      - ".github/workflows/sd-inference.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with: 
+      image-name: sd-inference
+      folder: sd-inference
+      build-args: ""
