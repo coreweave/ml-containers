@@ -9,7 +9,10 @@ RUN apt-get install -y cuda-nvcc-11-3 cuda-nvml-dev-11-3 libcurand-dev-11-3 \
 RUN mkdir /app
 WORKDIR /app
 
-RUN git clone https://github.com/coreweave/kubernetes-cloud
+RUN git clone https://github.com/coreweave/kubernetes-cloud.git && \
+    cd kubernetes-cloud && \
+    git checkout 261a47020a3d555325f9529b9aaec72432617f41 && \
+    cd ..
 RUN cp kubernetes-cloud/sd-finetuner-workflow/sd-finetuner/* .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
