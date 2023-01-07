@@ -1,5 +1,10 @@
 on:
   workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Commit to build'
+        required: true
+        default: 'master'
   push:
     paths:
       - "sd-inference/**"
@@ -13,4 +18,4 @@ jobs:
     with: 
       image-name: sd-inference
       folder: sd-inference
-      build-args: ""
+      build-args: "--build-arg COMMIT=${{ github.event.inputs.commit }}"
