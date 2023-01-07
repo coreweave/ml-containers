@@ -13,9 +13,9 @@ WORKDIR /app
 RUN git clone https://github.com/coreweave/kubernetes-cloud && \
     cd kubernetes-cloud && \
     git checkout ${COMMIT} && \
-    cd ..
+    cd .. && \
+    cp kubernetes-cloud/online-inference/stable-diffusion/service/* .
 
-RUN cp kubernetes-cloud/online-inference/stable-diffusion/service/* .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 CMD [ "/usr/bin/python3", "service.py" ]
