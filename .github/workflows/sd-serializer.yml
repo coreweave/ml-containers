@@ -7,8 +7,8 @@ on:
         default: 'master'
   push:
     paths:
-      - "sd-inference/**"
-      - ".github/workflows/sd-inference.yml"
+      - "sd-serializer/**"
+      - ".github/workflows/sd-serializer.yml"
       - ".github/workflows/build.yml"
 
 
@@ -16,6 +16,6 @@ jobs:
   build:
     uses: ./.github/workflows/build.yml
     with: 
-      image-name: sd-inference
-      folder: sd-inference
+      image-name: sd-serializer
+      folder: sd-serializer
       build-args: "--build-arg COMMIT=${{ github.event.inputs.commit }}"
