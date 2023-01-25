@@ -1,9 +1,7 @@
 ARG COMMIT=master
-FROM gooseai/torch-base:6cfdc11
+FROM gooseai/torch-base:1.13.1-cuda-1.18-rc4
 
 ENV tenzorizer_commit=35381e3812ba342991d30b71ce257503622ae828
-
-RUN apt-get install -y git
 
 RUN mkdir /app
 WORKDIR /app
