@@ -1,16 +1,24 @@
-FROM gooseai/torch-base:6cfdc11
+ARG COMMIT=master
+FROM gooseai/torch-base:1.13.1-cuda-1.18-rc4
 
-RUN apt-get install -y cuda-nvcc-11-3 cuda-nvml-dev-11-3 libcurand-dev-11-3 \
-                       libcublas-dev-11-3 libcusparse-dev-11-3 \
-                       libcusolver-dev-11-3 cuda-nvprof-11-3 \
-                       ninja-build git && \
-    apt-get clean
+ENV tenzorizer_commit=35381e3812ba342991d30b71ce257503622ae828
 
 RUN mkdir /app
 WORKDIR /app
 
 RUN git clone https://github.com/coreweave/kubernetes-cloud && \
-    cp kubernetes-cloud/online-inference/stable-diffusion/service/* . && \
-    pip3 install --no-cache-dir -r requirements.txt
+    cd kubernetes-cloud && \
+    git checkout ${COMMIT} && \
+    cd .. && \
+    cp kubernetes-cloud/online-inference/stable-diffusion/service/* .
+
+RUN git clone https://github.com/coreweave/tensorizer && \
+    cd tensorizer && \
+    git checkout ${tenzorizer_commit} && \
+    cd .. && \
+    mv tensorizer/tensorizer.py . && \
+    rm -rf tensorizer
+
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 CMD [ "/usr/bin/python3", "service.py" ]
