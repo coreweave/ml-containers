@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.1.1-devel-ubuntu20.04
+FROM nvidia/cuda:11.7.0-devel-ubuntu20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -41,7 +41,8 @@ RUN mv /usr/local/mpi/bin/mpirun /usr/local/mpi/bin/mpirun.real && \
     chmod a+x /usr/local/mpi/bin/mpirun
 
 #### Python packages
-RUN pip install torch==1.8.1+cu111 -f https://download.pytorch.org/whl/torch_stable.html && pip cache purge
+RUN pip install torch==1.13.1+cu117 -f https://download.pytorch.org/whl/torch_stable.html && \
+    pip install packaging>=14.0 && pip cache purge
 
 # Install yq
 RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && chmod +x /usr/bin/yq;
@@ -53,7 +54,7 @@ RUN sed -i 's/[ #]\(.*StrictHostKeyChecking \).*/ \1no/g' /etc/ssh/ssh_config &&
     mkdir /var/run/sshd -p
 
 ## Install APEX
-RUN pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex.git@a651e2c24ecf97cbf367fd3f330df36760e1c597
+RUN pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex.git@537424d24d55e3a166c930828e4780549edc6151
 
 # Get the gpt-neox source code
 RUN git clone https://github.com/EleutherAI/gpt-neox.git
