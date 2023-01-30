@@ -1,4 +1,4 @@
-# ml_images
+# ml-containers
 
 Repository for building ML images at CoreWeave
 
