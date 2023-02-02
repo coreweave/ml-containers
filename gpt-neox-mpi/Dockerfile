@@ -17,7 +17,8 @@ RUN pip install torch==1.13.1+cu117 -f https://download.pytorch.org/whl/torch_st
 
 ## Install APEX
 ARG APEX_COMMIT=537424d24d55e3a166c930828e4780549edc6151
-RUN pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex.git@${APEX_COMMIT}
+RUN pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" \
+        --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex.git@${APEX_COMMIT}
 
 # Get the gpt-neox source code
 WORKDIR /
