@@ -1,4 +1,3 @@
-ARG COMMIT=master
 FROM gooseai/torch-base:6cfdc11
 
 RUN apt-get install -y cuda-nvcc-11-3 cuda-nvml-dev-11-3 libcurand-dev-11-3 \
@@ -10,6 +9,7 @@ RUN apt-get install -y cuda-nvcc-11-3 cuda-nvml-dev-11-3 libcurand-dev-11-3 \
 RUN mkdir /app
 WORKDIR /app
 
+ARG COMMIT=master
 RUN git clone https://github.com/coreweave/kubernetes-cloud.git && \
     cd kubernetes-cloud && \
     git checkout ${COMMIT} && \

@@ -1,4 +1,3 @@
-ARG COMMIT=master
 FROM gooseai/torch-base:1.13.1-cuda-1.18-rc4
 
 ENV tenzorizer_commit=35381e3812ba342991d30b71ce257503622ae828
@@ -6,6 +5,7 @@ ENV tenzorizer_commit=35381e3812ba342991d30b71ce257503622ae828
 RUN mkdir /app
 WORKDIR /app
 
+ARG COMMIT=master
 RUN git clone https://github.com/coreweave/kubernetes-cloud && \
     cd kubernetes-cloud && \
     git checkout ${COMMIT} && \
