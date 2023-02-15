@@ -1,0 +1,21 @@
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Commit to build'
+        required: true
+        default: 'master'
+  push:
+    paths:
+      - "tensorizer/**"
+      - ".github/workflows/tensorizer.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with: 
+      image-name: tensorizer
+      folder: tensorizer
+      build-args: "--build-arg COMMIT=${{ github.event.inputs.commit }}"
