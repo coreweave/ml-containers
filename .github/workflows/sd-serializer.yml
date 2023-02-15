@@ -18,4 +18,5 @@ jobs:
     with: 
       image-name: sd-serializer
       folder: sd-serializer
-      build-args: "--build-arg COMMIT=${{ github.event.inputs.commit }}"
+      build-args: |
+        COMMIT=${{ github.event.inputs.commit }}
