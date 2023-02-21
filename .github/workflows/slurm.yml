@@ -14,11 +14,11 @@ jobs:
         - name: "slurm-login"
           folder: slurm
           build-args: |
-            BASE_IMAGE=registry.gitlab.com/coreweave/sunk/controller-extras:0ec60fa0
+            BASE_IMAGE=registry.gitlab.com/coreweave/sunk/controller-extras:bc5a133d
         - name: "slurm-cw-cu117"
           folder: slurm
           build-args: |
-            BASE_IMAGE=registry.gitlab.com/coreweave/sunk/slurmd-cw-cu117-extras:0ec60fa0
+            BASE_IMAGE=registry.gitlab.com/coreweave/sunk/slurmd-cw-cu117-extras:bc5a133d
 
     uses: ./.github/workflows/build.yml
     with: 
