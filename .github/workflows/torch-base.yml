@@ -1,0 +1,26 @@
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "torch/**"
+      - ".github/workflows/torch-base.yml"
+      - ".github/workflows/torch.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        cuda: [12.0.1, 11.8.0]
+        include:
+          - torch: 2.0.0-rc1
+            vision: 0.15.0-rc1
+
+    uses: ./.github/workflows/torch.yml
+    with:
+      tag: ${{ format('base-cuda{0}-torch{1}-vision{2}', matrix.cuda, matrix.torch, matrix.vision) }}
+      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu20.04
+      base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu20.04
+      torch-version: ${{ matrix.torch }}
+      torchvision-version: ${{ matrix.vision }}
