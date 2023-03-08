@@ -52,8 +52,9 @@ RUN apt-get -qq update && apt-get -qq install -y \
 # modules with invalid absolute paths when using nccl-tests as a base
 # See: https://github.com/coreweave/nccl-tests/pull/12
 RUN if [ -d /opt/nccl-tests ]; then \
-    grep -IrlF "/build-result/hpcx-.*-x86_64" ${HPCX_DIR} \
-    | xargs sed -i -e "s:/build-result/hpcx-.*-x86_64:${HPCX_DIR}:g"; \
+    grep -Irl "/build-result/hpcx-.*-x86_64" ${HPCX_DIR} \
+    | xargs --delimiter='\n' --no-run-if-empty \
+        sed -i -e "s:/build-result/hpcx-.*-x86_64:${HPCX_DIR}:g"; \
     fi
 
 RUN mkdir /build /build/dist
