@@ -49,8 +49,8 @@ jobs:
       folder: torch
       tag-suffix: ${{ inputs.tag }}
       build-args: |
-        BUILDER_BASE_IMAGE="${{ inputs.builder-base-image }}"
-        FINAL_BASE_IMAGE="${{ inputs.base-image }}"
-        BUILD_TORCH_VERSION="${{ inputs.torch-version }}"
-        BUILD_TORCH_VISION_VERSION="${{ inputs.torchvision-version }}"
-        ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST="{0}"', inputs.cuda-arch-support) || '' }}
+        BUILDER_BASE_IMAGE=${{ inputs.builder-base-image }}
+        FINAL_BASE_IMAGE=${{ inputs.base-image }}
+        BUILD_TORCH_VERSION=${{ inputs.torch-version }}
+        BUILD_TORCH_VISION_VERSION=${{ inputs.torchvision-version }}
+        ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST={0}', inputs.cuda-arch-support) || '' }}
