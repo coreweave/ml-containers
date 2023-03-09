@@ -168,6 +168,14 @@ RUN apt-get -qq update && apt-get -qq install -y \
     pip3 install --no-cache-dir --upgrade pip && \
     apt-get clean
 
+# Same HPC-X workaround as included in the builder,
+# so that linking works later if this image is itself used as a build base.
+RUN if [ -d /opt/nccl-tests ]; then \
+    grep -Irl "/build-result/hpcx-.*-x86_64" ${HPCX_DIR} \
+    | xargs --delimiter='\n' --no-run-if-empty \
+        sed -i -e "s:/build-result/hpcx-.*-x86_64:${HPCX_DIR}:g"; \
+    fi
+
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_VISION_VERSION
 ARG BUILD_TORCH_CUDA_ARCH_LIST
