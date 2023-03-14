@@ -12,6 +12,9 @@ on:
       build-args:
         required: false
         type: string
+      tag-suffix:
+        required: false
+        type: string
 
 jobs:
   build:
@@ -34,13 +37,17 @@ jobs:
         if: github.ref_name != 'main'
         run: |
           echo "TAG_PREFIX=${{ github.ref_name }}-" >> $GITHUB_ENV
+      - name: Set tag suffix
+        if: inputs.tag-suffix != ''
+        run: |
+          echo "TAG_SUFFIX=-${{ inputs.tag-suffix }}" >> $GITHUB_ENV
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v4.1.1
         with:
           images: ${{ env.REGISTRY }}/${{ inputs.image-name }}
           tags: |
-            type=sha,prefix=${{ env.TAG_PREFIX }},format=short
+            type=sha,prefix=${{ env.TAG_PREFIX }},suffix=${{ env.TAG_SUFFIX }},format=short
       - name: Build and push Docker image
         id: docker-build
         uses: docker/build-push-action@v3.2.0

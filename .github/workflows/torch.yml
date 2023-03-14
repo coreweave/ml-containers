@@ -1,0 +1,56 @@
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      builder-base-image:
+        required: true
+        type: string
+      base-image:
+        required: true
+        type: string
+      torch-version:
+        required: true
+        type: string
+      torchvision-version:
+        required: true
+        type: string
+      cuda-arch-support:
+        required: false
+        type: string
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+      builder-base-image:
+        required: true
+        type: string
+      base-image:
+        required: true
+        type: string
+      torch-version:
+        required: true
+        type: string
+      torchvision-version:
+        required: true
+        type: string
+      cuda-arch-support:
+        required: false
+        type: string
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with: 
+      image-name: torch
+      folder: torch
+      tag-suffix: ${{ inputs.tag }}
+      build-args: |
+        BUILDER_BASE_IMAGE=${{ inputs.builder-base-image }}
+        FINAL_BASE_IMAGE=${{ inputs.base-image }}
+        BUILD_TORCH_VERSION=${{ inputs.torch-version }}
+        BUILD_TORCH_VISION_VERSION=${{ inputs.torchvision-version }}
+        ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST={0}', inputs.cuda-arch-support) || '' }}
