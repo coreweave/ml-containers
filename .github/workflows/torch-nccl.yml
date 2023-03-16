@@ -20,8 +20,8 @@ jobs:
             nccl: 2.16.2-1
             nccl-tests-hash: 5efeee0
         include:
-          - torch: 2.0.0-rc1
-            vision: 0.15.0-rc1
+          - torch: 2.0.0
+            vision: 0.15.1
 
     uses: ./.github/workflows/torch.yml
     with:

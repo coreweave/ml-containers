@@ -14,8 +14,8 @@ jobs:
       matrix:
         cuda: [12.0.1, 11.8.0]
         include:
-          - torch: 2.0.0-rc1
-            vision: 0.15.0-rc1
+          - torch: 2.0.0
+            vision: 0.15.1
 
     uses: ./.github/workflows/torch.yml
     with:
