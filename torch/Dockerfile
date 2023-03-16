@@ -2,10 +2,10 @@
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.0.1-devel-ubuntu20.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu20.04"
 
-ARG BUILD_TORCH_VERSION="2.0.0-rc1"
-ARG BUILD_TORCH_VISION_VERSION="0.15.0-rc1"
+ARG BUILD_TORCH_VERSION="2.0.0"
+ARG BUILD_TORCH_VISION_VERSION="0.15.1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
-# 8.7 is not supported until PyTorch 2.0.0-rc2
+# 8.7 is supported in the PyTorch master branch, but not 2.0.0
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
