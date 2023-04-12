@@ -16,11 +16,13 @@ jobs:
         include:
           - torch: 2.0.0
             vision: 0.15.1
+            audio: 2.0.1
 
     uses: ./.github/workflows/torch.yml
     with:
-      tag: ${{ format('base-cuda{0}-torch{1}-vision{2}', matrix.cuda, matrix.torch, matrix.vision) }}
+      tag: ${{ format('base-cuda{0}-torch{1}-vision{2}-audio{3}', matrix.cuda, matrix.torch, matrix.vision, matrix.audio) }}
       builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu20.04
       base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu20.04
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
+      torchaudio-version: ${{ matrix.audio }}

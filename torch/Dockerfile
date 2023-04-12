@@ -4,6 +4,7 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu20.04"
 
 ARG BUILD_TORCH_VERSION="2.0.0"
 ARG BUILD_TORCH_VISION_VERSION="0.15.1"
+ARG BUILD_TORCH_AUDIO_VERSION="2.0.1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
 # 8.7 is supported in the PyTorch master branch, but not 2.0.0
 
@@ -22,6 +23,14 @@ ARG BUILD_TORCH_VISION_VERSION
 RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       https://github.com/pytorch/vision -b v${BUILD_TORCH_VISION_VERSION} && \
     rm -rf vision/.git
+
+FROM alpine/git:2.36.3 as torchaudio-downloader
+WORKDIR /git
+ARG BUILD_TORCH_AUDIO_VERSION
+RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
+      https://github.com/pytorch/audio -b v${BUILD_TORCH_AUDIO_VERSION}
+# The torchaudio build requires that this directory remain a full git repository,
+# so no rm -rf audio/.git is done for this one.
 
 ## Build PyTorch on a builder image.
 FROM ${BUILDER_BASE_IMAGE} as builder
@@ -161,6 +170,40 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
+## Build torchaudio
+ARG BUILD_TORCH_AUDIO_VERSION
+ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
+RUN pip3 install --no-cache-dir --upgrade \
+    matplotlib numpy typing_extensions requests pillow
+
+RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
+    cd audio && \
+    mkdir build && \
+    ln -s /usr/bin/cc build/cc && \
+    ln -s /usr/bin/c++ build/c++ && \
+    { if [ -d /opt/nccl-tests ]; then \
+      export \
+        USE_DISTRIBUTED=1 \
+        USE_CUDNN=1 \
+        USE_NCCL=1 USE_SYSTEM_NCCL=1 \
+        UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
+        USE_NCCL_WITH_UCC=1 \
+        USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
+    USE_OPENCV=1 \
+    BUILD_TORCH=ON \
+    BUILD_TEST=0 \
+    CUDA_HOST_COMPILER=cc \
+    USE_CUDA=1 \
+    FORCE_CUDA=1 \
+    USE_NNPACK=1 \
+    CC=cc \
+    CXX=c++ \
+    USE_EIGEN_FOR_BLAS=ON \
+    USE_MKL=OFF \
+    BUILD_VERSION="${TORCH_AUDIO_VERSION}" \
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
+    python3 setup.py bdist_wheel --dist-dir ../dist
+
 
 ## Build the final torch image.
 FROM ${FINAL_BASE_IMAGE}
@@ -186,9 +229,11 @@ RUN if [ -d /opt/nccl-tests ]; then \
 
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_VISION_VERSION
+ARG BUILD_TORCH_AUDIO_VERSION
 ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
+ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
