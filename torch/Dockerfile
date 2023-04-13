@@ -36,6 +36,8 @@ RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
 FROM ${BUILDER_BASE_IMAGE} as builder
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG BUILD_CCACHE_SIZE="1Gi"
+
 # ninja-build, ccache, gcc-10, g++-10, and lld are optional but improve the build
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
@@ -46,7 +48,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 10 && \
     update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 1 && \
-    ccache -M 5Gi && \
+    ccache -M "${BUILD_CCACHE_SIZE}" && \
     ccache -F 0 && \
     pip3 install --no-cache-dir --upgrade pip && \
     apt-get clean
