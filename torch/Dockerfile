@@ -4,6 +4,7 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu20.04"
 
 ARG BUILD_TORCH_VERSION="2.0.0"
 ARG BUILD_TORCH_VISION_VERSION="0.15.1"
+ARG BUILD_TORCH_AUDIO_VERSION="2.0.1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
 # 8.7 is supported in the PyTorch master branch, but not 2.0.0
 
@@ -23,22 +24,40 @@ RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       https://github.com/pytorch/vision -b v${BUILD_TORCH_VISION_VERSION} && \
     rm -rf vision/.git
 
+FROM alpine/git:2.36.3 as torchaudio-downloader
+WORKDIR /git
+ARG BUILD_TORCH_AUDIO_VERSION
+RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
+      https://github.com/pytorch/audio -b v${BUILD_TORCH_AUDIO_VERSION}
+# The torchaudio build requires that this directory remain a full git repository,
+# so no rm -rf audio/.git is done for this one.
+
 ## Build PyTorch on a builder image.
 FROM ${BUILDER_BASE_IMAGE} as builder
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ninja-build, gcc-10, g++-10, and lld are optional but improve the build
+ARG BUILD_CCACHE_SIZE="1Gi"
+
+# ninja-build, ccache, gcc-10, g++-10, and lld are optional but improve the build
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
-      python3-distutils python3-numpy build-essential ninja-build \
-      gcc-10 g++-10 lld && \
+      libpng-dev libjpeg-dev pkg-config python3-distutils python3-numpy \
+      build-essential ninja-build ccache gcc-10 g++-10 lld && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 10 && \
     update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 1 && \
+    ccache -M "${BUILD_CCACHE_SIZE}" && \
+    ccache -F 0 && \
     pip3 install --no-cache-dir --upgrade pip && \
     apt-get clean
+
+# Build-time environment variables
+ENV CCACHE_DIR=/ccache \
+    CMAKE_C_COMPILER_LAUNCHER=ccache \
+    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
 # Add Kitware's apt repository to get a newer version of CMake
 RUN apt-get -qq update && apt-get -qq install -y \
@@ -68,6 +87,14 @@ ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
+
+# Build tool & library paths, shared for all libraries to be built
+ENV CMAKE_PREFIX_PATH=/usr/bin/ \
+    LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/cuda/lib64:/usr/local/lib \
+    CUDA_BIN_PATH=/usr/local/cuda/bin \
+    CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/ \
+    CUDNN_LIB_DIR=/usr/local/cuda/lib64
+
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
 # so it uses the system's special NCCL and UCC installations for the build.
@@ -82,6 +109,7 @@ ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 # This step is itself cacheable as long as the downloaded files (and ARCH_LIST)
 # remain the same.
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
+    --mount=type=cache,target=/ccache \
     cd pytorch && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -89,6 +117,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
+        USE_CUDNN=1 \
         USE_NCCL=1 USE_SYSTEM_NCCL=1 \
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
@@ -96,11 +125,6 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
-    CMAKE_PREFIX_PATH="/usr/bin/" \
-    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64:/usr/local/lib \
-    CUDA_BIN_PATH=/usr/local/cuda/bin \
-    CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/ \
-    CUDNN_LIB_DIR=/usr/local/cuda/lib64 \
     CUDA_HOST_COMPILER=cc \
     USE_CUDA=1 \
     USE_NNPACK=1 \
@@ -110,7 +134,6 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     USE_MKL=OFF \
     PYTORCH_BUILD_VERSION="${TORCH_VERSION}" \
     PYTORCH_BUILD_NUMBER=0 \
-    TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
@@ -129,6 +152,7 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
+        USE_CUDNN=1 \
         USE_NCCL=1 USE_SYSTEM_NCCL=1 \
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
@@ -136,20 +160,49 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
-    CMAKE_PREFIX_PATH="/usr/bin/" \
-    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64:/usr/local/lib \
-    CUDA_BIN_PATH=/usr/local/cuda/bin \
-    CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/ \
-    CUDNN_LIB_DIR=/usr/local/cuda/lib64 \
     CUDA_HOST_COMPILER=cc \
     USE_CUDA=1 \
+    FORCE_CUDA=1 \
     USE_NNPACK=1 \
     CC=cc \
     CXX=c++ \
     USE_EIGEN_FOR_BLAS=ON \
     USE_MKL=OFF \
     BUILD_VERSION="${TORCH_VISION_VERSION}" \
-    TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
+    python3 setup.py bdist_wheel --dist-dir ../dist
+
+## Build torchaudio
+ARG BUILD_TORCH_AUDIO_VERSION
+ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
+RUN pip3 install --no-cache-dir --upgrade \
+    matplotlib numpy typing_extensions requests pillow
+
+RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
+    cd audio && \
+    mkdir build && \
+    ln -s /usr/bin/cc build/cc && \
+    ln -s /usr/bin/c++ build/c++ && \
+    { if [ -d /opt/nccl-tests ]; then \
+      export \
+        USE_DISTRIBUTED=1 \
+        USE_CUDNN=1 \
+        USE_NCCL=1 USE_SYSTEM_NCCL=1 \
+        UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
+        USE_NCCL_WITH_UCC=1 \
+        USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
+    USE_OPENCV=1 \
+    BUILD_TORCH=ON \
+    BUILD_TEST=0 \
+    CUDA_HOST_COMPILER=cc \
+    USE_CUDA=1 \
+    FORCE_CUDA=1 \
+    USE_NNPACK=1 \
+    CC=cc \
+    CXX=c++ \
+    USE_EIGEN_FOR_BLAS=ON \
+    USE_MKL=OFF \
+    BUILD_VERSION="${TORCH_AUDIO_VERSION}" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
@@ -178,9 +231,11 @@ RUN if [ -d /opt/nccl-tests ]; then \
 
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_VISION_VERSION
+ARG BUILD_TORCH_AUDIO_VERSION
 ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
+ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.

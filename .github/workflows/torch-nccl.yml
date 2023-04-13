@@ -15,18 +15,20 @@ jobs:
         image:
           - cuda: 12.0.1
             nccl: 2.17.1-1
-            nccl-tests-hash: 5efeee0
+            nccl-tests-hash: 1bac5e9
           - cuda: 11.8.0
             nccl: 2.16.2-1
-            nccl-tests-hash: 5efeee0
+            nccl-tests-hash: 1bac5e9
         include:
           - torch: 2.0.0
             vision: 0.15.1
+            audio: 2.0.1
 
     uses: ./.github/workflows/torch.yml
     with:
-      tag: ${{ format('nccl-cuda{0}-nccl{1}-torch{2}-vision{3}', matrix.image.cuda, matrix.image.nccl, matrix.torch, matrix.vision) }}
+      tag: ${{ format('nccl-cuda{0}-nccl{1}-torch{2}-vision{3}-audio{4}', matrix.image.cuda, matrix.image.nccl, matrix.torch, matrix.vision, matrix.audio) }}
       builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
       base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
+      torchaudio-version: ${{ matrix.audio }}

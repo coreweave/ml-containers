@@ -16,6 +16,9 @@ on:
       torchvision-version:
         required: true
         type: string
+      torchaudio-version:
+        required: true
+        type: string
       cuda-arch-support:
         required: false
         type: string
@@ -37,6 +40,9 @@ on:
       torchvision-version:
         required: true
         type: string
+      torchaudio-version:
+        required: true
+        type: string
       cuda-arch-support:
         required: false
         type: string
@@ -49,8 +55,10 @@ jobs:
       folder: torch
       tag-suffix: ${{ inputs.tag }}
       build-args: |
+        BUILD_CCACHE_SIZE=1Gi
         BUILDER_BASE_IMAGE=${{ inputs.builder-base-image }}
         FINAL_BASE_IMAGE=${{ inputs.base-image }}
         BUILD_TORCH_VERSION=${{ inputs.torch-version }}
         BUILD_TORCH_VISION_VERSION=${{ inputs.torchvision-version }}
+        BUILD_TORCH_AUDIO_VERSION=${{ inputs.torchaudio-version }}
         ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST={0}', inputs.cuda-arch-support) || '' }}
