@@ -1,0 +1,18 @@
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tensorflow/**"
+      - ".github/workflows/tensorflow.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      image-name: torch
+      folder: tensorflow
+      tag-suffix: "tensorflow-nccl-cuda11.8.0-nccl2.16.2-1-torch2.0.0-vision0.15.1"
+      build-args: |
+        BASE_IMAGE=ghcr.io/coreweave/ml-containers/torch:afecfe9-nccl-cuda11.8.0-nccl2.16.2-1-torch2.0.0-vision0.15.1
