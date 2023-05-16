@@ -1,0 +1,17 @@
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "cuda-ssh/**"
+      - ".github/workflows/cuda-ssh.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      image-name: cuda-ssh
+      folder: cuda-ssh
+      build-args: |
+        BASE_IMAGE=ghcr.io/coreweave/ml-containers/torch:bb02bee-base-cuda11.8.0-torch2.0.0-vision0.15.1-audio2.0.1
