@@ -8,9 +8,14 @@ RUN apt-get -qq update && \
       # Critical packages:
       ssh ca-certificates tini bash \
       # Helpful packages:
-      libncurses5 curl wget sudo htop git rsync \
+      libncurses5 curl wget sudo htop git rsync locales \
       tmux unzip nano vim apt-utils iputils-ping && \
     apt-get clean && \
+    # SSH passes the client's LANG and LC_* environment variables by default.
+    # However, the only pre-installed locales on most container images are
+    # C, C.UTF-8, and POSIX. This adds the en_US.UTF-8 locale as well,
+    # and leaves locale-gen available to install others.
+    locale-gen en_US.UTF-8 && \
     # Wipe the server-side SSH keys on the container image level
     # to prevent leaking the private host keys, which could
     # potentially allow impersonation of the SSH server by an attacker.
