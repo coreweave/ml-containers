@@ -20,9 +20,9 @@ jobs:
             nccl: 2.16.2-1
             nccl-tests-hash: 1bac5e9
         include:
-          - torch: 2.0.0
-            vision: 0.15.1
-            audio: 2.0.1
+          - torch: 2.0.1
+            vision: 0.15.2
+            audio: 2.0.2
 
     uses: ./.github/workflows/torch.yml
     with:
