@@ -259,7 +259,8 @@ RUN export \
     { if [ $CUDA_MAJOR_VERSION -ge 12 ]; then \
       apt-get -qq install --no-upgrade -y libnvjitlink-${CUDA_PACKAGE_VERSION}; fi; } && \
     { if [ ! -d /opt/nccl-tests ]; then \
-      apt-get -qq install --no-upgrade -y libnccl2; fi; } && \
+      export NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
+      apt-get -qq install --no-upgrade -y "libnccl2=$NCCL_PACKAGE_VERSION"; fi; } && \
     apt-get clean
 
 WORKDIR /usr/src/app
