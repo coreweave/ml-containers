@@ -6,7 +6,7 @@ ARG BUILD_TORCH_VERSION="2.0.1"
 ARG BUILD_TORCH_VISION_VERSION="0.15.2"
 ARG BUILD_TORCH_AUDIO_VERSION="2.0.2"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
-# 8.7 is supported in the PyTorch master branch, but not 2.0.0
+# 8.7 is supported in the PyTorch main branch, but not 2.0.0
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
@@ -66,15 +66,6 @@ RUN apt-get -qq update && apt-get -qq install -y \
     | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
     apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
     apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
-
-# Workaround for linking against an HPC-X distribution that contains CMake
-# modules with invalid absolute paths when using nccl-tests as a base
-# See: https://github.com/coreweave/nccl-tests/pull/12
-RUN if [ -d /opt/nccl-tests ]; then \
-    grep -Irl "/build-result/hpcx-.*-x86_64" ${HPCX_DIR} \
-    | xargs --delimiter='\n' --no-run-if-empty \
-        sed -i -e "s:/build-result/hpcx-.*-x86_64:${HPCX_DIR}:g"; \
-    fi
 
 RUN mkdir /build /build/dist
 WORKDIR /build
@@ -220,14 +211,6 @@ RUN apt-get -qq update && apt-get -qq install -y \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     pip3 install --no-cache-dir --upgrade pip && \
     apt-get clean
-
-# Same HPC-X workaround as included in the builder,
-# so that linking works later if this image is itself used as a build base.
-RUN if [ -d /opt/nccl-tests ]; then \
-    grep -Irl "/build-result/hpcx-.*-x86_64" ${HPCX_DIR} \
-    | xargs --delimiter='\n' --no-run-if-empty \
-        sed -i -e "s:/build-result/hpcx-.*-x86_64:${HPCX_DIR}:g"; \
-    fi
 
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_VISION_VERSION

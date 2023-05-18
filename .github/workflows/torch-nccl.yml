@@ -15,10 +15,10 @@ jobs:
         image:
           - cuda: 12.0.1
             nccl: 2.18.1-1
-            nccl-tests-hash: b408dff
+            nccl-tests-hash: e90a40f
           - cuda: 11.8.0
             nccl: 2.16.2-1
-            nccl-tests-hash: b408dff
+            nccl-tests-hash: e90a40f
         include:
           - torch: 2.0.1
             vision: 0.15.2
