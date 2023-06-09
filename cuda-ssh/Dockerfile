@@ -1,4 +1,4 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bb02bee-base-cuda11.8.0-torch2.0.0-vision0.15.1-audio2.0.1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:ceeb8c2-base-cuda11.8.0-torch2.0.1-vision0.15.2-audio2.0.2"
 
 FROM ${BASE_IMAGE}
 

@@ -9,9 +9,16 @@ on:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        tag:
+          - ceeb8c2-base-cuda11.8.0-torch2.0.1-vision0.15.2-audio2.0.2
+          - ceeb8c2-nccl-cuda11.8.0-nccl2.16.2-1-torch2.0.1-vision0.15.2-audio2.0.2
+
     uses: ./.github/workflows/build.yml
     with:
       image-name: cuda-ssh
       folder: cuda-ssh
+      tag-suffix: torch-${{ matrix.tag }}
       build-args: |
-        BASE_IMAGE=ghcr.io/coreweave/ml-containers/torch:bb02bee-base-cuda11.8.0-torch2.0.0-vision0.15.1-audio2.0.1
+        BASE_IMAGE=ghcr.io/coreweave/ml-containers/torch:${{ matrix.tag }}
