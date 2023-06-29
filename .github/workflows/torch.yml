@@ -23,6 +23,10 @@ on:
         required: false
         type: string
         default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
+      build-extras:
+        required: false
+        type: boolean
+        default: false
 
   workflow_dispatch:
     inputs:
@@ -48,11 +52,15 @@ on:
         required: false
         type: string
         default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
+      build-extras:
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
     uses: ./.github/workflows/build.yml
-    with: 
+    with:
       image-name: torch
       folder: torch
       tag-suffix: ${{ inputs.tag }}
@@ -64,3 +72,13 @@ jobs:
         BUILD_TORCH_VISION_VERSION=${{ inputs.torchvision-version }}
         BUILD_TORCH_AUDIO_VERSION=${{ inputs.torchaudio-version }}
         ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST={0}', inputs.cuda-arch-support) || '' }}
+  build-extras:
+    if: inputs.build-extras
+    needs: build
+    uses: ./.github/workflows/build.yml
+    with:
+      image-name: torch-extras
+      folder: torch-extras
+      tag-suffix: ${{ inputs.tag }}
+      build-args: |
+        BASE_IMAGE=${{ needs.build.outputs.tags }}
