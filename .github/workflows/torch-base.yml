@@ -26,3 +26,4 @@ jobs:
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
       torchaudio-version: ${{ matrix.audio }}
+      build-extras: true

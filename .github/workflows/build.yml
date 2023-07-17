@@ -15,11 +15,25 @@ on:
       tag-suffix:
         required: false
         type: string
+    outputs:
+      outcome:
+        description: "The outcome of the build"
+        value: ${{ jobs.build.outputs.outcome }}
+      tags:
+        description: "The resulting image tags"
+        value: ${{ jobs.build.outputs.tags }}
+      version:
+        description: "The resulting image version"
+        value: ${{ jobs.build.outputs.tags }}
 
 jobs:
   build:
     name: Build Images
     runs-on: [self-hosted, Linux]
+    outputs:
+      outcome: ${{ steps.docker-build.outcome }}
+      tags: ${{ steps.meta.outputs.tags }}
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
