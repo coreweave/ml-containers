@@ -1,0 +1,29 @@
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      base-image:
+        required: true
+        type: string
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+      base-image:
+        required: true
+        type: string
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      image-name: torch-extras
+      folder: torch-extras
+      tag-suffix: ${{ inputs.tag }}
+      build-args: |
+        BASE_IMAGE=${{ inputs.base-image }}

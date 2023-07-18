@@ -75,10 +75,7 @@ jobs:
   build-extras:
     if: inputs.build-extras
     needs: build
-    uses: ./.github/workflows/build.yml
+    uses: ./.github/workflows/torch-extras.yml
     with:
-      image-name: torch-extras
-      folder: torch-extras
-      tag-suffix: ${{ inputs.tag }}
-      build-args: |
-        BASE_IMAGE=${{ needs.build.outputs.tags }}
+      tag: ${{ inputs.tag }}
+      base-image: ${{ needs.build.outputs.tags }}
