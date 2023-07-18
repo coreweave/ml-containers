@@ -104,7 +104,7 @@ WORKDIR /wheels
 FROM builder-base as flash-attn-builder
 ARG FLASH_ATTN_VERSION
 
-RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/ \
+RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
