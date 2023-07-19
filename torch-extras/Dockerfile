@@ -3,6 +3,7 @@
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.9.4"
 ARG FLASH_ATTN_VERSION="1.0.7"
+ARG APEX_COMMIT="7b2e71b0d4013f8e2f9f1c8dd21980ff1d76f1b6"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
@@ -10,6 +11,16 @@ ARG FLASH_ATTN_VERSION
 RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       https://github.com/HazyResearch/flash-attention -b v${FLASH_ATTN_VERSION} && \
     rm -rf flash-attention/.git
+
+FROM alpine/git:2.36.3 as apex-downloader
+WORKDIR /git
+ARG APEX_COMMIT
+RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
+      https://github.com/NVIDIA/apex && \
+    cd apex && \
+    git checkout "${APEX_COMMIT}" && \
+    git submodule update --init --recursive --depth 1 --jobs 8 && \
+    find -type d -name docs -exec rm -r '{}' ';' 2> /dev/null
 
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
@@ -54,6 +65,8 @@ WORKDIR /build
 COPY compiler_wrapper.f95 .
 RUN gfortran -O3 ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
+COPY --chmod=755 effective_cpu_count.sh .
+
 
 FROM builder-base as deepspeed-builder
 # DeepSpeed build flags
@@ -92,6 +105,7 @@ RUN python3 -m pip install -U --no-cache-dir \
       do if [[ -z ${!VAR} ]]; then unset ${VAR}; fi; done; \
     } && \
     CC=$(realpath -e ./compiler) \
+      MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) \
       python3 -m pip wheel -w /wheels \
       --no-cache-dir --no-build-isolation --no-deps \
       deepspeed==${DEEPSPEED_VERSION} && \
@@ -102,12 +116,12 @@ WORKDIR /wheels
 
 
 FROM builder-base as flash-attn-builder
-ARG FLASH_ATTN_VERSION
 
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
+    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
     cd flash-attention && \
     parallel 'cd {} && python3 setup.py bdist_wheel --dist-dir /wheels' ::: \
       . \
@@ -121,6 +135,50 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
 WORKDIR /wheels
 
 
+FROM builder-base as apex-builder
+
+RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && \
+    apt-get -qq update && apt-get install -y --no-install-recommends \
+      libnccl-dev=$LIBNCCL2_VERSION && \
+    apt-get clean
+
+RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
+    python3 -m pip install -U --no-cache-dir \
+      packaging setuptools wheel pip && \
+    export CC=$(realpath -e ./compiler) && \
+    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+    EXTENSIONS=$(printf -- '--config-settings "--build-option=%s" ' $( \
+      echo \
+        --cpp_ext \
+        --cuda_ext \
+        --permutation_search \
+        --xentropy \
+        --focal_loss \
+        --index_mul_2d \
+        --deprecated_fused_adam \
+        --deprecated_fused_lamb \
+        --fast_layer_norm \
+        --fmha \
+        --fast_multihead_attn \
+        --transducer \
+        --peer_memory \
+        --nccl_p2p \
+        --fast_bottleneck && \
+      if dpkg-query --status libcudnn8-dev > /dev/null 2> /dev/null; then \
+        echo \
+          --bnp \
+          --cudnn_gbn \
+          --fused_conv_bias_relu; \
+      fi; \
+    )) && \
+    cd apex && \
+    python3 -m pip wheel -w /wheels -v \
+      --no-cache-dir --no-build-isolation --no-deps \
+      $EXTENSIONS ./
+
+WORKDIR /wheels
+
+
 FROM ${BASE_IMAGE}
 
 RUN apt-get -qq update && \
@@ -130,5 +188,7 @@ RUN apt-get -qq update && \
 RUN --mount=type=bind,from=deepspeed-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=flash-attn-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
+RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN rm -r /tmp/wheels
