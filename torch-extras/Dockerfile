@@ -191,4 +191,3 @@ RUN --mount=type=bind,from=flash-attn-builder,source=/wheels,target=/tmp/wheels 
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
-RUN rm -r /tmp/wheels
