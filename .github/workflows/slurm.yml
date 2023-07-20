@@ -21,7 +21,8 @@ jobs:
             BASE_IMAGE=registry.gitlab.com/coreweave/sunk/slurmd-cw-cu117-extras:bc5a133d
 
     uses: ./.github/workflows/build.yml
-    with: 
+    secrets: inherit
+    with:
       image-name: ${{ matrix.image.name }}
       folder: ${{ matrix.image.folder }}
       build-args: ${{ matrix.image.build-args }}

@@ -19,6 +19,7 @@ jobs:
             audio: 2.0.2
 
     uses: ./.github/workflows/torch.yml
+    secrets: inherit
     with:
       tag: ${{ format('base-cuda{0}-torch{1}-vision{2}-audio{3}', matrix.cuda, matrix.torch, matrix.vision, matrix.audio) }}
       builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu20.04

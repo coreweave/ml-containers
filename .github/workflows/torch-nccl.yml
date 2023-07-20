@@ -28,6 +28,7 @@ jobs:
             audio: 2.0.2
 
     uses: ./.github/workflows/torch.yml
+    secrets: inherit
     with:
       tag: ${{ format('nccl-cuda{0}-nccl{1}-torch{2}-vision{3}-audio{4}', matrix.image.cuda, matrix.image.nccl, matrix.torch, matrix.vision, matrix.audio) }}
       builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
