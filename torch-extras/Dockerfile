@@ -20,7 +20,7 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     cd apex && \
     git checkout "${APEX_COMMIT}" && \
     git submodule update --init --recursive --depth 1 --jobs 8 && \
-    find -type d -name docs -exec rm -r '{}' ';' 2> /dev/null
+    find -type d -name docs -prune -exec rm -r '{}' ';'
 
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
