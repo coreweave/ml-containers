@@ -9,8 +9,8 @@ FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
 ARG FLASH_ATTN_VERSION
 RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
-      https://github.com/HazyResearch/flash-attention -b v${FLASH_ATTN_VERSION} && \
-    rm -rf flash-attention/.git
+      --filter=blob:none --also-filter-submodules \
+      https://github.com/HazyResearch/flash-attention -b v${FLASH_ATTN_VERSION}
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -19,7 +19,8 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       https://github.com/NVIDIA/apex && \
     cd apex && \
     git checkout "${APEX_COMMIT}" && \
-    git submodule update --init --recursive --depth 1 --jobs 8 && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
 
 
@@ -43,7 +44,6 @@ RUN export \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
       ninja-build \
-      parallel \
       # gcc-10/g++-10/lld do not need to be installed here, but they improve the build.
       # gfortran-10 is just for compiler_wrapper.f95.
       gcc-10 g++-10 gfortran-10 lld && \
@@ -121,16 +121,26 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
-    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+    export MAX_JOBS=$(($(./effective_cpu_count.sh) / 4)) && \
+    export MAX_JOBS=$((MAX_JOBS == 0 ? 1 : MAX_JOBS)) && \
+    export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
     cd flash-attention && \
-    parallel 'cd {} && python3 setup.py bdist_wheel --dist-dir /wheels' ::: \
-      . \
-      csrc/ft_attention \
-      csrc/fused_dense_lib \
-      csrc/fused_softmax \
-      csrc/layer_norm \
-      csrc/rotary \
-      csrc/xentropy
+    ( \
+      for EXT_DIR in $(realpath -s -e \
+        . \
+        csrc/ft_attention \
+        csrc/fused_dense_lib \
+        csrc/fused_softmax \
+        csrc/layer_norm \
+        csrc/rotary \
+        csrc/xentropy); \
+      do \
+          cd $EXT_DIR && \
+          python3 setup.py bdist_wheel --dist-dir /wheels && \
+          cd - || \
+          exit 1; \
+      done; \
+    )
 
 WORKDIR /wheels
 
