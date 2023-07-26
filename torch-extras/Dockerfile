@@ -19,7 +19,8 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       https://github.com/NVIDIA/apex && \
     cd apex && \
     git checkout "${APEX_COMMIT}" && \
-    git submodule update --init --recursive --depth 1 --jobs 8 && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
 
 
