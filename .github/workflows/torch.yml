@@ -32,28 +32,36 @@ on:
     inputs:
       tag:
         required: true
+        description: "Tag suffix to identify the build"
         type: string
       builder-base-image:
         required: true
+        description: "Base image used during the compilation step"
         type: string
       base-image:
         required: true
+        description: "Base image for the final image"
         type: string
       torch-version:
         required: true
+        description: "Tagged version number from pytorch/pytorch to build"
         type: string
       torchvision-version:
         required: true
+        description: "Tagged version number from pytorch/vision to build"
         type: string
       torchaudio-version:
         required: true
+        description: "Tagged version number from pytorch/audio to build"
         type: string
       cuda-arch-support:
         required: false
+        description: "Space-separated list of CUDA architectures to support"
         type: string
         default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
       build-extras:
         required: false
+        description: "Whether to build and push a torch-extras container as well"
         type: boolean
         default: false
 
