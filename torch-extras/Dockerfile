@@ -10,7 +10,7 @@ WORKDIR /git
 ARG FLASH_ATTN_VERSION
 RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       --filter=blob:none --also-filter-submodules \
-      https://github.com/HazyResearch/flash-attention -b v${FLASH_ATTN_VERSION}
+      https://github.com/Dao-AILab/flash-attention -b v${FLASH_ATTN_VERSION}
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
