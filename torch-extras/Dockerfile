@@ -4,6 +4,7 @@ ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.9.4"
 ARG FLASH_ATTN_VERSION="2.0.2"
 ARG APEX_COMMIT="7b2e71b0d4013f8e2f9f1c8dd21980ff1d76f1b6"
+ARG XFORMERS_VERSION="0.0.20"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
@@ -115,6 +116,20 @@ SHELL ["/bin/sh", "-c"]
 WORKDIR /wheels
 
 
+FROM builder-base as xformers-builder
+
+ARG XFORMERS_VERSION
+
+RUN python3 -m pip install -U --no-cache-dir \
+      setuptools wheel pip && \
+    CC=$(realpath -e ./compiler) \
+      MAX_JOBS=$(($(./effective_cpu_count.sh) / 2 + 1)) \
+      python3 -m pip wheel -w /wheels -v \
+      --no-cache-dir --no-build-isolation --no-deps \
+      --no-binary=xformers \
+      xformers==${XFORMERS_VERSION}
+
+
 FROM builder-base as flash-attn-builder
 
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
@@ -200,4 +215,6 @@ RUN --mount=type=bind,from=deepspeed-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=flash-attn-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
+RUN --mount=type=bind,from=xformers-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
