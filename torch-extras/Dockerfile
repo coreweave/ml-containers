@@ -157,7 +157,8 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
-    EXTENSIONS=$(printf -- '--config-settings "--build-option=%s" ' $( \
+    export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+    printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
         --cpp_ext \
         --cuda_ext \
@@ -180,11 +181,10 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
           --cudnn_gbn \
           --fused_conv_bias_relu; \
       fi; \
-    )) && \
+    ) > ./apex-extensions.conf && \
+    echo "Extensions: $(cat ./apex-extensions.conf)" && \
     cd apex && \
-    python3 -m pip wheel -w /wheels -v \
-      --no-cache-dir --no-build-isolation --no-deps \
-      $EXTENSIONS ./
+    xargs -a ../apex-extensions.conf python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation --no-deps ./
 
 WORKDIR /wheels
 
