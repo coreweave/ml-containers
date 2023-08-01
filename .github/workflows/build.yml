@@ -15,6 +15,16 @@ on:
       tag-suffix:
         required: false
         type: string
+      runner:
+        required: false
+        type: choice
+        default: |
+          ["self-hosted", "Linux"]
+        options:
+          - |
+            ["self-hosted", "Linux"]
+          - |
+            ["self-hosted", "Linux", "chunky"]
     outputs:
       outcome:
         description: "The outcome of the build"
@@ -29,7 +39,7 @@ on:
 jobs:
   build:
     name: Build Images
-    runs-on: [self-hosted, Linux]
+    runs-on: ${{ fromJSON(inputs.runner) }}
     outputs:
       outcome: ${{ steps.docker-build.outcome }}
       tags: ${{ steps.meta.outputs.tags }}

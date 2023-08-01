@@ -30,6 +30,8 @@ jobs:
       image-name: torch-extras
       folder: torch-extras
       tag-suffix: ${{ inputs.tag }}-flash_attn${{ matrix.flash-attn }}
+      runner: |
+        ["self-hosted", "Linux", "chunky"]
       build-args: |
         BASE_IMAGE=${{ inputs.base-image }}
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
