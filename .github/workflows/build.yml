@@ -33,7 +33,7 @@ on:
 jobs:
   build:
     name: Build Images
-    runs-on: ${{ fromJSON(inputs.large-runner == 'true' && '["self-hosted", "Linux", "chunky"]' || '["self-hosted", "Linux"]') }}
+    runs-on: ${{ fromJSON(inputs.large-runner && '["self-hosted", "Linux", "chunky"]' || '["self-hosted", "Linux"]') }}
     outputs:
       outcome: ${{ steps.docker-build.outcome }}
       tags: ${{ steps.meta.outputs.tags }}
