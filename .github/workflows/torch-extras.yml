@@ -12,18 +12,25 @@ on:
     inputs:
       tag:
         required: true
+        description: "Tag suffix to identify the build"
         type: string
       base-image:
         required: true
+        description: "Base image for the build"
         type: string
 
 
 jobs:
   build:
+    strategy:
+      matrix:
+        flash-attn: [ 2.0.2, 1.0.9 ]
     uses: ./.github/workflows/build.yml
     with:
       image-name: torch-extras
       folder: torch-extras
-      tag-suffix: ${{ inputs.tag }}
+      tag-suffix: ${{ inputs.tag }}-flash_attn${{ matrix.flash-attn }}
+      large-runner: true
       build-args: |
         BASE_IMAGE=${{ inputs.base-image }}
+        FLASH_ATTN_VERSION=${{ matrix.flash-attn }}

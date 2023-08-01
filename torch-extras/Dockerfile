@@ -2,7 +2,7 @@
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.9.4"
-ARG FLASH_ATTN_VERSION="1.0.7"
+ARG FLASH_ATTN_VERSION="2.0.2"
 ARG APEX_COMMIT="7b2e71b0d4013f8e2f9f1c8dd21980ff1d76f1b6"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
@@ -10,7 +10,7 @@ WORKDIR /git
 ARG FLASH_ATTN_VERSION
 RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       --filter=blob:none --also-filter-submodules \
-      https://github.com/HazyResearch/flash-attention -b v${FLASH_ATTN_VERSION}
+      https://github.com/Dao-AILab/flash-attention -b v${FLASH_ATTN_VERSION}
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -157,7 +157,8 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
-    EXTENSIONS=$(printf -- '--config-settings "--build-option=%s" ' $( \
+    export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+    printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
         --cpp_ext \
         --cuda_ext \
@@ -180,11 +181,10 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
           --cudnn_gbn \
           --fused_conv_bias_relu; \
       fi; \
-    )) && \
+    ) > ./apex-extensions.conf && \
+    echo "Extensions: $(cat ./apex-extensions.conf)" && \
     cd apex && \
-    python3 -m pip wheel -w /wheels -v \
-      --no-cache-dir --no-build-isolation --no-deps \
-      $EXTENSIONS ./
+    xargs -a ../apex-extensions.conf python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation --no-deps ./
 
 WORKDIR /wheels
 
