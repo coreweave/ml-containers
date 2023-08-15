@@ -36,14 +36,14 @@ on:
 
 jobs:
   get-required-bases:
-    if: !inputs.skip-bases-check && github.event.action == 'push'
+    if: github.event.action == 'push' && !inputs.skip-bases-check
     runs-on: ["self-hosted", "Linux"]
     outputs:
       bases-list: ${{ steps.choose-bases.outputs.list }}
     steps:
       - name: check-changed
         run: |
-          CHANGED_FILES="$(git diff --name-only '${{ github.event.before }}' '${{ github.event.after }}')" && \
+          CHANGED_FILES="$(git diff --name-only "$BEFORE_HASH" "$AFTER_HASH")" && \
           { \
             echo "$CHANGED_FILES" \
             | grep -P '^(\./)?(torch/|\.github/workflows/torch(-base)?\.yml|\.github/workflows/build\.yml)' > /dev/null \
@@ -73,6 +73,8 @@ jobs:
           echo "LATEST_NCCL_IMAGES=\"$LATEST_NCCL_IMAGES\"" >> $GITHUB_OUTPUT
         env:
           BEARER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BEFORE_HASH: ${{ github.event.before }}
+          AFTER_HASH: ${{ github.event.after }}
       - name: choose-bases
         run: |
           echo "list=[ $( \
