@@ -152,6 +152,8 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
       libnccl-dev=$LIBNCCL2_VERSION && \
     apt-get clean
 
+# --distributed_adam, --distributed_lamb, and --group_norm aren't documented
+# in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
