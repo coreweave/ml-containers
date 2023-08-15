@@ -162,9 +162,12 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       echo \
         --cpp_ext \
         --cuda_ext \
+        --distributed_adam \
+        --distributed_lamb \
         --permutation_search \
         --xentropy \
         --focal_loss \
+        --group_norm \
         --index_mul_2d \
         --deprecated_fused_adam \
         --deprecated_fused_lamb \
