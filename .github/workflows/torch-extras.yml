@@ -36,7 +36,7 @@ on:
 
 jobs:
   get-required-bases:
-    if: github.event.action == 'push' && !inputs.skip-bases-check
+    if: github.event.action == 'push' && inputs.skip-bases-check != true
     runs-on: ["self-hosted", "Linux"]
     outputs:
       bases-list: ${{ steps.choose-bases.outputs.list }}
