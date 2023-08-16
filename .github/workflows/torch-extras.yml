@@ -24,7 +24,7 @@ on:
         type: string
       skip-bases-check:
         required: false
-        description: "If false, build from the most recent releases from the main branch rather than a specific image"
+        description: "Build from one specific image rather than the most recent releases from the main branch"
         type: boolean
         default: true
 
@@ -37,7 +37,7 @@ on:
 
 jobs:
   get-required-bases:
-    if: !inputs.skip-bases-check
+    if: inputs.skip-bases-check != true
     runs-on: ["self-hosted", "Linux"]
     permissions:
       packages: read
