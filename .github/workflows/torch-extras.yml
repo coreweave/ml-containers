@@ -43,6 +43,7 @@ jobs:
     outputs:
       bases-list: ${{ steps.choose-bases.outputs.list }}
     steps:
+      - uses: actions/checkout@v3
       - name: check-changed
         run: |
           CHANGED_FILES="$(git diff --name-only "$BEFORE_HASH" "$AFTER_HASH")" && \
