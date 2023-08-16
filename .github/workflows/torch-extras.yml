@@ -77,8 +77,8 @@ jobs:
           LATEST_NCCL_COMMIT="$(echo "$NCCL_RELEASES" | tail -1 | cut -c1-7)" && \
           LATEST_BASE_IMAGES="$(echo "$BASE_RELEASES" | grep -F "${LATEST_BASE_COMMIT}-")" && \
           LATEST_NCCL_IMAGES="$(echo "$NCCL_RELEASES" | grep -F "${LATEST_NCCL_COMMIT}-")" && \
-          echo "LATEST_BASE_IMAGES=\"$LATEST_BASE_IMAGES\"" >> $GITHUB_OUTPUT && \
-          echo "LATEST_NCCL_IMAGES=\"$LATEST_NCCL_IMAGES\"" >> $GITHUB_OUTPUT
+          echo "LATEST_BASE_IMAGES=\"$(echo $LATEST_BASE_IMAGES)\"" >> $GITHUB_OUTPUT && \
+          echo "LATEST_NCCL_IMAGES=\"$(echo $LATEST_NCCL_IMAGES)\"" >> $GITHUB_OUTPUT
         env:
           BEARER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: choose-bases
