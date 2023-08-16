@@ -24,6 +24,7 @@ on:
         type: string
       skip-bases-check:
         required: false
+        description: "If false, build from the most recent releases from the main branch rather than a specific image"
         type: boolean
         default: true
 
@@ -36,7 +37,7 @@ on:
 
 jobs:
   get-required-bases:
-    if: github.event_name == 'push' && !inputs.skip-bases-check
+    if: !inputs.skip-bases-check
     runs-on: ["self-hosted", "Linux"]
     permissions:
       packages: read
@@ -46,25 +47,32 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: Check changed files
+      - name: Check if torch-extras needs to be rebuilt from previous bases
         id: check-changed
         run: |
-          CHANGED_FILES="$(git diff --name-only "$BEFORE_HASH" "$AFTER_HASH")" && \
-          { \
-            echo "$CHANGED_FILES" \
-            | grep -P '^(\./)?(torch/|\.github/workflows/torch(-base)?\.yml|\.github/workflows/build\.yml)' > /dev/null \
-              && echo "BASE_PROVIDED=true" >> $GITHUB_OUTPUT \
-              || echo "BASE_PROVIDED=false" >> $GITHUB_OUTPUT; \
-          } && { \
-            echo "$CHANGED_FILES" \
-            | grep -P '^(\./)?(torch/|\.github/workflows/torch(-nccl)?\.yml|\.github/workflows/build\.yml)' > /dev/null \
-              && echo "NCCL_PROVIDED=true" >> $GITHUB_OUTPUT \
-              || echo "NCCL_PROVIDED=false" >> $GITHUB_OUTPUT; \
-          }
+          if [ "$EVENT_NAME" = 'push' ]; then \
+            CHANGED_FILES="$(git diff --name-only "$BEFORE_HASH" "$AFTER_HASH")" && \
+            { \
+              echo "$CHANGED_FILES" \
+              | grep -P '^(\./)?(torch/|\.github/workflows/torch(-base)?\.yml|\.github/workflows/build\.yml)' > /dev/null \
+                && echo "BASE_PROVIDED=true" >> "$GITHUB_OUTPUT" \
+                || echo "BASE_PROVIDED=false" >> "$GITHUB_OUTPUT"; \
+            } && { \
+              echo "$CHANGED_FILES" \
+              | grep -P '^(\./)?(torch/|\.github/workflows/torch(-nccl)?\.yml|\.github/workflows/build\.yml)' > /dev/null \
+                && echo "NCCL_PROVIDED=true" >> "$GITHUB_OUTPUT" \
+                || echo "NCCL_PROVIDED=false" >> "$GITHUB_OUTPUT"; \
+            }; \
+          else \
+            echo "BASE_PROVIDED=false" >> "$GITHUB_OUTPUT" && \
+            echo "NCCL_PROVIDED=false" >> "$GITHUB_OUTPUT";
+          fi
         env:
+          EVENT_NAME: ${{ github.event_name }}
           BEFORE_HASH: ${{ github.event.before }}
           AFTER_HASH: ${{ github.event.after }}
       - name: Get latest torch container releases
+        if: steps.check-changed.outputs.BASE_PROVIDED != 'true' || steps.check-changed.outputs.NCCL_PROVIDED != 'true'
         id: get-latest
         run: |
           RELEASES="$( \
@@ -79,11 +87,12 @@ jobs:
           LATEST_NCCL_COMMIT="$(echo "$NCCL_RELEASES" | tail -1 | cut -c1-7)" && \
           LATEST_BASE_IMAGES="$(echo "$BASE_RELEASES" | grep -F "${LATEST_BASE_COMMIT}-")" && \
           LATEST_NCCL_IMAGES="$(echo "$NCCL_RELEASES" | grep -F "${LATEST_NCCL_COMMIT}-")" && \
-          echo "LATEST_BASE_IMAGES=$(echo $LATEST_BASE_IMAGES)" >> $GITHUB_OUTPUT && \
-          echo "LATEST_NCCL_IMAGES=$(echo $LATEST_NCCL_IMAGES)" >> $GITHUB_OUTPUT
+          echo "LATEST_BASE_IMAGES=$(echo $LATEST_BASE_IMAGES)" >> "$GITHUB_OUTPUT" && \
+          echo "LATEST_NCCL_IMAGES=$(echo $LATEST_NCCL_IMAGES)" >> "$GITHUB_OUTPUT"
         env:
           BEARER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Choose which torch containers to use as a build base
+        if: steps.check-changed.outputs.BASE_PROVIDED != 'true' || steps.check-changed.outputs.NCCL_PROVIDED != 'true'
         id: choose-bases
         run: |
           TAG_PATTERN='^[0-9a-f]{7}-(.*)' && \
@@ -91,16 +100,19 @@ jobs:
           TAG_TO_JSON() { sed -E -e "s@${TAG_PATTERN}@${JSON_REPLACE}@g"; }
           SPLIT_TO_LINES() { xargs -n 1; } && \
           JOIN_LINES() { tr '[:space:]' ',' | sed -e 's/,$//'; } && \
+          echo '## Pre-existing `ghcr.io/coreweave/ml-containers/torch` images to build from' >> "$GITHUB_STEP_SUMMARY" && \
           echo "list=[$( \
             ( \
               if [ "$BASE_PROVIDED" = 'false' ]; then \
+                echo "$LATEST_BASE_IMAGES" | xargs -n 1 echo '-' >> "$GITHUB_STEP_SUMMARY" && \
                 echo "$LATEST_BASE_IMAGES"; \
               fi && \
               if [ "$NCCL_PROVIDED" = 'false' ]; then \
+                echo "$LATEST_NCCL_IMAGES" | xargs -n 1 echo '-' >> "$GITHUB_STEP_SUMMARY" && \
                 echo "$LATEST_NCCL_IMAGES"; \
               fi; \
             ) | SPLIT_TO_LINES | TAG_TO_JSON | JOIN_LINES \
-          )]" >> $GITHUB_OUTPUT;
+          )]" >> "$GITHUB_OUTPUT";
         env:
           BASE_PROVIDED: ${{ steps.check-changed.outputs.BASE_PROVIDED }}
           NCCL_PROVIDED: ${{ steps.check-changed.outputs.NCCL_PROVIDED }}
@@ -117,7 +129,6 @@ jobs:
       image-name: torch-extras
       folder: torch-extras
       tag-suffix: ${{ inputs.tag }}-flash_attn${{ matrix.flash-attn }}
-      large-runner: false
       build-args: |
         BASE_IMAGE=${{ inputs.base-image }}
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
@@ -134,7 +145,6 @@ jobs:
       image-name: torch-extras
       folder: torch-extras
       tag-suffix: ${{ matrix.bases.tag }}-flash_attn${{ matrix.flash-attn }}
-      large-runner: false
       build-args: |
         BASE_IMAGE=${{ matrix.bases.image }}
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
