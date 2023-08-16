@@ -38,6 +38,8 @@ jobs:
   get-required-bases:
     if: github.event_name == 'push' && !inputs.skip-bases-check
     runs-on: ["self-hosted", "Linux"]
+    permissions:
+      packages: read
     outputs:
       bases-list: ${{ steps.choose-bases.outputs.list }}
     steps:
@@ -55,6 +57,9 @@ jobs:
               && echo "NCCL_PROVIDED=true" >> $GITHUB_OUTPUT \
               || echo "NCCL_PROVIDED=false" >> $GITHUB_OUTPUT; \
           }
+        env:
+          BEFORE_HASH: ${{ github.event.before }}
+          AFTER_HASH: ${{ github.event.after }}
       - name: get-latest
         run: |
           RELEASES="$( \
@@ -73,23 +78,23 @@ jobs:
           echo "LATEST_NCCL_IMAGES=\"$LATEST_NCCL_IMAGES\"" >> $GITHUB_OUTPUT
         env:
           BEARER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BEFORE_HASH: ${{ github.event.before }}
-          AFTER_HASH: ${{ github.event.after }}
       - name: choose-bases
         run: |
-          echo "list=[ $( \
-            echo $( \
+          TAG_PATTERN='^[0-9a-f]{7}-(.*)' && \
+          JSON_REPLACE='{"tag":"\1","image":"ghcr.io/coreweave/ml-containers/torch:\0"}' && \
+          TAG_TO_JSON() { sed -E -e "s@${TAG_PATTERN}@${JSON_REPLACE}@g"; }
+          SPLIT_TO_LINES() { xargs -n 1; } && \
+          JOIN_LINES() { tr '[:space:]' ',' | sed -e 's/,$//'; } && \
+          echo "list=[$( \
+            ( \
               if [ "$BASE_PROVIDED" = 'false' ]; then \
                 echo "$LATEST_BASE_IMAGES"; \
               fi && \
               if [ "$NCCL_PROVIDED" = 'false' ]; then \
                 echo "$LATEST_NCCL_IMAGES"; \
               fi; \
-            ) | tr ' ' '\n' \
-              | sed -E -e 's/^[0-9a-f]{7}-(.*)$/{"tag":"\1","image":"\0"}/g' \
-              | tr '[:space:]' ',' \
-              | sed -e 's/,$//' \
-          ) ]" >> $GITHUB_OUTPUT;
+            ) | SPLIT_TO_LINES | TAG_TO_JSON | JOIN_LINES \
+          )]" >> $GITHUB_OUTPUT;
         env:
           BASE_PROVIDED: ${{ steps.check-changed.outputs.BASE_PROVIDED }}
           NCCL_PROVIDED: ${{ steps.check-changed.outputs.NCCL_PROVIDED }}
@@ -106,13 +111,14 @@ jobs:
       image-name: torch-extras
       folder: torch-extras
       tag-suffix: ${{ inputs.tag }}-flash_attn${{ matrix.flash-attn }}
-      large-runner: true
+      large-runner: false
       build-args: |
         BASE_IMAGE=${{ inputs.base-image }}
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
 
   build-self:
     needs: get-required-bases
+    if: needs.get-required-bases.outputs.bases-list && needs.get-required-bases.outputs.bases-list != '[]'
     strategy:
       matrix:
         flash-attn: [ 2.0.2, 1.0.9 ]
@@ -122,7 +128,7 @@ jobs:
       image-name: torch-extras
       folder: torch-extras
       tag-suffix: ${{ matrix.bases.tag }}-flash_attn${{ matrix.flash-attn }}
-      large-runner: true
+      large-runner: false
       build-args: |
         BASE_IMAGE=${{ matrix.bases.image }}
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
