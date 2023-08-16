@@ -91,7 +91,7 @@ jobs:
           TAG_TO_JSON() { sed -E -e "s@${TAG_PATTERN}@${JSON_REPLACE}@g"; }
           SPLIT_TO_LINES() { xargs -n 1; } && \
           JOIN_LINES() { tr '[:space:]' ',' | sed -e 's/,$//'; } && \
-          echo "list=[$( \
+          echo "list='[$( \
             ( \
               if [ "$BASE_PROVIDED" = 'false' ]; then \
                 echo "$LATEST_BASE_IMAGES"; \
@@ -100,7 +100,7 @@ jobs:
                 echo "$LATEST_NCCL_IMAGES"; \
               fi; \
             ) | SPLIT_TO_LINES | TAG_TO_JSON | JOIN_LINES \
-          )]" >> $GITHUB_OUTPUT;
+          )]'" >> $GITHUB_OUTPUT;
         env:
           BASE_PROVIDED: ${{ steps.check-changed.outputs.BASE_PROVIDED }}
           NCCL_PROVIDED: ${{ steps.check-changed.outputs.NCCL_PROVIDED }}
