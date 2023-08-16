@@ -46,7 +46,8 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: check-changed
+      - name: Check changed files
+        id: check-changed
         run: |
           CHANGED_FILES="$(git diff --name-only "$BEFORE_HASH" "$AFTER_HASH")" && \
           { \
@@ -63,7 +64,8 @@ jobs:
         env:
           BEFORE_HASH: ${{ github.event.before }}
           AFTER_HASH: ${{ github.event.after }}
-      - name: get-latest
+      - name: Get latest torch container releases
+        id: get-latest
         run: |
           RELEASES="$( \
             /bin/curl -f -s --oauth2-bearer "$(echo "$BEARER_TOKEN" | base64 -w 0)" \
@@ -81,7 +83,8 @@ jobs:
           echo "LATEST_NCCL_IMAGES=\"$(echo $LATEST_NCCL_IMAGES)\"" >> $GITHUB_OUTPUT
         env:
           BEARER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: choose-bases
+      - name: Choose which torch containers to use as a build base
+        id: choose-bases
         run: |
           TAG_PATTERN='^[0-9a-f]{7}-(.*)' && \
           JSON_REPLACE='{"tag":"\1","image":"ghcr.io/coreweave/ml-containers/torch:\0"}' && \
