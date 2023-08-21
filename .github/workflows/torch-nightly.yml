@@ -1,0 +1,95 @@
+name: torch-nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    # At 05:00 UTC (midnight EST)
+    - cron: "0 5 * * *"
+  push:
+    paths:
+#      - "torch/**"
+      - ".github/workflows/torch-nightly.yml"
+#      - ".github/workflows/torch.yml"
+#      - ".github/workflows/build.yml"
+
+
+jobs:
+  get-nightly-commit-hash:
+    runs-on: [ self-hosted, Linux ]
+    outputs:
+      pytorch-commit: ${{ steps.get-hash.outputs.pytorch-commit }}
+      triton-commit: ${{ steps.get-hash.outputs.triton-commit }}
+      torchvision-commit: ${{ steps.get-hash.outputs.torchvision-commit }}
+      torchaudio-commit: ${{ steps.get-hash.outputs.torchaudio-commit }}
+      version-string: ${{ steps.get-hash.outputs.version-string }}
+    steps:
+      - name: Get latest commit hashes
+        id: get-hash
+        run: |
+          set -e;
+          
+          FORMAT_COMMIT_LINK() {
+            echo "[$(echo "$2" | cut -c1-7)](https://github.com/$1/tree/$2)";
+          };
+          
+          CLONE() {
+            git clone --filter=blob:none --no-checkout --depth=1 \
+              "https://github.com/$1" \
+              "$2" > /dev/null 2> /dev/null && \
+            local COMMIT=$(git -C "$2" rev-parse HEAD) && \
+            echo "Latest $1 commit: $(
+              FORMAT_COMMIT_LINK $1 $COMMIT
+            )" >> "$GITHUB_STEP_SUMMARY" && \
+            echo $COMMIT;
+          };
+          
+          GET_VERSION() {
+            git -C "$1" show HEAD:version.txt 2> /dev/null; 
+          };
+          
+          PYTORCH_COMMIT="$(CLONE pytorch/pytorch pytorch-git)";
+          PYTORCH_VERSION="$(GET_VERSION pytorch-git)";
+          TRITON_COMMIT_FILE=".ci/docker/ci_commit_pins/triton.txt";
+          TRITON_COMMIT="$(git -C pytorch-git show "HEAD:$TRITON_COMMIT_FILE" 2> /dev/null)";
+          rm -rf pytorch-git;
+          
+          echo "Corresponding Triton commit: $(
+            FORMAT_COMMIT_LINK openai/triton $TRITON_COMMIT
+          )" >> "$GITHUB_STEP_SUMMARY";
+          
+          TORCHVISION_COMMIT="$(CLONE pytorch/vision torchvision-git)";
+          TORCHVISION_VERSION="$(GET_VERSION torchvision-git)";
+          rm -rf torchvision-git;
+          
+          TORCHAUDIO_COMMIT="$(CLONE pytorch/audio torchaudio-git)";
+          TORCHAUDIO_VERSION="$(GET_VERSION torchaudio-git)";
+          rm -rf torchaudio-git;
+          
+          echo "pytorch-commit=$PYTORCH_COMMIT" >> "$GITHUB_OUTPUT";
+          echo "triton-commit=$TRITON_COMMIT" >> "$GITHUB_OUTPUT";
+          echo "torchvision-commit=$TORCHVISION_COMMIT" >> "$GITHUB_OUTPUT";
+          echo "torchaudio-commit=$TORCHAUDIO_COMMIT" >> "$GITHUB_OUTPUT";
+          
+          printf -- 'version-string=torch%s-vision%s-audio%s\n' \
+            "$PYTORCH_VERSION" "$TORCHVISION_VERSION" "$TORCHAUDIO_VERSION" \
+            >> "$GITHUB_OUTPUT";
+  build-base:
+    needs: get-nightly-commit-hash
+    uses: ./.github/workflows/torch-base.yml
+    with:
+      image-name: nightly/torch
+      image-tag-suffix: ${{ needs.get-nightly-commit-hash.outputs.version-string }}
+      torch-version: ${{ needs.get-nightly-commit-hash.outputs.pytorch-commit }}
+      torchvision-version: ${{ needs.get-nightly-commit-hash.outputs.torchvision-commit }}
+      torchaudio-version: ${{ needs.get-nightly-commit-hash.outputs.torchaudio-commit }}
+      triton-version: ${{ needs.get-nightly-commit-hash.outputs.triton-commit }}
+  build-nccl:
+    needs: get-nightly-commit-hash
+    uses: ./.github/workflows/torch-nccl.yml
+    with:
+      image-name: nightly/torch
+      image-tag-suffix: ${{ needs.get-nightly-commit-hash.outputs.version-string }}
+      torch-version: ${{ needs.get-nightly-commit-hash.outputs.pytorch-commit }}
+      torchvision-version: ${{ needs.get-nightly-commit-hash.outputs.torchvision-commit }}
+      torchaudio-version: ${{ needs.get-nightly-commit-hash.outputs.torchaudio-commit }}
+      triton-version: ${{ needs.get-nightly-commit-hash.outputs.triton-commit }}

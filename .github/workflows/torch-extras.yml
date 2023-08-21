@@ -7,6 +7,9 @@ on:
       base-image:
         required: true
         type: string
+      image-name:
+        required: false
+        type: string
       skip-bases-check:
         required: false
         type: boolean
@@ -21,6 +24,10 @@ on:
       base-image:
         required: false
         description: "Base image for the build"
+        type: string
+      image-name:
+        required: false
+        description: "Custom name under which to publish the resulting container"
         type: string
       skip-bases-check:
         required: false
@@ -95,9 +102,11 @@ jobs:
         if: steps.check-changed.outputs.BASE_PROVIDED != 'true' || steps.check-changed.outputs.NCCL_PROVIDED != 'true'
         id: choose-bases
         run: |
-          TAG_PATTERN='^[0-9a-f]{7}-(.*)' && \
-          JSON_REPLACE='{"tag":"\1","image":"ghcr.io/coreweave/ml-containers/torch:\0"}' && \
-          TAG_TO_JSON() { sed -E -e "s@${TAG_PATTERN}@${JSON_REPLACE}@g"; }
+          TAG_TO_JSON() {
+            TAG_PATTERN='^[0-9a-f]{7}-(.*)';
+            JSON_REPLACE='{"tag":"\1","image":"ghcr.io/coreweave/ml-containers/torch:\0"}';
+            sed -E -e "s@${TAG_PATTERN}@${JSON_REPLACE}@g";
+          } && \
           SPLIT_TO_LINES() { xargs -n 1; } && \
           JOIN_LINES() { tr '[:space:]' ',' | sed -e 's/,$//'; } && \
           echo '## Pre-existing `ghcr.io/coreweave/ml-containers/torch` images to build from' >> "$GITHUB_STEP_SUMMARY" && \
@@ -142,7 +151,7 @@ jobs:
         bases: ${{ fromJSON(needs.get-required-bases.outputs.bases-list) }}
     uses: ./.github/workflows/build.yml
     with:
-      image-name: torch-extras
+      image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ matrix.bases.tag }}-flash_attn${{ matrix.flash-attn }}
       build-args: |

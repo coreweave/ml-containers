@@ -1,36 +1,66 @@
-# syntax=docker/dockerfile:1.2
+# syntax=docker/dockerfile:1.4
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.0.1-devel-ubuntu20.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu20.04"
 
 ARG BUILD_TORCH_VERSION="2.0.1"
 ARG BUILD_TORCH_VISION_VERSION="0.15.2"
 ARG BUILD_TORCH_AUDIO_VERSION="2.0.2"
+ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
-FROM alpine/git:2.36.3 as pytorch-downloader
+FROM alpine/git:2.40.1 as downloader-base
 WORKDIR /git
+RUN git config --global advice.detachedHead false
+
+COPY <<EOT /git/clone.sh
+#!/bin/sh
+REPO="https://github.com/$1";
+DEST="$2";
+REF="$3";
+
+CLONE() { git clone -j8 --depth=1 --filter=blob:none "$@"; }
+
+# Try cloning REF as a tag prefixed with "v", otherwise fall back
+# to git checkout for commit hashes
+CLONE --recurse-submodules --shallow-submodules --also-filter-submodules \
+  "$REPO" -b "v$REF" "$DEST" \
+|| {
+    CLONE --no-single-branch --no-checkout "$REPO" "$DEST" && \
+    git -C "$DEST" checkout "$REF" && \
+    git -C "$DEST" submodule update --init --filter=blob:none --depth=1 --recursive --jobs 8;
+};
+EOT
+
+RUN chmod +x /git/clone.sh
+
+
+FROM downloader-base as pytorch-downloader
 ARG BUILD_TORCH_VERSION
-RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
-      https://github.com/pytorch/pytorch -b v${BUILD_TORCH_VERSION} && \
+RUN ./clone.sh pytorch/pytorch pytorch "${BUILD_TORCH_VERSION}" && \
     rm -rf pytorch/.git
 
-FROM alpine/git:2.36.3 as torchvision-downloader
-WORKDIR /git
+FROM downloader-base as torchvision-downloader
 ARG BUILD_TORCH_VISION_VERSION
-RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
-      https://github.com/pytorch/vision -b v${BUILD_TORCH_VISION_VERSION} && \
+RUN ./clone.sh pytorch/vision vision "${BUILD_TORCH_VISION_VERSION}" && \
     rm -rf vision/.git
 
-FROM alpine/git:2.36.3 as torchaudio-downloader
-WORKDIR /git
+FROM downloader-base as torchaudio-downloader
 ARG BUILD_TORCH_AUDIO_VERSION
-RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
-      https://github.com/pytorch/audio -b v${BUILD_TORCH_AUDIO_VERSION}
+RUN ./clone.sh pytorch/audio audio "${BUILD_TORCH_AUDIO_VERSION}"
 # The torchaudio build requires that this directory remain a full git repository,
 # so no rm -rf audio/.git is done for this one.
+
+FROM downloader-base as triton-downloader
+ARG BUILD_TRITON_VERSION
+RUN if [ -n "${BUILD_TRITON_VERSION}" ]; then \
+      ./clone.sh openai/triton triton "${BUILD_TRITON_VERSION}"; \
+    else \
+      mkdir triton; \
+    fi;
+
 
 ## Build PyTorch on a builder image.
 FROM ${BUILDER_BASE_IMAGE} as builder
@@ -74,17 +104,26 @@ WORKDIR /build
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
     cd pytorch && pip3 install --no-cache-dir -r requirements.txt
 
-ARG BUILD_TORCH_VERSION
-ARG BUILD_TORCH_CUDA_ARCH_LIST
-ENV TORCH_VERSION=$BUILD_TORCH_VERSION
-ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
-
 # Build tool & library paths, shared for all libraries to be built
 ENV CMAKE_PREFIX_PATH=/usr/bin/ \
     LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/cuda/lib64:/usr/local/lib \
     CUDA_BIN_PATH=/usr/local/cuda/bin \
     CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/ \
     CUDNN_LIB_DIR=/usr/local/cuda/lib64
+
+ARG BUILD_TRITON_VERSION
+RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
+    --mount=type=cache,target=/ccache \
+    if [ -n "$BUILD_TRITON_VERSION" ]; then \
+      cd triton/python && \
+      python -m pip wheel -w wheels/ --no-build-isolation --no-deps -vv . && \
+      pip install wheels/*.whl; \
+    fi
+
+ARG BUILD_TORCH_VERSION
+ARG BUILD_TORCH_CUDA_ARCH_LIST
+ENV TORCH_VERSION=$BUILD_TORCH_VERSION
+ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,

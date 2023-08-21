@@ -1,5 +1,52 @@
+name: torch-base
+
 on:
+  workflow_call:
+    inputs:
+      torch-version:
+        required: false
+        type: string
+      torchvision-version:
+        required: false
+        type: string
+      torchaudio-version:
+        required: false
+        type: string
+      triton-version:
+        required: false
+        type: string
+      image-name:
+        required: false
+        type: string
+      image-tag-suffix:
+        required: false
+        type: string
   workflow_dispatch:
+    inputs:
+      torch-version:
+        required: false
+        description: "Tagged version number from pytorch/pytorch to build"
+        type: string
+      torchvision-version:
+        required: false
+        description: "Tagged version number from pytorch/vision to build"
+        type: string
+      torchaudio-version:
+        required: false
+        description: "Tagged version number from pytorch/audio to build"
+        type: string
+      triton-version:
+        required: false
+        description: "Tagged version number from openai/triton to build"
+        type: string
+      image-name:
+        required: false
+        description: "Custom name under which to publish the resulting container"
+        type: string
+      image-tag-suffix:
+        required: false
+        description: "Custom tag suffix listing library versions under which to publish the resulting container"
+        type: string
   push:
     paths:
       - "torch/**"
@@ -14,16 +61,19 @@ jobs:
       matrix:
         cuda: [12.1.1, 12.0.1, 11.8.0]
         include:
-          - torch: 2.0.1
-            vision: 0.15.2
-            audio: 2.0.2
+          - torch:  ${{ inputs.torch-version       || '2.0.1'  }}
+            vision: ${{ inputs.torchvision-version || '0.15.2' }}
+            audio:  ${{ inputs.torchaudio-version  || '2.0.2'  }}
+            triton: ${{ inputs.triton-version }}
 
     uses: ./.github/workflows/torch.yml
     with:
-      tag: ${{ format('base-cuda{0}-torch{1}-vision{2}-audio{3}', matrix.cuda, matrix.torch, matrix.vision, matrix.audio) }}
+      image-name: ${{ inputs.image-name }}
+      tag: ${{ format('{0}-{1}', format('base-cuda{0}', matrix.cuda), inputs.image-tag-suffix || format('torch{0}-vision{1}-audio{2}', matrix.torch, matrix.vision, matrix.audio)) }}
       builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu20.04
       base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu20.04
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
       torchaudio-version: ${{ matrix.audio }}
+      triton-version: ${{ matrix.triton }}
       build-extras: true
