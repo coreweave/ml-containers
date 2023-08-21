@@ -15,23 +15,22 @@ FROM alpine/git:2.40.1 as downloader-base
 WORKDIR /git
 RUN git config --global advice.detachedHead false
 
-COPY <<EOT /git/clone.sh
-#!/bin/sh
-REPO="https://github.com/$1";
-DEST="$2";
-REF="$3";
+COPY <<-"EOT" /git/clone.sh
+    #!/bin/sh
+    REPO="https://github.com/$1";
+    DEST="$2";
+    REF="$3";
 
-CLONE() { git clone -j8 --depth=1 --filter=blob:none "$@"; }
+    CLONE() { git clone -j8 --depth=1 --filter=blob:none "$@"; };
 
-# Try cloning REF as a tag prefixed with "v", otherwise fall back
-# to git checkout for commit hashes
-CLONE --recurse-submodules --shallow-submodules --also-filter-submodules \
-  "$REPO" -b "v$REF" "$DEST" \
-|| {
-    CLONE --no-single-branch --no-checkout "$REPO" "$DEST" && \
-    git -C "$DEST" checkout "$REF" && \
-    git -C "$DEST" submodule update --init --filter=blob:none --depth=1 --recursive --jobs 8;
-};
+    # Try cloning REF as a tag prefixed with "v", otherwise fall back
+    # to git checkout for commit hashes
+    CLONE --recurse-submodules --shallow-submodules --also-filter-submodules \
+      "$REPO" -b "v$REF" "$DEST" || { \
+        CLONE --no-single-branch --no-checkout "$REPO" "$DEST" && \
+        git -C "$DEST" checkout "$REF" && \
+        git -C "$DEST" submodule update --init --filter=blob:none --depth=1 --recursive --jobs 8; \
+    };
 EOT
 
 RUN chmod +x /git/clone.sh
