@@ -77,7 +77,7 @@ jobs:
     needs: get-nightly-commit-hash
     uses: ./.github/workflows/torch-base.yml
     with:
-      image-name: nightly/torch
+      image-name: nightly-torch
       image-tag-suffix: ${{ needs.get-nightly-commit-hash.outputs.version-string }}
       torch-version: ${{ needs.get-nightly-commit-hash.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-commit-hash.outputs.torchvision-commit }}
@@ -87,7 +87,7 @@ jobs:
     needs: get-nightly-commit-hash
     uses: ./.github/workflows/torch-nccl.yml
     with:
-      image-name: nightly/torch
+      image-name: nightly-torch
       image-tag-suffix: ${{ needs.get-nightly-commit-hash.outputs.version-string }}
       torch-version: ${{ needs.get-nightly-commit-hash.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-commit-hash.outputs.torchvision-commit }}
