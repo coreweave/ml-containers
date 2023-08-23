@@ -71,16 +71,24 @@ ARG BUILD_CCACHE_SIZE="1Gi"
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
       libpng-dev libjpeg-dev pkg-config python3-distutils python3-numpy \
-      build-essential ninja-build ccache gcc-10 g++-10 lld && \
+      build-essential ninja-build gcc-10 g++-10 lld && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 10 && \
     update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 1 && \
-    ccache -M "${BUILD_CCACHE_SIZE}" && \
-    ccache -F 0 && \
     pip3 install --no-cache-dir --upgrade pip && \
     apt-get clean
+
+RUN mkdir /tmp/ccache-install && \
+    pushd /tmp/ccache-install && \
+    CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2-linux-x86_64.tar.xz' && \
+    wget -qO - $CCACHE_URL | tar --strip-components 1 -xJf - && \
+    make install && \
+    popd && \
+    rm -rf /tmp/ccache-install && \
+    ccache -M "${BUILD_CCACHE_SIZE}" && \
+    ccache -F 0
 
 # Build-time environment variables
 ENV CCACHE_DIR=/ccache \
@@ -98,6 +106,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
 
 RUN mkdir /build /build/dist
 WORKDIR /build
+COPY --chmod=755 effective_cpu_count.sh .
 
 ## Build torch
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
@@ -114,6 +123,7 @@ ARG BUILD_TRITON_VERSION
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
     --mount=type=cache,target=/ccache \
     if [ -n "$BUILD_TRITON_VERSION" ]; then \
+      export MAX_JOBS="$(./effective_cpu_count.sh)" && \
       cd triton/python && \
       python -m pip wheel -w wheels/ --no-build-isolation --no-deps -vv . && \
       pip install wheels/*.whl; \
@@ -139,6 +149,7 @@ ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 # remain the same.
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
+    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
     cd pytorch && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -174,6 +185,7 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
+    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
     cd vision && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -208,6 +220,7 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
+    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
     cd audio && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
