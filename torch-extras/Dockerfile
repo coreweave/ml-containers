@@ -3,7 +3,7 @@
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.9.4"
 ARG FLASH_ATTN_VERSION="2.0.2"
-ARG APEX_COMMIT="7b2e71b0d4013f8e2f9f1c8dd21980ff1d76f1b6"
+ARG APEX_COMMIT="38a12698bc3cc95987bca270bcd6d025bb0be346"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
@@ -152,6 +152,8 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
       libnccl-dev=$LIBNCCL2_VERSION && \
     apt-get clean
 
+# --distributed_adam, --distributed_lamb, and --group_norm aren't documented
+# in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
@@ -162,9 +164,12 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       echo \
         --cpp_ext \
         --cuda_ext \
+        --distributed_adam \
+        --distributed_lamb \
         --permutation_search \
         --xentropy \
         --focal_loss \
+        --group_norm \
         --index_mul_2d \
         --deprecated_fused_adam \
         --deprecated_fused_lamb \

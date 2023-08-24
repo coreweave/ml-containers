@@ -15,10 +15,6 @@ on:
       tag-suffix:
         required: false
         type: string
-      large-runner:
-        required: false
-        type: boolean
-        default: false
     outputs:
       outcome:
         description: "The outcome of the build"
@@ -33,7 +29,7 @@ on:
 jobs:
   build:
     name: Build Images
-    runs-on: ${{ fromJSON(inputs.large-runner && '["self-hosted", "Linux", "chunky"]' || '["self-hosted", "Linux"]') }}
+    runs-on: [ self-hosted, Linux ]
     outputs:
       outcome: ${{ steps.docker-build.outcome }}
       tags: ${{ steps.meta.outputs.tags }}
