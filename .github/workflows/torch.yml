@@ -68,6 +68,7 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/build.yml
+    secrets: inherit
     with:
       image-name: torch
       folder: torch
@@ -84,6 +85,7 @@ jobs:
     if: inputs.build-extras
     needs: build
     uses: ./.github/workflows/torch-extras.yml
+    secrets: inherit
     with:
       tag: ${{ inputs.tag }}
       base-image: ${{ needs.build.outputs.tags }}
