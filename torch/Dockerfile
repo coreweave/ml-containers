@@ -33,7 +33,7 @@ COPY <<-"EOT" /git/clone.sh
     };
 EOT
 
-RUN chmod +x /git/clone.sh
+RUN chmod 755 /git/clone.sh
 
 
 FROM downloader-base as pytorch-downloader
@@ -108,6 +108,25 @@ RUN mkdir /build /build/dist
 WORKDIR /build
 COPY --chmod=755 effective_cpu_count.sh .
 
+COPY <<-"EOT" /build/version-string.sh
+    #!/bin/sh
+    set -x;
+    VERSION="$1";
+
+    IS_HASH() {
+      echo "$1" | grep -qxiEe '[0-9a-f]{40}';
+    };
+
+    if IS_HASH "$VERSION"; then
+      REAL_VERSION="$(cat ./version.txt)";
+      SHORT_HASH="$(echo "$VERSION" | cut -c1-7)";
+      echo "$REAL_VERSION+$SHORT_HASH";
+    else
+      echo "$VERSION";
+    fi;
+EOT
+RUN chmod 755 /build/version-string.sh
+
 ## Build torch
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
     cd pytorch && pip3 install --no-cache-dir -r requirements.txt
@@ -172,7 +191,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     CXX=c++ \
     USE_EIGEN_FOR_BLAS=ON \
     USE_MKL=OFF \
-    PYTORCH_BUILD_VERSION="${TORCH_VERSION}" \
+    PYTORCH_BUILD_VERSION="$(../version-string.sh "$TORCH_VERSION")" \
     PYTORCH_BUILD_NUMBER=0 \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
@@ -209,7 +228,7 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     CXX=c++ \
     USE_EIGEN_FOR_BLAS=ON \
     USE_MKL=OFF \
-    BUILD_VERSION="${TORCH_VISION_VERSION}" \
+    BUILD_VERSION="$(../version-string.sh "$TORCH_VISION_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
@@ -244,7 +263,7 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     CXX=c++ \
     USE_EIGEN_FOR_BLAS=ON \
     USE_MKL=OFF \
-    BUILD_VERSION="${TORCH_AUDIO_VERSION}" \
+    BUILD_VERSION="$(../version-string.sh "$TORCH_AUDIO_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
