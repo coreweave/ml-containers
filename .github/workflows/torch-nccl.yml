@@ -3,18 +3,6 @@ name: torch-nccl
 on:
   workflow_call:
     inputs:
-      torch-version:
-        required: false
-        type: string
-      torchvision-version:
-        required: false
-        type: string
-      torchaudio-version:
-        required: false
-        type: string
-      triton-version:
-        required: false
-        type: string
       image-name:
         required: false
         type: string
@@ -23,22 +11,6 @@ on:
         type: string
   workflow_dispatch:
     inputs:
-      torch-version:
-        required: false
-        description: "Tagged version number from pytorch/pytorch to build"
-        type: string
-      torchvision-version:
-        required: false
-        description: "Tagged version number from pytorch/vision to build"
-        type: string
-      torchaudio-version:
-        required: false
-        description: "Tagged version number from pytorch/audio to build"
-        type: string
-      triton-version:
-        required: false
-        description: "Tagged version number from openai/triton to build"
-        type: string
       image-name:
         required: false
         description: "Custom name under which to publish the resulting container"
@@ -50,31 +22,21 @@ on:
   push:
     paths:
       - "torch/**"
+      - ".github/configurations/torch-nccl.yml"
       - ".github/workflows/torch-nccl.yml"
       - ".github/workflows/torch.yml"
       - ".github/workflows/build.yml"
 
 
 jobs:
+  get-config:
+    uses: ./.github/workflows/read-configuration.yml
+    with:
+      path: ./.github/configurations/torch-nccl.yml
   build:
+    needs: get-config
     strategy:
-      matrix:
-        image:
-          - cuda: 12.1.1
-            nccl: 2.18.3-1
-            nccl-tests-hash: 471f0db
-          - cuda: 12.0.1
-            nccl: 2.18.3-1
-            nccl-tests-hash: 471f0db
-          - cuda: 11.8.0
-            nccl: 2.16.2-1
-            nccl-tests-hash: 471f0db
-        include:
-          - torch:  ${{ inputs.torch-version       || '2.0.1'  }}
-            vision: ${{ inputs.torchvision-version || '0.15.2' }}
-            audio:  ${{ inputs.torchaudio-version  || '2.0.2'  }}
-            triton: ${{ inputs.triton-version }}
-
+      matrix: ${{ fromJSON(needs.get-config.outputs.config) }}
     uses: ./.github/workflows/torch.yml
     with:
       image-name: ${{ inputs.image-name }}
@@ -84,5 +46,4 @@ jobs:
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
       torchaudio-version: ${{ matrix.audio }}
-      triton-version: ${{ matrix.triton }}
       build-extras: true
