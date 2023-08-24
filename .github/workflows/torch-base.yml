@@ -30,6 +30,7 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.get-config.outputs.config) }}
     uses: ./.github/workflows/torch.yml
+    secrets: inherit
     with:
       image-name: ${{ inputs.image-name }}
       tag: ${{ format('{0}-{1}', format('base-cuda{0}', matrix.cuda), inputs.image-tag-suffix || format('torch{0}-vision{1}-audio{2}', matrix.torch, matrix.vision, matrix.audio)) }}

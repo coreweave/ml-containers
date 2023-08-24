@@ -134,6 +134,7 @@ jobs:
       matrix:
         flash-attn: [ 2.0.2, 1.0.9 ]
     uses: ./.github/workflows/build.yml
+    secrets: inherit
     with:
       image-name: torch-extras
       folder: torch-extras
