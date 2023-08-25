@@ -9,9 +9,13 @@ on:
       filter:
         required: false
         type: string
+    outputs:
+      config:
+        description: "The retrieved configuration, as JSON"
+        value: ${{ jobs.read-file.outputs.config }}
 
 jobs:
-  get-required-bases:
+  read-file:
     runs-on: ["self-hosted", "Linux"]
     permissions: {}
     outputs:
@@ -31,3 +35,10 @@ jobs:
             CONTENTS="$(yq e "$FILE_PATH" -oj -I0)";
           fi;
           echo "contents=$CONTENTS" >> "$GITHUB_OUTPUT";
+          
+          {
+            echo '## Configuration';
+            echo '```json';
+            echo "$CONTENTS" | jq .;
+            echo '```';
+          } >> "$GITHUB_STEP_SUMMARY";
