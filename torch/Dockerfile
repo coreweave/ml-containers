@@ -72,12 +72,12 @@ RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
       libpng-dev libjpeg-dev pkg-config python3-distutils python3-numpy \
       build-essential ninja-build gcc-10 g++-10 lld && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 10 && \
     update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 1 && \
-    pip3 install --no-cache-dir --upgrade pip && \
     apt-get clean
 
 RUN mkdir /tmp/ccache-install && \
