@@ -78,7 +78,7 @@ jobs:
             >> "$GITHUB_OUTPUT";
       - name: Get date
         id: get-date
-        run: echo "date=$(date '+%Y.%m.%d')" >> "$GITHUB_OUTPUT";
+        run: echo "date=$(date -u '+%Y.%m.%d.%H')" >> "$GITHUB_OUTPUT";
 
   get-base-config:
     uses: ./.github/workflows/read-configuration.yml
