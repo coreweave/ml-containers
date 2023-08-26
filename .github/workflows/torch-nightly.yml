@@ -32,17 +32,20 @@ jobs:
           set -e;
           
           FORMAT_COMMIT_LINK() {
-            echo "[$(echo "$2" | cut -c1-7)](https://github.com/$1/tree/$2)";
+            printf '[`%.7s`](https://github.com/%s/tree/%s)\n' "$2" "$1" "$2";
           };
+          
+          LOG() {
+            printf -- "$@" >> "$GITHUB_STEP_SUMMARY";
+          }
           
           CLONE() {
             git clone --filter=blob:none --no-checkout --depth=1 \
               "https://github.com/$1" \
               "$2" > /dev/null 2> /dev/null && \
-            local COMMIT=$(git -C "$2" rev-parse HEAD) && \
-            echo "Latest $1 commit: $(
-              FORMAT_COMMIT_LINK $1 $COMMIT
-            )" >> "$GITHUB_STEP_SUMMARY" && \
+            local COMMIT="$(git -C "$2" rev-parse HEAD)" && \
+            LOG 'Latest `%s` commit: %s\n' \
+              "$1" "$(FORMAT_COMMIT_LINK "$1" "$COMMIT")" && \
             echo $COMMIT;
           };
           
@@ -56,9 +59,8 @@ jobs:
           TRITON_COMMIT="$(git -C pytorch-git show "HEAD:$TRITON_COMMIT_FILE" 2> /dev/null)";
           rm -rf pytorch-git;
           
-          echo "Corresponding Triton commit: $(
-            FORMAT_COMMIT_LINK openai/triton $TRITON_COMMIT
-          )" >> "$GITHUB_STEP_SUMMARY";
+          LOG 'Corresponding `openai/triton` commit: %s\n' \
+            "$(FORMAT_COMMIT_LINK openai/triton "$TRITON_COMMIT")";
           
           TORCHVISION_COMMIT="$(CLONE pytorch/vision torchvision-git)";
           TORCHVISION_VERSION="$(GET_VERSION torchvision-git)";
