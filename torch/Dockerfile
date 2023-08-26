@@ -81,11 +81,11 @@ RUN apt-get -qq update && apt-get -qq install -y \
     apt-get clean
 
 RUN mkdir /tmp/ccache-install && \
-    pushd /tmp/ccache-install && \
+    cd /tmp/ccache-install && \
     CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2-linux-x86_64.tar.xz' && \
     wget -qO - $CCACHE_URL | tar --strip-components 1 -xJf - && \
     make install && \
-    popd && \
+    cd .. && \
     rm -rf /tmp/ccache-install && \
     ccache -M "${BUILD_CCACHE_SIZE}" && \
     ccache -F 0
