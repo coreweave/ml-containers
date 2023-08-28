@@ -67,18 +67,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 ARG BUILD_CCACHE_SIZE="1Gi"
 
-# ninja-build, ccache, gcc-10, g++-10, and lld are optional but improve the build
+# ninja-build, ccache, and lld are optional but improve the build
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
       libpng-dev libjpeg-dev pkg-config python3-distutils python3-numpy \
-      build-essential ninja-build gcc-10 g++-10 lld && \
+      build-essential ninja-build && \
+    apt-get clean && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 10 && \
-    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 1 && \
-    apt-get clean
+    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
@@ -99,10 +96,22 @@ ENV CCACHE_DIR=/ccache \
 # Add Kitware's apt repository to get a newer version of CMake
 RUN apt-get -qq update && apt-get -qq install -y \
       software-properties-common lsb-release && \
-    { wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null \
+    { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
     | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
     apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
     apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
+
+# Update compiler (GCC) and linker (LLD) versions
+RUN CODENAME="$(lsb_release -cs)" && \
+    wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
+    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
+    apt-add-repository -y ppa:ubuntu-toolchain-r/test && \
+    apt-get -qq update && apt-get -qq install --no-install-recommends -y \
+      gcc-13 g++-13 lld-17 && \
+    apt-get clean && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
 
 RUN mkdir /build /build/dist
 WORKDIR /build
