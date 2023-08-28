@@ -43,16 +43,31 @@ RUN export \
       cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
-      ninja-build \
-      # gcc-10/g++-10/lld do not need to be installed here, but they improve the build.
-      # gfortran-10 is just for compiler_wrapper.f95.
-      gcc-10 g++-10 gfortran-10 lld && \
+      ninja-build && \
+    apt-get clean
+
+# Add Kitware's apt repository to get a newer version of CMake
+RUN apt-get -qq update && apt-get -qq install -y \
+      software-properties-common lsb-release && \
+    { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
+    | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
+    apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
+    apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
+
+# Update compiler (GCC) and linker (LLD) versions
+# gfortran-11 is just for compiler_wrapper.f95
+RUN CODENAME="$(lsb_release -cs)" && \
+    wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
+    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
+    apt-add-repository -y ppa:ubuntu-toolchain-r/test && \
+    apt-get -qq update && apt-get -qq install --no-install-recommends -y \
+      gcc-11 g++-11 gfortran-11 lld-17 && \
     apt-get clean && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 10 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install \
-      /usr/bin/gfortran gfortran /usr/bin/gfortran-10 10 && \
-    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 1
+      /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
+    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
 
 RUN mkdir /wheels /build
 WORKDIR /build
