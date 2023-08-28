@@ -17,6 +17,8 @@ on:
 
 jobs:
   get-nightly-info:
+    name:
+      Get Nightly Info
     runs-on: [ self-hosted, Linux ]
     outputs:
       pytorch-commit: ${{ steps.get-hash.outputs.pytorch-commit }}
