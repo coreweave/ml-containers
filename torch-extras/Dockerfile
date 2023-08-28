@@ -103,6 +103,12 @@ ARG DEEPSPEED_VERSION
 SHELL ["/bin/bash", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
+    if python3 -m pip show torch | grep -F 'Version: 2.1.' > /dev/null; then \
+      # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
+      # requirement for C++17 (as of DeepSpeed 0.10.1).
+      # See: https://github.com/microsoft/DeepSpeed/pull/3976
+      export DS_BUILD_AIO='0'; \
+    fi && \
     { \
       # DeepSpeed doesn't handle blank environment variables
       # in the same way as unset ones, so clear any blank ones.
