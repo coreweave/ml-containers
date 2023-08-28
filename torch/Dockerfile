@@ -107,10 +107,10 @@ RUN CODENAME="$(lsb_release -cs)" && \
     apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
     apt-add-repository -y ppa:ubuntu-toolchain-r/test && \
     apt-get -qq update && apt-get -qq install --no-install-recommends -y \
-      gcc-13 g++-13 lld-17 && \
+      gcc-11 g++-11 lld-17 && \
     apt-get clean && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
 
 RUN mkdir /build /build/dist

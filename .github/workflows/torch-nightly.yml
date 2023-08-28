@@ -37,7 +37,7 @@ jobs:
           
           LOG() {
             printf -- "$@" >> "$GITHUB_STEP_SUMMARY";
-          }
+          };
           
           CLONE() {
             git clone --filter=blob:none --no-checkout --depth=1 \
