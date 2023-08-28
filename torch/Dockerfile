@@ -286,9 +286,9 @@ RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip python3-distutils python3-numpy \
       curl git apt-utils ssh ca-certificates tmux nano vim sudo bash rsync \
       htop wget unzip tini && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
-    pip3 install --no-cache-dir --upgrade pip && \
     apt-get clean
 
 ARG BUILD_TORCH_VERSION
