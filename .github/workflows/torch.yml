@@ -81,6 +81,7 @@ on:
 
 jobs:
   build:
+    name: Build torch
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
@@ -97,6 +98,7 @@ jobs:
         ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST={0}', inputs.cuda-arch-support) || '' }}
         ${{ inputs.triton-version && format('BUILD_TRITON_VERSION={0}', inputs.triton-version) || '' }}
   build-extras:
+    name: Build torch-extras
     if: inputs.build-extras
     needs: build
     uses: ./.github/workflows/torch-extras.yml

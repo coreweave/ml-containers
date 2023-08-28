@@ -44,6 +44,7 @@ on:
 
 jobs:
   get-required-bases:
+    name: Get Latest Required Base Images
     if: inputs.skip-bases-check != true
     runs-on: ["self-hosted", "Linux"]
     permissions:
@@ -129,6 +130,7 @@ jobs:
           LATEST_NCCL_IMAGES: ${{ steps.get-latest.outputs.LATEST_NCCL_IMAGES }}
 
   build-call:
+    name: Build torch-extras via Workflow Call
     if: inputs.skip-bases-check
     strategy:
       matrix:
@@ -144,6 +146,7 @@ jobs:
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
 
   build-self:
+    name: Build torch-extras via Event Trigger
     needs: get-required-bases
     if: needs.get-required-bases.outputs.bases-list && needs.get-required-bases.outputs.bases-list != '[]'
     strategy:

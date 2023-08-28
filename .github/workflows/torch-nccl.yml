@@ -30,10 +30,12 @@ on:
 
 jobs:
   get-config:
+    name: Get torch:nccl Config
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-nccl.yml
   build:
+    name: Build torch:nccl
     needs: get-config
     strategy:
       matrix: ${{ fromJSON(needs.get-config.outputs.config) }}

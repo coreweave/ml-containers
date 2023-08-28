@@ -16,6 +16,7 @@ on:
 
 jobs:
   read-file:
+    name: Read Configuration File
     runs-on: ["self-hosted", "Linux"]
     permissions: {}
     outputs:

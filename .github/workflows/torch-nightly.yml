@@ -83,17 +83,20 @@ jobs:
         run: echo "date=$(date -u '+%Y.%m.%d.%H')" >> "$GITHUB_OUTPUT";
 
   get-base-config:
+    name: Get torch:base Config
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-base.yml
       filter: del(.include)
   get-nccl-config:
+    name: Get torch:nccl Config
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-nccl.yml
       filter: del(.include)
 
   build-base:
+    name: Build Nightly torch:base
     needs:
       - get-nightly-info
       - get-base-config
@@ -112,6 +115,7 @@ jobs:
       triton-version: ${{ needs.get-nightly-info.outputs.triton-commit }}
       build-extras: true
   build-nccl:
+    name: Build Nightly torch:nccl
     needs:
       - get-nightly-info
       - get-nccl-config
