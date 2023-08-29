@@ -7,6 +7,12 @@ Repository for building ML images at CoreWeave
 
 See the [list of all published images](https://github.com/orgs/coreweave/packages?repo_name=ml-containers).
 
+Special PyTorch Images:
+
+- [PyTorch Base Images](#pytorch-base-images)
+- [PyTorch Extras](#pytorch-extras)
+- [PyTorch Nightly](#pytorch-nightly)
+
 ### PyTorch Base Images
 
 - [`ghcr.io/coreweave/ml-containers/torch`](https://github.com/coreweave/ml-containers/pkgs/container/ml-containers%2Ftorch)
@@ -51,6 +57,30 @@ matching those for
 The `base` edition retains a small size, as a multi-stage build is used to avoid including
 CUDA development libraries in it, despite those libraries being required to build
 the extensions themselves.
+
+### PyTorch Nightly
+
+- [`ghcr.io/coreweave/ml-containers/nightly-torch`](https://github.com/coreweave/ml-containers/pkgs/container/ml-containers%2Fnightly-torch)
+- [`ghcr.io/coreweave/ml-containers/nightly-torch-extras`](https://github.com/coreweave/ml-containers/pkgs/container/ml-containers%2Fnightly-torch-extras)
+
+[`ml-containers/nightly-torch`](https://github.com/coreweave/ml-containers/pkgs/container/ml-containers%2Fnightly-torch)
+is an experimental, nightly release channel of the
+[PyTorch Base Images](#pytorch-base-images) in the style of PyTorch's
+own nightly preview builds, featuring the latest development versions of
+`torch`, `torchvision`, and `torchaudio` pulled daily from GitHub
+and compiled from source.
+
+[`ml-containers/nightly-torch-extras`](https://github.com/coreweave/ml-containers/pkgs/container/ml-containers%2Fnightly-torch-extras)
+is a version of [PyTorch Extras](#pytorch-extras) built on top of the
+[`ml-containers/nightly-torch`](https://github.com/coreweave/ml-containers/pkgs/container/ml-containers%2Fnightly-torch)
+container images.
+These are not nightly versions of the extensions themselves, but rather match
+the extension versions in the regular [PyTorch Extras](#pytorch-extras) containers.
+
+> ⚠ The *PyTorch Nightly* containers are based on unstable, experimental preview
+builds of PyTorch, and should be expected to contain bugs and other issues.
+> For more stable containers use the [PyTorch Base Images](#pytorch-base-images)
+> and [PyTorch Extras](#pytorch-extras) containers. 
 
 
 ## Organization
