@@ -1,3 +1,5 @@
+name: torch-extras
+
 on:
   workflow_call:
     inputs:
@@ -6,6 +8,9 @@ on:
         type: string
       base-image:
         required: true
+        type: string
+      image-name:
+        required: false
         type: string
       skip-bases-check:
         required: false
@@ -22,6 +27,10 @@ on:
         required: false
         description: "Base image for the build"
         type: string
+      image-name:
+        required: false
+        description: "Custom name under which to publish the resulting container"
+        type: string
       skip-bases-check:
         required: false
         description: "Build from one specific image rather than the most recent releases from the main branch"
@@ -37,6 +46,7 @@ on:
 
 jobs:
   get-required-bases:
+    name: Get Latest Required Base Images
     if: inputs.skip-bases-check != true
     runs-on: ["self-hosted", "Linux"]
     permissions:
@@ -95,9 +105,11 @@ jobs:
         if: steps.check-changed.outputs.BASE_PROVIDED != 'true' || steps.check-changed.outputs.NCCL_PROVIDED != 'true'
         id: choose-bases
         run: |
-          TAG_PATTERN='^[0-9a-f]{7}-(.*)' && \
-          JSON_REPLACE='{"tag":"\1","image":"ghcr.io/coreweave/ml-containers/torch:\0"}' && \
-          TAG_TO_JSON() { sed -E -e "s@${TAG_PATTERN}@${JSON_REPLACE}@g"; }
+          TAG_TO_JSON() {
+            TAG_PATTERN='^[0-9a-f]{7}-(.*)';
+            JSON_REPLACE='{"tag":"\1","image":"ghcr.io/coreweave/ml-containers/torch:\0"}';
+            sed -E -e "s@${TAG_PATTERN}@${JSON_REPLACE}@g";
+          } && \
           SPLIT_TO_LINES() { xargs -n 1; } && \
           JOIN_LINES() { tr '[:space:]' ',' | sed -e 's/,$//'; } && \
           echo '## Pre-existing `ghcr.io/coreweave/ml-containers/torch` images to build from' >> "$GITHUB_STEP_SUMMARY" && \
@@ -120,6 +132,7 @@ jobs:
           LATEST_NCCL_IMAGES: ${{ steps.get-latest.outputs.LATEST_NCCL_IMAGES }}
 
   build-call:
+    name: Build torch-extras via Workflow Call
     if: inputs.skip-bases-check
     strategy:
       matrix:
@@ -127,7 +140,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
-      image-name: torch-extras
+      image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ inputs.tag }}-flash_attn${{ matrix.flash-attn }}
       build-args: |
@@ -135,6 +148,7 @@ jobs:
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
 
   build-self:
+    name: Build torch-extras via Event Trigger
     needs: get-required-bases
     if: needs.get-required-bases.outputs.bases-list && needs.get-required-bases.outputs.bases-list != '[]'
     strategy:
@@ -142,8 +156,9 @@ jobs:
         flash-attn: [ 2.0.2, 1.0.9 ]
         bases: ${{ fromJSON(needs.get-required-bases.outputs.bases-list) }}
     uses: ./.github/workflows/build.yml
+    secrets: inherit
     with:
-      image-name: torch-extras
+      image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ matrix.bases.tag }}-flash_attn${{ matrix.flash-attn }}
       build-args: |

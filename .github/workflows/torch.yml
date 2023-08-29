@@ -19,10 +19,16 @@ on:
       torchaudio-version:
         required: true
         type: string
+      triton-version:
+        required: false
+        type: string
       cuda-arch-support:
         required: false
         type: string
         default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
+      image-name:
+        required: false
+        type: string
       build-extras:
         required: false
         type: boolean
@@ -54,11 +60,19 @@ on:
         required: true
         description: "Tagged version number from pytorch/audio to build"
         type: string
+      triton-version:
+        required: false
+        description: "Tagged version number from openai/triton to build"
+        type: string
       cuda-arch-support:
         required: false
         description: "Space-separated list of CUDA architectures to support"
         type: string
         default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
+      image-name:
+        required: false
+        description: "Custom name under which to publish the resulting container"
+        type: string
       build-extras:
         required: false
         description: "Whether to build and push a torch-extras container as well"
@@ -67,21 +81,24 @@ on:
 
 jobs:
   build:
+    name: Build torch
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
-      image-name: torch
+      image-name: ${{ inputs.image-name || 'torch' }}
       folder: torch
       tag-suffix: ${{ inputs.tag }}
       build-args: |
-        BUILD_CCACHE_SIZE=1Gi
+        BUILD_CCACHE_SIZE=20Gi
         BUILDER_BASE_IMAGE=${{ inputs.builder-base-image }}
         FINAL_BASE_IMAGE=${{ inputs.base-image }}
         BUILD_TORCH_VERSION=${{ inputs.torch-version }}
         BUILD_TORCH_VISION_VERSION=${{ inputs.torchvision-version }}
         BUILD_TORCH_AUDIO_VERSION=${{ inputs.torchaudio-version }}
         ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST={0}', inputs.cuda-arch-support) || '' }}
+        ${{ inputs.triton-version && format('BUILD_TRITON_VERSION={0}', inputs.triton-version) || '' }}
   build-extras:
+    name: Build torch-extras
     if: inputs.build-extras
     needs: build
     uses: ./.github/workflows/torch-extras.yml
@@ -89,3 +106,4 @@ jobs:
     with:
       tag: ${{ inputs.tag }}
       base-image: ${{ needs.build.outputs.tags }}
+      image-name: ${{ inputs.image-name && format('{0}-extras', inputs.image-name) || '' }}
