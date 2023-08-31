@@ -284,11 +284,19 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install core packages
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip python3-distutils python3-numpy \
-      curl git apt-utils ssh ca-certificates tmux nano vim sudo bash rsync \
-      htop wget unzip tini && \
+      libpng16-16 libjpeg-turbo8 \
+      curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
+      rsync htop wget unzip tini && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
+    update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
+    apt-get clean
+
+RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
+        software-properties-common && \
+    apt-add-repository -y ppa:ubuntu-toolchain-r/test && \
+    apt-get -qq install -y --no-install-recommends libstdc++6 && \
     apt-get clean
 
 ARG BUILD_TORCH_VERSION
@@ -317,13 +325,15 @@ RUN export \
       libcusparse-${CUDA_PACKAGE_VERSION} \
       libcusolver-${CUDA_PACKAGE_VERSION} \
       cuda-cupti-${CUDA_PACKAGE_VERSION} \
+      libnvjpeg-${CUDA_PACKAGE_VERSION} \
       libnvtoolsext1 && \
     { if [ $CUDA_MAJOR_VERSION -ge 12 ]; then \
       apt-get -qq install --no-upgrade -y libnvjitlink-${CUDA_PACKAGE_VERSION}; fi; } && \
     { if [ ! -d /opt/nccl-tests ]; then \
       export NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
       apt-get -qq install --no-upgrade -y "libnccl2=$NCCL_PACKAGE_VERSION"; fi; } && \
-    apt-get clean
+    apt-get clean && \
+    ldconfig
 
 WORKDIR /usr/src/app
 
