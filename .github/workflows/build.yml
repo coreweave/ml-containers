@@ -75,7 +75,6 @@ jobs:
           build-args: |-
             ${{ inputs.build-args }}
           outputs: |-
-            type=registry
             type=registry,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
