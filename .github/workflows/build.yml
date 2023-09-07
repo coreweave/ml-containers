@@ -75,7 +75,7 @@ jobs:
           build-args: |-
             ${{ inputs.build-args }}
           outputs: |-
-            type=registry,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
+            type=image,name=${{ env.REGISTRY }}/${{ inputs.image-name }}:${{ steps.meta.outputs.tags }},oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true,push=true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ inputs.image-name }}:buildcache
