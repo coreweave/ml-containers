@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.2
 
 ARG BASE_IMAGE
-ARG DEEPSPEED_VERSION="0.10.1"
+ARG DEEPSPEED_VERSION="0.10.3"
 ARG FLASH_ATTN_VERSION="2.0.2"
 ARG APEX_COMMIT="38a12698bc3cc95987bca270bcd6d025bb0be346"
 
@@ -103,7 +103,7 @@ ARG DEEPSPEED_VERSION
 SHELL ["/bin/bash", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
-    if python3 -m pip show torch | grep -F 'Version: 2.1.' > /dev/null; then \
+    if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
       # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
       # requirement for C++17 (as of DeepSpeed 0.10.1).
       # See: https://github.com/microsoft/DeepSpeed/pull/3976
