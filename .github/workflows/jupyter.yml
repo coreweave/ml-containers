@@ -1,0 +1,17 @@
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "jupyter/**"
+      - ".github/workflows/jupyter.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: jupyter
+      folder: jupyter
+      build-args: ""
