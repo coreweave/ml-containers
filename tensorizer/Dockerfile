@@ -1,4 +1,4 @@
-FROM python:3.9
+FROM python:3.12.0rc2-slim
 ARG COMMIT=main
 
 RUN mkdir /app
