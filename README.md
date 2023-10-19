@@ -23,7 +23,7 @@ CoreWeave provides custom builds of
 and [`torchaudio`](https://github.com/pytorch/audio)
 tuned for our platform in a single container image, [`ml-containers/torch`](https://github.com/coreweave/ml-containers/pkgs/container/ml-containers%2Ftorch).
 
-Versions compiled against CUDA 11.8.0, 12.0.1, and 12.1.1 are available in this repository, with two variants:
+Versions compiled against CUDA 11.8.0, 12.0.1, 12.1.1, and 12.2.2 are available in this repository, with two variants:
 
 1. `base`: Tagged as `ml-containers/torch:a1b2c3d-base-...`.
    1. Built from [`nvidia/cuda:...-base-ubuntu20.04`](https://hub.docker.com/r/nvidia/cuda/tags?name=base-ubuntu20.04) as a base.
