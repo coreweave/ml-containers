@@ -1,16 +1,16 @@
 image:
   - cuda: 12.2.2
     nccl: 2.18.6-1
-    nccl-tests-hash: c50cbae
+    nccl-tests-hash: a6a61ab
   - cuda: 12.1.1
     nccl: 2.18.6-1
-    nccl-tests-hash: c50cbae
+    nccl-tests-hash: a6a61ab
   - cuda: 12.0.1
     nccl: 2.18.6-1
-    nccl-tests-hash: c50cbae
+    nccl-tests-hash: a6a61ab
   - cuda: 11.8.0
     nccl: 2.16.2-1
-    nccl-tests-hash: c50cbae
+    nccl-tests-hash: a6a61ab
 include:
   - torch: 2.0.1
     vision: 0.15.2
