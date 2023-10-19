@@ -87,7 +87,7 @@ jobs:
         run: |
           RELEASES="$( \
             /bin/curl -f -s --oauth2-bearer "$(echo "$BEARER_TOKEN" | base64 -w 0)" \
-              https://ghcr.io/v2/coreweave/ml-containers%2Ftorch/tags/list \
+              'https://ghcr.io/v2/coreweave/ml-containers%2Ftorch/tags/list?n=100000' \
             | jq -r '.["tags"][]' \
             | grep -E '^[0-9a-f]{7}-(base|nccl)-' \
           )" && \
