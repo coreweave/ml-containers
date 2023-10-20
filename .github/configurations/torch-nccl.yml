@@ -12,6 +12,6 @@ image:
     nccl: 2.16.2-1
     nccl-tests-hash: a6a61ab
 include:
-  - torch: 2.0.1
-    vision: 0.15.2
-    audio: 2.0.2
+  - torch: 2.1.0
+    vision: 0.16.2
+    audio: 2.1.0
