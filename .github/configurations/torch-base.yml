@@ -1,5 +1,5 @@
 cuda: [ 12.2.2, 12.1.1, 12.0.1, 11.8.0 ]
 include:
   - torch: 2.1.0
-    vision: 0.16.2
+    vision: 0.16.0
     audio: 2.1.0
