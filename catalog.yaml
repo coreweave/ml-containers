@@ -1,0 +1,20 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ml-containers
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+  description: Optimized images for training/inference on CoreWeave infrastructure
+  tags:
+    - ml
+  # links:
+  #   - title: Deployment Manifests
+  #     url: https://github.com/coreweave/awesome-turtles/tree/main/deploy
+  #     icon: github
+  customer_impact: true
+  stateless: false
+spec:
+  type: service
+  lifecycle: production
+  owner: group:cw/team_ml
