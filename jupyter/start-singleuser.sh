@@ -6,7 +6,7 @@ set -e
 
 # set default ip to 0.0.0.0
 if [[ "${NOTEBOOK_ARGS} $*" != *"--ip="* ]]; then
-    NOTEBOOK_ARGS="--ip=0.0.0.0 --port 8888 --allow-root --NotebookApp.token='$INSTANCE_TOKEN' ${NOTEBOOK_ARGS}"
+    NOTEBOOK_ARGS="--ip=0.0.0.0 --port 8888 --allow-root ${NOTEBOOK_ARGS}"
 fi
 echo "NOTEBOOK_ARGS=${NOTEBOOK_ARGS}"
 
