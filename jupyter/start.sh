@@ -13,6 +13,8 @@ _log () {
     fi
 }
 _log "Entered start.sh with args:" "$@"
+_log "Token provided is: $INSTANCE_TOKEN"
+
 
 # The run-hooks function looks for .sh scripts to source and executable files to
 # run within a passed directory.
