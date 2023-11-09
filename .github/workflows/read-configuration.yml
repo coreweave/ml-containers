@@ -1,0 +1,45 @@
+name: read-configuration
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        required: true
+        type: string
+      filter:
+        required: false
+        type: string
+    outputs:
+      config:
+        description: "The retrieved configuration, as JSON"
+        value: ${{ jobs.read-file.outputs.config }}
+
+jobs:
+  read-file:
+    name: Read Configuration File
+    runs-on: ["self-hosted", "Linux"]
+    permissions: {}
+    outputs:
+      config: ${{ steps.read.outputs.contents }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Read configuration
+        id: read
+        env:
+          FILE_PATH: ${{ inputs.path }}
+          FILTER: ${{ inputs.filter }}
+        run: |
+          set -x;
+          if [ -n "$FILTER" ]; then
+            CONTENTS="$(yq e "$FILE_PATH" --expression "$FILTER" -oj -I0)";
+          else
+            CONTENTS="$(yq e "$FILE_PATH" -oj -I0)";
+          fi;
+          echo "contents=$CONTENTS" >> "$GITHUB_OUTPUT";
+          
+          {
+            echo '## Configuration';
+            echo '```json';
+            echo "$CONTENTS" | jq .;
+            echo '```';
+          } >> "$GITHUB_STEP_SUMMARY";

@@ -1,0 +1,137 @@
+name: torch-nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    # At 05:00 UTC (midnight EST)
+    - cron: "0 5 * * *"
+  push:
+    paths:
+      - "torch/**"
+      - ".github/configurations/torch-base.yml"
+      - ".github/configurations/torch-nccl.yml"
+      - ".github/workflows/torch-nightly.yml"
+      - ".github/workflows/torch.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  get-nightly-info:
+    name:
+      Get Nightly Info
+    runs-on: [ self-hosted, Linux ]
+    outputs:
+      pytorch-commit: ${{ steps.get-hash.outputs.pytorch-commit }}
+      triton-commit: ${{ steps.get-hash.outputs.triton-commit }}
+      torchvision-commit: ${{ steps.get-hash.outputs.torchvision-commit }}
+      torchaudio-commit: ${{ steps.get-hash.outputs.torchaudio-commit }}
+      version-string: ${{ steps.get-hash.outputs.version-string }}
+      date: ${{ steps.get-date.outputs.date }}
+    steps:
+      - name: Get latest commit hashes
+        id: get-hash
+        run: |
+          set -e;
+          
+          FORMAT_COMMIT_LINK() {
+            printf '[`%.7s`](https://github.com/%s/tree/%s)\n' "$2" "$1" "$2";
+          };
+          
+          LOG() {
+            printf -- "$@" >> "$GITHUB_STEP_SUMMARY";
+          };
+          
+          CLONE() {
+            git clone --filter=blob:none --no-checkout --depth=1 \
+              "https://github.com/$1" \
+              "$2" > /dev/null 2> /dev/null && \
+            local COMMIT="$(git -C "$2" rev-parse HEAD)" && \
+            LOG 'Latest `%s` commit: %s\n' \
+              "$1" "$(FORMAT_COMMIT_LINK "$1" "$COMMIT")" && \
+            echo $COMMIT;
+          };
+          
+          GET_VERSION() {
+            git -C "$1" show HEAD:version.txt 2> /dev/null; 
+          };
+          
+          PYTORCH_COMMIT="$(CLONE pytorch/pytorch pytorch-git)";
+          PYTORCH_VERSION="$(GET_VERSION pytorch-git)";
+          TRITON_COMMIT_FILE=".ci/docker/ci_commit_pins/triton.txt";
+          TRITON_COMMIT="$(git -C pytorch-git show "HEAD:$TRITON_COMMIT_FILE" 2> /dev/null)";
+          rm -rf pytorch-git;
+          
+          LOG 'Corresponding `openai/triton` commit: %s\n' \
+            "$(FORMAT_COMMIT_LINK openai/triton "$TRITON_COMMIT")";
+          
+          TORCHVISION_COMMIT="$(CLONE pytorch/vision torchvision-git)";
+          TORCHVISION_VERSION="$(GET_VERSION torchvision-git)";
+          rm -rf torchvision-git;
+          
+          TORCHAUDIO_COMMIT="$(CLONE pytorch/audio torchaudio-git)";
+          TORCHAUDIO_VERSION="$(GET_VERSION torchaudio-git)";
+          rm -rf torchaudio-git;
+          
+          echo "pytorch-commit=$PYTORCH_COMMIT" >> "$GITHUB_OUTPUT";
+          echo "triton-commit=$TRITON_COMMIT" >> "$GITHUB_OUTPUT";
+          echo "torchvision-commit=$TORCHVISION_COMMIT" >> "$GITHUB_OUTPUT";
+          echo "torchaudio-commit=$TORCHAUDIO_COMMIT" >> "$GITHUB_OUTPUT";
+          
+          printf -- 'version-string=torch%s-vision%s-audio%s\n' \
+            "$PYTORCH_VERSION" "$TORCHVISION_VERSION" "$TORCHAUDIO_VERSION" \
+            >> "$GITHUB_OUTPUT";
+      - name: Get date
+        id: get-date
+        run: echo "date=$(date -u '+%Y.%m.%d.%H')" >> "$GITHUB_OUTPUT";
+
+  get-base-config:
+    name: Get torch:base Config
+    uses: ./.github/workflows/read-configuration.yml
+    with:
+      path: ./.github/configurations/torch-base.yml
+      filter: del(.include)
+  get-nccl-config:
+    name: Get torch:nccl Config
+    uses: ./.github/workflows/read-configuration.yml
+    with:
+      path: ./.github/configurations/torch-nccl.yml
+      filter: del(.include)
+
+  build-base:
+    name: Build Nightly torch:base
+    needs:
+      - get-nightly-info
+      - get-base-config
+    strategy:
+      matrix: ${{ fromJSON(needs.get-base-config.outputs.config) }}
+    uses: ./.github/workflows/torch.yml
+    secrets: inherit
+    with:
+      image-name: nightly-torch
+      tag: ${{ format('base-{0}-cuda{1}-{2}', needs.get-nightly-info.outputs.date, matrix.cuda, needs.get-nightly-info.outputs.version-string ) }}
+      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu20.04
+      base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu20.04
+      torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
+      torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
+      torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
+      triton-version: ${{ needs.get-nightly-info.outputs.triton-commit }}
+      build-extras: true
+  build-nccl:
+    name: Build Nightly torch:nccl
+    needs:
+      - get-nightly-info
+      - get-nccl-config
+    strategy:
+      matrix: ${{ fromJSON(needs.get-nccl-config.outputs.config) }}
+    uses: ./.github/workflows/torch.yml
+    secrets: inherit
+    with:
+      image-name: nightly-torch
+      tag: ${{ format('nccl-{0}-cuda{1}-nccl{2}-{3}', needs.get-nightly-info.outputs.date, matrix.image.cuda, matrix.image.nccl, needs.get-nightly-info.outputs.version-string ) }}
+      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
+      torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
+      torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
+      triton-version: ${{ needs.get-nightly-info.outputs.triton-commit }}
+      build-extras: true

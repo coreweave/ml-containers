@@ -16,6 +16,7 @@ jobs:
           - ceeb8c2-nccl-cuda11.8.0-nccl2.16.2-1-torch2.0.1-vision0.15.2-audio2.0.2
 
     uses: ./.github/workflows/build.yml
+    secrets: inherit
     with:
       image-name: cuda-ssh
       folder: cuda-ssh

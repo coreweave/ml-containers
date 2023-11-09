@@ -1,3 +1,5 @@
+name: torch-extras
+
 on:
   workflow_call:
     inputs:
@@ -7,29 +9,158 @@ on:
       base-image:
         required: true
         type: string
+      image-name:
+        required: false
+        type: string
+      skip-bases-check:
+        required: false
+        type: boolean
+        default: true
 
   workflow_dispatch:
     inputs:
       tag:
-        required: true
+        required: false
         description: "Tag suffix to identify the build"
         type: string
       base-image:
-        required: true
+        required: false
         description: "Base image for the build"
         type: string
+      image-name:
+        required: false
+        description: "Custom name under which to publish the resulting container"
+        type: string
+      skip-bases-check:
+        required: false
+        description: "Build from one specific image rather than the most recent releases from the main branch"
+        type: boolean
+        default: true
+
+  push:
+    paths:
+      - "torch-extras/**"
+      - ".github/workflows/torch-extras.yml"
+      - ".github/workflows/build.yml"
 
 
 jobs:
-  build:
+  get-required-bases:
+    name: Get Latest Required Base Images
+    if: inputs.skip-bases-check != true
+    runs-on: ["self-hosted", "Linux"]
+    permissions:
+      packages: read
+    outputs:
+      bases-list: ${{ steps.choose-bases.outputs.list }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Check if torch-extras needs to be rebuilt from previous bases
+        id: check-changed
+        run: |
+          if [ "$EVENT_NAME" = 'push' ]; then \
+            CHANGED_FILES="$(git diff --name-only "$BEFORE_HASH" "$AFTER_HASH")" && \
+            { \
+              echo "$CHANGED_FILES" \
+              | grep -P '^(\./)?(torch/|\.github/workflows/torch(-base)?\.yml|\.github/workflows/build\.yml)' > /dev/null \
+                && echo "BASE_PROVIDED=true" >> "$GITHUB_OUTPUT" \
+                || echo "BASE_PROVIDED=false" >> "$GITHUB_OUTPUT"; \
+            } && { \
+              echo "$CHANGED_FILES" \
+              | grep -P '^(\./)?(torch/|\.github/workflows/torch(-nccl)?\.yml|\.github/workflows/build\.yml)' > /dev/null \
+                && echo "NCCL_PROVIDED=true" >> "$GITHUB_OUTPUT" \
+                || echo "NCCL_PROVIDED=false" >> "$GITHUB_OUTPUT"; \
+            }; \
+          else \
+            echo "BASE_PROVIDED=false" >> "$GITHUB_OUTPUT" && \
+            echo "NCCL_PROVIDED=false" >> "$GITHUB_OUTPUT";
+          fi
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_HASH: ${{ github.event.before }}
+          AFTER_HASH: ${{ github.event.after }}
+      - name: Get latest torch container releases
+        if: steps.check-changed.outputs.BASE_PROVIDED != 'true' || steps.check-changed.outputs.NCCL_PROVIDED != 'true'
+        id: get-latest
+        run: |
+          RELEASES="$( \
+            /bin/curl -f -s --oauth2-bearer "$(echo "$BEARER_TOKEN" | base64 -w 0)" \
+              'https://ghcr.io/v2/coreweave/ml-containers%2Ftorch/tags/list?n=100000' \
+            | jq -r '.["tags"][]' \
+            | grep -E '^[0-9a-f]{7}-(base|nccl)-' \
+          )" && \
+          BASE_RELEASES="$(echo "$RELEASES" | grep -E '^[0-9a-f]{7}-base-')" && \
+          NCCL_RELEASES="$(echo "$RELEASES" | grep -E '^[0-9a-f]{7}-nccl-')" && \
+          LATEST_BASE_COMMIT="$(echo "$BASE_RELEASES" | tail -1 | cut -c1-7)" && \
+          LATEST_NCCL_COMMIT="$(echo "$NCCL_RELEASES" | tail -1 | cut -c1-7)" && \
+          LATEST_BASE_IMAGES="$(echo "$BASE_RELEASES" | grep -F "${LATEST_BASE_COMMIT}-")" && \
+          LATEST_NCCL_IMAGES="$(echo "$NCCL_RELEASES" | grep -F "${LATEST_NCCL_COMMIT}-")" && \
+          echo "LATEST_BASE_IMAGES=$(echo $LATEST_BASE_IMAGES)" >> "$GITHUB_OUTPUT" && \
+          echo "LATEST_NCCL_IMAGES=$(echo $LATEST_NCCL_IMAGES)" >> "$GITHUB_OUTPUT"
+        env:
+          BEARER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Choose which torch containers to use as a build base
+        if: steps.check-changed.outputs.BASE_PROVIDED != 'true' || steps.check-changed.outputs.NCCL_PROVIDED != 'true'
+        id: choose-bases
+        run: |
+          TAG_TO_JSON() {
+            TAG_PATTERN='^[0-9a-f]{7}-(.*)';
+            JSON_REPLACE='{"tag":"\1","image":"ghcr.io/coreweave/ml-containers/torch:\0"}';
+            sed -E -e "s@${TAG_PATTERN}@${JSON_REPLACE}@g";
+          } && \
+          SPLIT_TO_LINES() { xargs -n 1; } && \
+          JOIN_LINES() { tr '[:space:]' ',' | sed -e 's/,$//'; } && \
+          echo '## Pre-existing `ghcr.io/coreweave/ml-containers/torch` images to build from' >> "$GITHUB_STEP_SUMMARY" && \
+          echo "list=[$( \
+            ( \
+              if [ "$BASE_PROVIDED" = 'false' ]; then \
+                echo "$LATEST_BASE_IMAGES" | xargs -n 1 echo '-' >> "$GITHUB_STEP_SUMMARY" && \
+                echo "$LATEST_BASE_IMAGES"; \
+              fi && \
+              if [ "$NCCL_PROVIDED" = 'false' ]; then \
+                echo "$LATEST_NCCL_IMAGES" | xargs -n 1 echo '-' >> "$GITHUB_STEP_SUMMARY" && \
+                echo "$LATEST_NCCL_IMAGES"; \
+              fi; \
+            ) | SPLIT_TO_LINES | TAG_TO_JSON | JOIN_LINES \
+          )]" >> "$GITHUB_OUTPUT";
+        env:
+          BASE_PROVIDED: ${{ steps.check-changed.outputs.BASE_PROVIDED }}
+          NCCL_PROVIDED: ${{ steps.check-changed.outputs.NCCL_PROVIDED }}
+          LATEST_BASE_IMAGES: ${{ steps.get-latest.outputs.LATEST_BASE_IMAGES }}
+          LATEST_NCCL_IMAGES: ${{ steps.get-latest.outputs.LATEST_NCCL_IMAGES }}
+
+  build-call:
+    name: Build torch-extras via Workflow Call
+    if: inputs.skip-bases-check
     strategy:
       matrix:
         flash-attn: [ 2.0.2, 1.0.9 ]
     uses: ./.github/workflows/build.yml
+    secrets: inherit
     with:
-      image-name: torch-extras
+      image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ inputs.tag }}-flash_attn${{ matrix.flash-attn }}
       build-args: |
         BASE_IMAGE=${{ inputs.base-image }}
+        FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
+
+  build-self:
+    name: Build torch-extras via Event Trigger
+    needs: get-required-bases
+    if: needs.get-required-bases.outputs.bases-list && needs.get-required-bases.outputs.bases-list != '[]'
+    strategy:
+      matrix:
+        flash-attn: [ 2.0.2, 1.0.9 ]
+        bases: ${{ fromJSON(needs.get-required-bases.outputs.bases-list) }}
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: ${{ inputs.image-name || 'torch-extras' }}
+      folder: torch-extras
+      tag-suffix: ${{ matrix.bases.tag }}-flash_attn${{ matrix.flash-attn }}
+      build-args: |
+        BASE_IMAGE=${{ matrix.bases.image }}
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}

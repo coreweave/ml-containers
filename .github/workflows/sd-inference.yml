@@ -15,7 +15,9 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/build.yml
-    with: 
+    secrets: inherit
+    with:
       image-name: sd-inference
       folder: sd-inference
-      build-args: "--build-arg COMMIT=${{ github.event.inputs.commit }}"
+      build-args: |
+        COMMIT=${{ github.event.inputs.commit }}

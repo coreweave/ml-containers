@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.2
 
 ARG BASE_IMAGE
-ARG DEEPSPEED_VERSION="0.9.4"
+ARG DEEPSPEED_VERSION="0.10.3"
 ARG FLASH_ATTN_VERSION="2.0.2"
-ARG APEX_COMMIT="7b2e71b0d4013f8e2f9f1c8dd21980ff1d76f1b6"
-ARG XFORMERS_VERSION="0.0.20"
+ARG APEX_COMMIT="38a12698bc3cc95987bca270bcd6d025bb0be346"
+ARG XFORMERS_VERSION="0.0.22"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
@@ -44,16 +44,31 @@ RUN export \
       cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
-      ninja-build \
-      # gcc-10/g++-10/lld do not need to be installed here, but they improve the build.
-      # gfortran-10 is just for compiler_wrapper.f95.
-      gcc-10 g++-10 gfortran-10 lld && \
+      ninja-build && \
+    apt-get clean
+
+# Add Kitware's apt repository to get a newer version of CMake
+RUN apt-get -qq update && apt-get -qq install -y \
+      software-properties-common lsb-release && \
+    { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
+    | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
+    apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
+    apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
+
+# Update compiler (GCC) and linker (LLD) versions
+# gfortran-11 is just for compiler_wrapper.f95
+RUN CODENAME="$(lsb_release -cs)" && \
+    wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
+    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
+    apt-add-repository -y ppa:ubuntu-toolchain-r/test && \
+    apt-get -qq update && apt-get -qq install --no-install-recommends -y \
+      gcc-11 g++-11 gfortran-11 lld-17 && \
     apt-get clean && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 10 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 10 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install \
-      /usr/bin/gfortran gfortran /usr/bin/gfortran-10 10 && \
-    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 1
+      /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
+    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
 
 RUN mkdir /wheels /build
 WORKDIR /build
@@ -89,6 +104,12 @@ ARG DEEPSPEED_VERSION
 SHELL ["/bin/bash", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
+    if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
+      # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
+      # requirement for C++17 (as of DeepSpeed 0.10.1).
+      # See: https://github.com/microsoft/DeepSpeed/pull/3976
+      export DS_BUILD_AIO='0'; \
+    fi && \
     { \
       # DeepSpeed doesn't handle blank environment variables
       # in the same way as unset ones, so clear any blank ones.
@@ -114,20 +135,6 @@ RUN python3 -m pip install -U --no-cache-dir \
 SHELL ["/bin/sh", "-c"]
 
 WORKDIR /wheels
-
-
-FROM builder-base as xformers-builder
-
-ARG XFORMERS_VERSION
-
-RUN python3 -m pip install -U --no-cache-dir \
-      setuptools wheel pip && \
-    CC=$(realpath -e ./compiler) \
-      MAX_JOBS=$(($(./effective_cpu_count.sh) / 2 + 1)) \
-      python3 -m pip wheel -w /wheels -v \
-      --no-cache-dir --no-build-isolation --no-deps \
-      --no-binary=xformers \
-      xformers==${XFORMERS_VERSION}
 
 
 FROM builder-base as flash-attn-builder
@@ -167,18 +174,24 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
       libnccl-dev=$LIBNCCL2_VERSION && \
     apt-get clean
 
+# --distributed_adam, --distributed_lamb, and --group_norm aren't documented
+# in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
-    EXTENSIONS=$(printf -- '--config-settings "--build-option=%s" ' $( \
+    export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+    printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
         --cpp_ext \
         --cuda_ext \
+        --distributed_adam \
+        --distributed_lamb \
         --permutation_search \
         --xentropy \
         --focal_loss \
+        --group_norm \
         --index_mul_2d \
         --deprecated_fused_adam \
         --deprecated_fused_lamb \
@@ -195,13 +208,26 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
           --cudnn_gbn \
           --fused_conv_bias_relu; \
       fi; \
-    )) && \
+    ) > ./apex-extensions.conf && \
+    echo "Extensions: $(cat ./apex-extensions.conf)" && \
     cd apex && \
-    python3 -m pip wheel -w /wheels -v \
-      --no-cache-dir --no-build-isolation --no-deps \
-      $EXTENSIONS ./
+    xargs -a ../apex-extensions.conf python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation --no-deps ./
 
 WORKDIR /wheels
+
+
+FROM builder-base as xformers-builder
+
+ARG XFORMERS_VERSION
+
+RUN python3 -m pip install -U --no-cache-dir \
+      setuptools wheel pip && \
+    CC=$(realpath -e ./compiler) \
+      MAX_JOBS=$(($(./effective_cpu_count.sh) / 2 + 1)) \
+      python3 -m pip wheel -w /wheels -v \
+      --no-cache-dir --no-build-isolation --no-deps \
+      --no-binary=xformers \
+      xformers==${XFORMERS_VERSION}
 
 
 FROM ${BASE_IMAGE}

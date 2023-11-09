@@ -29,7 +29,7 @@ on:
 jobs:
   build:
     name: Build Images
-    runs-on: [self-hosted, Linux]
+    runs-on: [ self-hosted, Linux ]
     outputs:
       outcome: ${{ steps.docker-build.outcome }}
       tags: ${{ steps.meta.outputs.tags }}
@@ -38,12 +38,17 @@ jobs:
       - uses: actions/checkout@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2.2.1
-      - name: Login to container registry
-        uses: docker/login-action@v2.1.0
+      - name: Login to GitHub container registry
+        uses: docker/login-action@v2.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to DockerHub container registry
+        uses: docker/login-action@v2.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
       - name: Get base registry
         run: |
           echo "REGISTRY=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
@@ -67,7 +72,8 @@ jobs:
         uses: docker/build-push-action@v3.2.0
         with:
           context: ${{ inputs.folder }}
-          build-args: ${{ inputs.build-args }}
+          build-args: |-
+            ${{ inputs.build-args }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -80,10 +86,10 @@ jobs:
       - name: Comment
         if: steps.PR.outputs.number
         uses: peter-evans/create-or-update-comment@v2.1.0
-        with: 
+        with:
           issue-number: ${{ steps.PR.outputs.number }}
           body: >
-            @${{ github.triggering_actor }} Build complete, ${{ steps.docker-build.outcome }}: 
+            @${{ github.triggering_actor }} Build complete, ${{ steps.docker-build.outcome }}:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
             Image: `${{ fromJSON(steps.docker-build.outputs.metadata)['image.name'] }}`

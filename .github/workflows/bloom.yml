@@ -10,7 +10,8 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/build.yml
-    with: 
+    secrets: inherit
+    with:
       image-name: bloom
       folder: bloom
       build-args: ""

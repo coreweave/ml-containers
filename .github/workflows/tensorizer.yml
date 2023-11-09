@@ -15,7 +15,8 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/build.yml
-    with: 
+    secrets: inherit
+    with:
       image-name: tensorizer
       folder: tensorizer
       build-args: "--build-arg COMMIT=${{ github.event.inputs.commit }}"
