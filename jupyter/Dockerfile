@@ -164,7 +164,6 @@ RUN mamba install --yes \
 
 ENV JUPYTER_PORT=8888
 EXPOSE $JUPYTER_PORT
-
 # Configure container startup
 CMD ["start-notebook.sh"]
 
