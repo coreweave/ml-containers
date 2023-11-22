@@ -128,7 +128,7 @@ RUN python3 -m pip install -U --no-cache-dir \
       do if [[ -z ${!VAR} ]]; then unset ${VAR}; fi; done; \
     } && \
     CC=$(realpath -e ./compiler) \
-      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 48)" \
+      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)" \
       python3 -m pip wheel -w /wheels \
       --no-cache-dir --no-build-isolation --no-deps \
       deepspeed==${DEEPSPEED_VERSION} && \
@@ -144,7 +144,7 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" && \
     export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
     cd flash-attention && \
     ( \
@@ -180,7 +180,7 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 48)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)" && \
     export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
     printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
@@ -223,7 +223,7 @@ ARG XFORMERS_VERSION
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     CC=$(realpath -e ./compiler) \
-      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)" \
+      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 12)" \
       python3 -m pip wheel -w /wheels -v \
       --no-cache-dir --no-build-isolation --no-deps \
       --no-binary=xformers \
