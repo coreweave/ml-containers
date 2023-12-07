@@ -2,9 +2,9 @@
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.10.3"
-ARG FLASH_ATTN_VERSION="2.0.2"
+ARG FLASH_ATTN_VERSION="2.3.6"
 ARG APEX_COMMIT="38a12698bc3cc95987bca270bcd6d025bb0be346"
-ARG XFORMERS_VERSION="0.0.22"
+ARG XFORMERS_VERSION="0.0.22.post7"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
@@ -164,8 +164,8 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
           cd - || \
           exit 1; \
       done; \
-    ) 2> \
-    >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
+    ) | \
+    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
 SHELL ["/bin/sh", "-c"]
 
 WORKDIR /wheels
@@ -230,6 +230,8 @@ RUN python3 -m pip install -U --no-cache-dir \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS=1 \
       PYTHONUNBUFFERED=1 \
+      NVCC_APPEND_FLAGS='-diag-suppress 186,177' \
+      XFORMERS_DISABLE_FLASH_ATTN=1 \
       python3 -m pip wheel -w /wheels -v \
       --no-cache-dir --no-build-isolation --no-deps \
       --no-binary=xformers \

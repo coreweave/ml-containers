@@ -136,7 +136,7 @@ jobs:
     if: inputs.skip-bases-check
     strategy:
       matrix:
-        flash-attn: [ 2.0.2, 1.0.9 ]
+        flash-attn: [ 2.3.6 ]
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
@@ -153,7 +153,7 @@ jobs:
     if: needs.get-required-bases.outputs.bases-list && needs.get-required-bases.outputs.bases-list != '[]'
     strategy:
       matrix:
-        flash-attn: [ 2.0.2, 1.0.9 ]
+        flash-attn: [ 2.3.6 ]
         bases: ${{ fromJSON(needs.get-required-bases.outputs.bases-list) }}
     uses: ./.github/workflows/build.yml
     secrets: inherit
