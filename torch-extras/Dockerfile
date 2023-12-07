@@ -140,6 +140,7 @@ WORKDIR /wheels
 
 FROM builder-base as flash-attn-builder
 
+SHELL ["/bin/bash", "-c"]
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
@@ -163,8 +164,9 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
           cd - || \
           exit 1; \
       done; \
-    ) | \
-    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
+    ) 2> \
+    >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
+SHELL ["/bin/sh", "-c"]
 
 WORKDIR /wheels
 
@@ -222,6 +224,7 @@ FROM builder-base as xformers-builder
 
 ARG XFORMERS_VERSION
 
+SHELL ["/bin/bash", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     CC=$(realpath -e ./compiler) \
@@ -230,8 +233,9 @@ RUN python3 -m pip install -U --no-cache-dir \
       python3 -m pip wheel -w /wheels -v \
       --no-cache-dir --no-build-isolation --no-deps \
       --no-binary=xformers \
-      xformers==${XFORMERS_VERSION} | \
-    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
+      xformers==${XFORMERS_VERSION} 2> \
+    >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
+SHELL ["/bin/sh", "-c"]
 
 
 FROM ${BASE_IMAGE}
