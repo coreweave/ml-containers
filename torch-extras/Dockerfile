@@ -102,7 +102,7 @@ ARG DS_BUILD_AIO=""
 
 ARG DEEPSPEED_VERSION
 
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
@@ -140,7 +140,7 @@ WORKDIR /wheels
 
 FROM builder-base as flash-attn-builder
 
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
@@ -224,7 +224,7 @@ FROM builder-base as xformers-builder
 
 ARG XFORMERS_VERSION
 
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     CC=$(realpath -e ./compiler) \
