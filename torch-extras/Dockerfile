@@ -2,7 +2,7 @@
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.10.3"
-ARG FLASH_ATTN_VERSION="2.0.2"
+ARG FLASH_ATTN_VERSION="2.3.6"
 ARG APEX_COMMIT="38a12698bc3cc95987bca270bcd6d025bb0be346"
 ARG XFORMERS_VERSION="0.0.22.post7"
 
@@ -82,6 +82,7 @@ COPY compiler_wrapper.f95 .
 RUN gfortran -O3 ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
 COPY --chmod=755 effective_cpu_count.sh .
+COPY --chmod=755 scale.sh .
 
 
 FROM builder-base as deepspeed-builder
@@ -101,7 +102,7 @@ ARG DS_BUILD_AIO=""
 
 ARG DEEPSPEED_VERSION
 
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
@@ -127,7 +128,7 @@ RUN python3 -m pip install -U --no-cache-dir \
       do if [[ -z ${!VAR} ]]; then unset ${VAR}; fi; done; \
     } && \
     CC=$(realpath -e ./compiler) \
-      MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) \
+      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)" \
       python3 -m pip wheel -w /wheels \
       --no-cache-dir --no-build-isolation --no-deps \
       deepspeed==${DEEPSPEED_VERSION} && \
@@ -139,13 +140,15 @@ WORKDIR /wheels
 
 FROM builder-base as flash-attn-builder
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
-    export CC=$(realpath -e ./compiler) && \
-    export MAX_JOBS=$(($(./effective_cpu_count.sh) / 4)) && \
-    export MAX_JOBS=$((MAX_JOBS == 0 ? 1 : MAX_JOBS)) && \
-    export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+    export CC=$(realpath -e ./compiler) \
+      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" \
+      NVCC_APPEND_FLAGS='-diag-suppress 186,177' \
+      PYTHONUNBUFFERED=1 \
+      FLASH_ATTENTION_FORCE_BUILD='TRUE' && \
     cd flash-attention && \
     ( \
       for EXT_DIR in $(realpath -s -e \
@@ -162,7 +165,9 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
           cd - || \
           exit 1; \
       done; \
-    )
+    ) | \
+    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
+SHELL ["/bin/sh", "-c"]
 
 WORKDIR /wheels
 
@@ -180,7 +185,7 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     export CC=$(realpath -e ./compiler) && \
-    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)" && \
     export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
     printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
@@ -220,14 +225,20 @@ FROM builder-base as xformers-builder
 
 ARG XFORMERS_VERSION
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     CC=$(realpath -e ./compiler) \
-      MAX_JOBS=$(($(./effective_cpu_count.sh) / 2 + 1)) \
+      MAX_JOBS=1 \
+      PYTHONUNBUFFERED=1 \
+      NVCC_APPEND_FLAGS='-diag-suppress 186,177' \
+      XFORMERS_DISABLE_FLASH_ATTN=1 \
       python3 -m pip wheel -w /wheels -v \
       --no-cache-dir --no-build-isolation --no-deps \
       --no-binary=xformers \
-      xformers==${XFORMERS_VERSION}
+      xformers==${XFORMERS_VERSION} 2> \
+    >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
+SHELL ["/bin/sh", "-c"]
 
 
 FROM ${BASE_IMAGE}
