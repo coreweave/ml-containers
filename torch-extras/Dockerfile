@@ -4,7 +4,7 @@ ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.10.3"
 ARG FLASH_ATTN_VERSION="2.0.2"
 ARG APEX_COMMIT="38a12698bc3cc95987bca270bcd6d025bb0be346"
-ARG XFORMERS_VERSION="0.0.22.post7"
+ARG XFORMERS_VERSION="0.0.22"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
@@ -224,10 +224,12 @@ RUN python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS=1 \
+      PYTHONUNBUFFERED=1 \
       python3 -m pip wheel -w /wheels -v \
       --no-cache-dir --no-build-isolation --no-deps \
       --no-binary=xformers \
-      xformers==${XFORMERS_VERSION}
+      xformers==${XFORMERS_VERSION} | \
+    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
 
 
 FROM ${BASE_IMAGE}
