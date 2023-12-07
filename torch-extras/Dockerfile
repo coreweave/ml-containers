@@ -146,6 +146,7 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     export CC=$(realpath -e ./compiler) && \
     export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" && \
     export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+    export PYTHONUNBUFFERED=1 && \
     cd flash-attention && \
     ( \
       for EXT_DIR in $(realpath -s -e \
@@ -162,7 +163,8 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
           cd - || \
           exit 1; \
       done; \
-    )
+    ) | \
+    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
 
 WORKDIR /wheels
 
