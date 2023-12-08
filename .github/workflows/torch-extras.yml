@@ -61,6 +61,10 @@ jobs:
         id: check-changed
         run: |
           if [ "$EVENT_NAME" = 'push' ]; then \
+            if [ "$FORCE_PUSH" = '1' ] || \
+              [ "$BEFORE_HASH" = '0000000000000000000000000000000000000000' ] && [ -n "$FIRST_COMMIT" ]; then \
+              export BEFORE_HASH="$FIRST_COMMIT~";
+            fi && \
             CHANGED_FILES="$(git diff --name-only "$BEFORE_HASH" "$AFTER_HASH")" && \
             { \
               echo "$CHANGED_FILES" \
@@ -81,6 +85,8 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BEFORE_HASH: ${{ github.event.before }}
           AFTER_HASH: ${{ github.event.after }}
+          FIRST_COMMIT: ${{ github.event.commits[0].id }}
+          FORCE_PUSH: ${{ github.event.forced && '1' || '' }}
       - name: Get latest torch container releases
         if: steps.check-changed.outputs.BASE_PROVIDED != 'true' || steps.check-changed.outputs.NCCL_PROVIDED != 'true'
         id: get-latest

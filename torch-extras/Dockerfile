@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.2
 
 ARG BASE_IMAGE
-ARG DEEPSPEED_VERSION="0.10.3"
+ARG DEEPSPEED_VERSION="0.12.4"
 ARG FLASH_ATTN_VERSION="2.3.6"
-ARG APEX_COMMIT="38a12698bc3cc95987bca270bcd6d025bb0be346"
+ARG APEX_COMMIT="2386a912164b0c5cfcd8be7a2b890fbac5607c82"
 ARG XFORMERS_VERSION="0.0.22.post7"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
@@ -89,9 +89,17 @@ FROM builder-base as deepspeed-builder
 # DeepSpeed build flags
 # See: https://www.deepspeed.ai/tutorials/advanced-install
 ARG DS_BUILD_OPS="1"
+ARG DS_BUILD_CCL_COMM=""
 ARG DS_BUILD_CPU_ADAM=""
+ARG DS_BUILD_CPU_LION=""
+# Requires CUTLASS
+ARG DS_BUILD_EVOFORMER_ATTN="0"
 ARG DS_BUILD_FUSED_ADAM=""
+ARG DS_BUILD_FUSED_LION=""
+ARG DS_BUILD_CPU_ADAGRAD=""
 ARG DS_BUILD_FUSED_LAMB=""
+ARG DS_BUILD_QUANTIZER=""
+ARG DS_BUILD_RANDOM_LTD=""
 # sparse_attn has issues with PyTorch >= 2.0.0 as of DeepSpeed 0.9.4
 ARG DS_BUILD_SPARSE_ATTN="0"
 ARG DS_BUILD_TRANSFORMER=""
@@ -104,7 +112,7 @@ ARG DEEPSPEED_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN python3 -m pip install -U --no-cache-dir \
-      setuptools wheel pip && \
+      setuptools wheel pip deepspeed-kernels && \
     if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
       # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
       # requirement for C++17 (as of DeepSpeed 0.10.1).
@@ -116,9 +124,16 @@ RUN python3 -m pip install -U --no-cache-dir \
       # in the same way as unset ones, so clear any blank ones.
       for VAR in \
         DS_BUILD_OPS \
+        DS_BUILD_CCL_COMM \
         DS_BUILD_CPU_ADAM \
+        DS_BUILD_CPU_LION \
+        DS_BUILD_EVOFORMER_ATTN \
         DS_BUILD_FUSED_ADAM \
+        DS_BUILD_FUSED_LION \
+        DS_BUILD_CPU_ADAGRAD \
         DS_BUILD_FUSED_LAMB \
+        DS_BUILD_QUANTIZER \
+        DS_BUILD_RANDOM_LTD \
         DS_BUILD_SPARSE_ATTN \
         DS_BUILD_TRANSFORMER \
         DS_BUILD_TRANSFORMER_INFERENCE \

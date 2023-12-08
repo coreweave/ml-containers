@@ -1,17 +1,17 @@
 image:
   - cuda: 12.2.2
-    nccl: 2.18.5-1
-    nccl-tests-hash: a6a61ab
+    nccl: 2.19.3-1
+    nccl-tests-hash: fb613ea
   - cuda: 12.1.1
     nccl: 2.18.3-1
-    nccl-tests-hash: 253a5b1
+    nccl-tests-hash: fb613ea
   - cuda: 12.0.1
-    nccl: 2.18.5-1
-    nccl-tests-hash: a6a61ab
+    nccl: 2.19.3-1
+    nccl-tests-hash: fb613ea
   - cuda: 11.8.0
-    nccl: 2.16.2-1
-    nccl-tests-hash: a6a61ab
+    nccl: 2.16.5-1
+    nccl-tests-hash: fb613ea
 include:
-  - torch: 2.0.1
-    vision: 0.15.2
-    audio: 2.0.2
+  - torch: 2.1.1
+    vision: 0.16.1
+    audio: 2.1.1
