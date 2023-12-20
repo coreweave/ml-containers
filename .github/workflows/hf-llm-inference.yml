@@ -1,0 +1,22 @@
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Commit to build'
+        required: true
+  push:
+    paths:
+      - "hf-llm-inference/**"
+      - ".github/workflows/hf-llm-inference.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: hf-llm-inference
+      folder: hf-llm-inference
+      build-args: |
+        ${{ inputs.commit && 'COMMIT=' }}${{ inputs.commit }}
