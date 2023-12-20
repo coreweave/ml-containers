@@ -4,7 +4,6 @@ on:
       commit:
         description: 'Commit to build'
         required: true
-        default: 'master'
   push:
     paths:
       - "hf-llm-inference/**"
@@ -20,4 +19,4 @@ jobs:
       image-name: hf-llm-inference
       folder: hf-llm-inference
       build-args: |
-        COMMIT=${{ github.event.inputs.commit }}
+        ${{ inputs.commit && 'COMMIT=' }}${{ inputs.commit }}
