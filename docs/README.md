@@ -26,12 +26,12 @@ tuned for our platform in a single container image, [`ml-containers/torch`](http
 Versions compiled against CUDA 11.8.0, 12.0.1, 12.1.1, and 12.2.2 are available in this repository, with two variants:
 
 1. `base`: Tagged as `ml-containers/torch:a1b2c3d-base-...`.
-   1. Built from [`nvidia/cuda:...-base-ubuntu20.04`](https://hub.docker.com/r/nvidia/cuda/tags?name=base-ubuntu20.04) as a base.
+   1. Built from [`nvidia/cuda:...-base-ubuntu22.04`](https://hub.docker.com/r/nvidia/cuda/tags?name=base-ubuntu22.04) as a base.
    2. Only includes essentials (CUDA, `torch`, `torchvision`, `torchaudio`),
       so it has a small image size, making it fast to launch.
 2. `nccl`: Tagged as `ml-containers/torch:a1b2c3d-nccl-...`.
    1. Built from [`ghcr.io/coreweave/nccl-tests`](https://github.com/coreweave/nccl-tests/pkgs/container/nccl-tests) as a base.
-   2. Ultimately inherits from [`nvidia/cuda:...-cudnn8-devel-ubuntu20.04`](https://hub.docker.com/r/nvidia/cuda/tags?name=cudnn8-devel-ubuntu20.04).
+   2. Ultimately inherits from [`nvidia/cuda:...-cudnn8-devel-ubuntu22.04`](https://hub.docker.com/r/nvidia/cuda/tags?name=cudnn8-devel-ubuntu22.04).
    3. Larger, but includes development libraries and build tools such as `nvcc` necessary for compiling other PyTorch extensions.
    4. These PyTorch builds are built on component libraries optimized for the CoreWeave cloud&mdash;see
       [`coreweave/nccl-tests`](https://github.com/coreweave/nccl-tests/blob/master/README.md).

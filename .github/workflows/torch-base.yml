@@ -36,8 +36,8 @@ jobs:
     with:
       image-name: ${{ inputs.image-name }}
       tag: ${{ format('{0}-{1}', format('base-cuda{0}', matrix.cuda), inputs.image-tag-suffix || format('torch{0}-vision{1}-audio{2}', matrix.torch, matrix.vision, matrix.audio)) }}
-      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu20.04
-      base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu20.04
+      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu22.04
+      base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu22.04
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
       torchaudio-version: ${{ matrix.audio }}

@@ -109,8 +109,8 @@ jobs:
     with:
       image-name: nightly-torch
       tag: ${{ format('base-{0}-cuda{1}-{2}', needs.get-nightly-info.outputs.date, matrix.cuda, needs.get-nightly-info.outputs.version-string ) }}
-      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu20.04
-      base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu20.04
+      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu22.04
+      base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu22.04
       torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
@@ -128,8 +128,8 @@ jobs:
     with:
       image-name: nightly-torch
       tag: ${{ format('nccl-{0}-cuda{1}-nccl{2}-{3}', needs.get-nightly-info.outputs.date, matrix.image.cuda, matrix.image.nccl, needs.get-nightly-info.outputs.version-string ) }}
-      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
-      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu22.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu22.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
       torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
