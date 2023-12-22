@@ -8,7 +8,7 @@ RUN apt-get -qq update && \
 RUN mkdir /app
 WORKDIR /app
 
-ARG COMMIT=4ff78daa65b6a4a944c5f14f102e5f28770bcfcc
+ARG COMMIT=2ce545a83c1e85d12f7b23657586e038f0901373
 RUN git clone --filter=blob:none https://github.com/coreweave/kubernetes-cloud && \
     cd kubernetes-cloud && \
     git checkout ${COMMIT} && \
