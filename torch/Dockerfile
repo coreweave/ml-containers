@@ -213,6 +213,7 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
+    --mount=type=cache,target=/ccache \
     export MAX_JOBS="$(./effective_cpu_count.sh)" && \
     cd vision && \
     mkdir build && \
@@ -248,6 +249,7 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
+    --mount=type=cache,target=/ccache \
     export MAX_JOBS="$(./effective_cpu_count.sh)" && \
     cd audio && \
     mkdir build && \
