@@ -11,12 +11,12 @@ WORKDIR /usr/src/app/ComfyUI/custom_nodes
 RUN git clone --depth=1 https://github.com/ltdrdata/ComfyUI-Manager
 RUN git clone --depth=1 https://github.com/pythongosssss/ComfyUI-Custom-Scripts
 
-# Put additional extensions you want installed in repos.txt and they'll be installed here
-# TODO: modularize this so user can pass in a URL to a text file of repos to install instead of repos.txt, e.g. a gh gist
-COPY install_script.sh /install_script.sh
-COPY repos.txt /repos.txt
-RUN chmod +x /install_script.sh
-RUN /install_script.sh
+# # Put additional extensions you want installed in repos.txt and they'll be installed here
+# # TODO: modularize this so user can pass in a URL to a text file of repos to install instead of repos.txt, e.g. a gh gist
+# COPY install_script.sh /install_script.sh
+# COPY repos.txt /repos.txt
+# RUN chmod +x /install_script.sh
+# RUN /install_script.sh
 
 WORKDIR /usr/src/app/ComfyUI
 #ENTRYPOINT ["python", "main.py", "--port", "8000", "--listen", "0.0.0.0"]
