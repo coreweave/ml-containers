@@ -1,0 +1,23 @@
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Commit to build'
+        required: true
+  push:
+    paths:
+      - "vllm-tensorizer/**"
+      - ".github/workflows/vllm-tensorizer.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: vllm-tensorizer
+      folder: vllm-tensorizer
+      tag-suffix: ${{ inputs.commit || '048f9a4c8f65ae3acc65001d7840e1aed9108ad4'}}
+      build-args: |
+        COMMIT_HASH=${{ inputs.commit || '048f9a4c8f65ae3acc65001d7840e1aed9108ad4'}}
