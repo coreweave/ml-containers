@@ -3,6 +3,7 @@ FROM ${BASE_IMAGE} as builder-base
 
 ARG MAX_JOBS=""
 
+COPY --chmod=755 freeze.sh /tmp
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
 # in the final image.
@@ -42,7 +43,7 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
 FROM builder-base as vllm-builder
 WORKDIR /workspace
 COPY --from=vllm-downloader /git/vllm /workspace
-RUN ./freeze.sh torch torchaudio torchvision transformers xformers > constraints.txt && \
+RUN ./tmp/freeze.sh torch torchaudio torchvision transformers xformers > constraints.txt && \
     python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation -c constraints.txt --no-deps ./
 
 WORKDIR /wheels
@@ -53,12 +54,12 @@ WORKDIR /workspace
 
 RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt-get clean
 
-RUN ./freeze.sh torch torchaudio torchvision xformers > constraints.txt && \
+RUN ./tmp/freeze.sh torch torchaudio torchvision xformers > constraints.txt && \
     pip3 install "transformers == 4.36.0" "fschat[model_worker] == 0.2.30" "triton == 2.1.0" -c constraints.txt
 
 # Install the vllm wheel from the vllm-builder layer
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
-    ./freeze.sh torch torchaudio torchvision xformers > constraints.txt && \
+    ./tmp/freeze.sh torch torchaudio torchvision xformers > constraints.txt && \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c constraints.txt && \
     rm constraints.txt
 
