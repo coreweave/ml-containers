@@ -68,7 +68,7 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 
 RUN python3 -m pip install \
       "transformers == 4.36.0" "fschat[model_worker] == 0.2.30" "triton == 2.1.0" \
-      -c /tmp/frozen/constraints.txt
+      -c /tmp/constraints.txt
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh transformers >> /tmp/constraints.txt
