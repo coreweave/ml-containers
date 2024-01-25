@@ -27,8 +27,7 @@ RUN export \
 RUN apt update && \
     apt install -y python3-pip python3-packaging \
       git ninja-build && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel
-
+    pip3 install -U --no-cache-dir pip packaging setuptools wheel \
 
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
@@ -43,7 +42,8 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
 FROM builder-base as vllm-builder
 WORKDIR /workspace
 COPY --from=vllm-downloader /git/vllm /workspace
-RUN python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation --no-deps ./
+RUN ./freeze.sh torch torchaudio torchvision transformers xformers > constraints.txt && \
+    python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation -c constraints.txt --no-deps ./
 
 WORKDIR /wheels
 
@@ -53,7 +53,9 @@ WORKDIR /workspace
 
 RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt-get clean
 
-RUN pip3 install "transformers == 4.36.0" "fschat[model_worker] == 0.2.30" "triton == 2.1.0"
+RUN ./freeze.sh torch torchaudio torchvision xformers > constraints.txt && \
+    pip3 install "transformers == 4.36.0" "fschat[model_worker] == 0.2.30" "triton == 2.1.0" -c constraints.txt && \
+    rm constraints.txt
 
 # Install the vllm wheel from the vllm-builder layer
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \

@@ -18,6 +18,6 @@ jobs:
     with:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
-      tag-suffix: ${{ inputs.commit || '5bdcb65afca2d867f5a6bc854339c9960dfd77a4'}}
+      tag-suffix: ${{ inputs.commit || 'cca41fc7ea472e19e639cedfb1d8376707947e2a'}}
       build-args: |
-        COMMIT_HASH=${{ inputs.commit || '5bdcb65afca2d867f5a6bc854339c9960dfd77a4'}}
+        COMMIT_HASH=${{ inputs.commit || 'cca41fc7ea472e19e639cedfb1d8376707947e2a'}}
