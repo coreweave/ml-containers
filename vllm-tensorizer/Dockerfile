@@ -54,12 +54,13 @@ WORKDIR /workspace
 RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt-get clean
 
 RUN ./freeze.sh torch torchaudio torchvision xformers > constraints.txt && \
-    pip3 install "transformers == 4.36.0" "fschat[model_worker] == 0.2.30" "triton == 2.1.0" -c constraints.txt && \
-    rm constraints.txt
+    pip3 install "transformers == 4.36.0" "fschat[model_worker] == 0.2.30" "triton == 2.1.0" -c constraints.txt
 
 # Install the vllm wheel from the vllm-builder layer
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
+    ./freeze.sh torch torchaudio torchvision xformers > constraints.txt && \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c constraints.txt && \
+    rm constraints.txt
 
 EXPOSE 8080
 
