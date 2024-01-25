@@ -2,7 +2,7 @@
 
 PATTERN="";
 for DEP in "$@"; do {
-  PATTERN="${PATTERN:+$PATTERN|}${DEP}"
+  PATTERN="${PATTERN:+$PATTERN|}${DEP}";
 }; done;
 PATTERN="^(${PATTERN})\b";
 
