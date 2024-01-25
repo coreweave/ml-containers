@@ -25,10 +25,11 @@ RUN export \
       ninja-build && \
     apt-get clean
 
-RUN apt update && \
-    apt install -y python3-pip python3-packaging \
-      git ninja-build && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel \
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends \
+      python3-pip python3-packaging git ninja-build && \
+    apt-get clean && \
+    pip3 install -U --no-cache-dir pip packaging setuptools wheel
 
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
