@@ -36,6 +36,13 @@ Versions compiled against CUDA 11.8.0, 12.0.1, 12.1.1, and 12.2.2 are available 
    4. These PyTorch builds are built on component libraries optimized for the CoreWeave cloud&mdash;see
       [`coreweave/nccl-tests`](https://github.com/coreweave/nccl-tests/blob/master/README.md).
 
+> [!NOTE]
+> Most `torch` images have both a variant built on Ubuntu 22.04 and a variant built on Ubuntu 20.04.
+> - CUDA 11.8.0 is an exception, and is only available on Ubuntu 20.04.
+> - Ubuntu 22.04 images use Python 3.10.
+> - Ubuntu 20.04 images use Python 3.8.
+> - The base distribution is indicated in the container image tag.
+
 ### PyTorch Extras
 
 - [`ghcr.io/coreweave/ml-containers/torch-extras`](https://github.com/coreweave/ml-containers/pkgs/container/ml-containers%2Ftorch-extras)

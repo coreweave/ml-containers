@@ -35,9 +35,9 @@ jobs:
     secrets: inherit
     with:
       image-name: ${{ inputs.image-name }}
-      tag: ${{ format('{0}-{1}', format('base-cuda{0}', matrix.cuda), inputs.image-tag-suffix || format('torch{0}-vision{1}-audio{2}', matrix.torch, matrix.vision, matrix.audio)) }}
-      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu22.04
-      base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu22.04
+      tag: ${{ format('{0}-{1}', format('base-cuda{0}-{1}', matrix.cuda, matrix.os), inputs.image-tag-suffix || format('torch{0}-vision{1}-audio{2}', matrix.torch, matrix.vision, matrix.audio)) }}
+      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-${{ matrix.os }}
+      base-image: nvidia/cuda:${{ matrix.cuda }}-base-${{ matrix.os }}
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
       torchaudio-version: ${{ matrix.audio }}

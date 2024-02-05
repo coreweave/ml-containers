@@ -103,14 +103,15 @@ jobs:
       - get-nightly-info
       - get-base-config
     strategy:
+      fail-fast: false
       matrix: ${{ fromJSON(needs.get-base-config.outputs.config) }}
     uses: ./.github/workflows/torch.yml
     secrets: inherit
     with:
       image-name: nightly-torch
-      tag: ${{ format('base-{0}-cuda{1}-{2}', needs.get-nightly-info.outputs.date, matrix.cuda, needs.get-nightly-info.outputs.version-string ) }}
-      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu22.04
-      base-image: nvidia/cuda:${{ matrix.cuda }}-base-ubuntu22.04
+      tag: ${{ format('base-{0}-cuda{1}-{2}-{3}', needs.get-nightly-info.outputs.date, matrix.cuda, matrix.os, needs.get-nightly-info.outputs.version-string) }}
+      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-${{ matrix.os }}
+      base-image: nvidia/cuda:${{ matrix.cuda }}-base-${{ matrix.os }}
       torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
@@ -122,14 +123,15 @@ jobs:
       - get-nightly-info
       - get-nccl-config
     strategy:
+      fail-fast: false
       matrix: ${{ fromJSON(needs.get-nccl-config.outputs.config) }}
     uses: ./.github/workflows/torch.yml
     secrets: inherit
     with:
       image-name: nightly-torch
-      tag: ${{ format('nccl-{0}-cuda{1}-nccl{2}-{3}', needs.get-nightly-info.outputs.date, matrix.image.cuda, matrix.image.nccl, needs.get-nightly-info.outputs.version-string ) }}
-      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu22.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
-      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu22.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      tag: ${{ format('nccl-{0}-cuda{1}-{2}-nccl{3}-{4}', needs.get-nightly-info.outputs.date, matrix.image.cuda, matrix.image.os, matrix.image.nccl, needs.get-nightly-info.outputs.version-string ) }}
+      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-${{ matrix.image.os }}-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-${{ matrix.image.os }}-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
       torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
