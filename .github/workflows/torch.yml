@@ -25,7 +25,7 @@ on:
       cuda-arch-support:
         required: false
         type: string
-        default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
+        default: "7.0 7.5 8.0 8.6 8.9 9.0a 9.0+PTX"
       image-name:
         required: false
         type: string
@@ -68,7 +68,7 @@ on:
         required: false
         description: "Space-separated list of CUDA architectures to support"
         type: string
-        default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
+        default: "7.0 7.5 8.0 8.6 8.9 9.0a 9.0+PTX"
       image-name:
         required: false
         description: "Custom name under which to publish the resulting container"
