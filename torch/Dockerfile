@@ -6,7 +6,7 @@ ARG BUILD_TORCH_VERSION="2.2.0"
 ARG BUILD_TORCH_VISION_VERSION="0.17.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.2.0"
 ARG BUILD_TRITON_VERSION=""
-ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0a 9.0+PTX"
+ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
 
 # Clone PyTorch repositories independently from all other build steps
