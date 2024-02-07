@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.4
-ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.0.1-devel-ubuntu20.04"
-ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu20.04"
+ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.0.1-devel-ubuntu22.04"
+ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu22.04"
 
-ARG BUILD_TORCH_VERSION="2.1.1"
-ARG BUILD_TORCH_VISION_VERSION="0.16.1"
-ARG BUILD_TORCH_AUDIO_VERSION="2.1.1"
+ARG BUILD_TORCH_VERSION="2.2.0"
+ARG BUILD_TORCH_VISION_VERSION="0.17.0"
+ARG BUILD_TORCH_AUDIO_VERSION="2.2.0"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
@@ -213,6 +213,7 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
+    --mount=type=cache,target=/ccache \
     export MAX_JOBS="$(./effective_cpu_count.sh)" && \
     cd vision && \
     mkdir build && \
@@ -248,6 +249,7 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
+    --mount=type=cache,target=/ccache \
     export MAX_JOBS="$(./effective_cpu_count.sh)" && \
     cd audio && \
     mkdir build && \
