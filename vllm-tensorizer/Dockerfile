@@ -75,14 +75,11 @@ RUN python3 -m pip install \
       "fschat[model_worker] == 0.2.30" "triton == 2.1.0" \
       -c /tmp/constraints.txt
 
-#RUN --mount=type=bind,from=vllm-builder \
-#     sed -i 's/torch==.*/torch==2.2.0/g' /tmp/requirements.txt
-    # Install the vllm wheel from the vllm-builder layer
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
-# `dive` shows that the `.cache` folder still exists in the final image,
+# `dive` shows that the `.cache` folder still exists in the final image
 RUN rm -rf /root/.cache/pip
 
 EXPOSE 8080
