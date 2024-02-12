@@ -29,6 +29,8 @@ RUN export \
       ninja-build && \
     apt-get clean
 
+RUN ldconfig
+
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip python3-packaging git ninja-build && \
@@ -47,10 +49,13 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
 
 FROM builder-base as vllm-builder
 WORKDIR /workspace
+ENV LD_LIBRARY_PATH /usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+RUN if [ -d "/usr/local/cuda" ]; then echo "Directory /usr/local/cuda exists."; else exit 1; fi
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
-    python3 -m pip wheel -w /wheels \
+    LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}" \
+      python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /tmp/frozen/constraints.txt \
       ./
@@ -70,11 +75,16 @@ RUN python3 -m pip install \
       "fschat[model_worker] == 0.2.30" "triton == 2.1.0" \
       -c /tmp/constraints.txt
 
-# Install the vllm wheel from the vllm-builder layer
+#RUN --mount=type=bind,from=vllm-builder \
+#     sed -i 's/torch==.*/torch==2.2.0/g' /tmp/requirements.txt
+    # Install the vllm wheel from the vllm-builder layer
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
+# `dive` shows that the `.cache` folder still exists in the final image,
+RUN rm -rf /root/.cache/pip
+
 EXPOSE 8080
 
-ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+#ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
