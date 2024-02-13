@@ -79,5 +79,3 @@ RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
 
 
 EXPOSE 8080
-
-#ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
