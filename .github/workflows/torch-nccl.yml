@@ -43,9 +43,9 @@ jobs:
     secrets: inherit
     with:
       image-name: ${{ inputs.image-name }}
-      tag: ${{ format('{0}-{1}', format('nccl-cuda{0}-nccl{1}', matrix.image.cuda, matrix.image.nccl), inputs.image-tag-suffix || format('torch{0}-vision{1}-audio{2}', matrix.torch, matrix.vision, matrix.audio)) }}
-      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
-      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-ubuntu20.04-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      tag: ${{ format('{0}-{1}', format('nccl-cuda{0}-{1}-nccl{2}', matrix.image.cuda, matrix.image.os, matrix.image.nccl), inputs.image-tag-suffix || format('torch{0}-vision{1}-audio{2}', matrix.torch, matrix.vision, matrix.audio)) }}
+      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-${{ matrix.image.os }}-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-cudnn8-devel-${{ matrix.image.os }}-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
       torchaudio-version: ${{ matrix.audio }}
