@@ -1,4 +1,9 @@
 ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-22.04-58a49a2-base-cuda12.1.1-torch2.1.2-vision0.16.2-audio2.1.2-flash_attn2.4.2"
+
+FROM scratch as freezer
+WORKDIR /
+COPY --chmod=755 freeze.sh /
+
 FROM ${BASE_IMAGE} as builder-base
 
 ARG MAX_JOBS=""
@@ -24,11 +29,13 @@ RUN export \
       ninja-build && \
     apt-get clean
 
-RUN apt update && \
-    apt install -y python3-pip python3-packaging \
-      git ninja-build && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel
+RUN ldconfig
 
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends \
+      python3-pip git ninja-build && \
+    apt-get clean && \
+    pip3 install -U --no-cache-dir pip packaging setuptools wheel
 
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
@@ -42,8 +49,14 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
 
 FROM builder-base as vllm-builder
 WORKDIR /workspace
-COPY --from=vllm-downloader /git/vllm /workspace
-RUN python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation --no-deps ./
+RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
+    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
+    LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}" \
+      python3 -m pip wheel -w /wheels \
+      -v --no-cache-dir --no-build-isolation --no-deps \
+      -c /tmp/frozen/constraints.txt \
+      ./
 
 WORKDIR /wheels
 
@@ -53,12 +66,16 @@ WORKDIR /workspace
 
 RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt-get clean
 
-RUN pip3 install "transformers == 4.36.0" "fschat[model_worker] == 0.2.30" "triton == 2.1.0"
+RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
+    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
 
-# Install the vllm wheel from the vllm-builder layer
+RUN python3 -m pip install --no-cache-dir \
+      "fschat[model_worker] == 0.2.30" "triton == 2.1.0" \
+      -c /tmp/constraints.txt
+
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
+    rm /tmp/constraints.txt
+
 
 EXPOSE 8080
-
-ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
