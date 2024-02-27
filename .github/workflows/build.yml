@@ -77,8 +77,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ inputs.image-name }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ inputs.image-name }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ inputs.image-name }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ inputs.image-name }},mode=max
       - uses: 8BitJonny/gh-get-current-pr@2.1.3
         id: PR
         with:
