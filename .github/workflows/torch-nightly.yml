@@ -82,7 +82,7 @@ jobs:
             >> "$GITHUB_OUTPUT";
       - name: Get date
         id: get-date
-        run: echo "date=$(date -u '+%Y.%m.%d.%H')" >> "$GITHUB_OUTPUT";
+        run: echo "date=$(date -u '+%y%m%d%H')" >> "$GITHUB_OUTPUT";
 
   get-base-config:
     name: Get torch:base Config
