@@ -107,7 +107,7 @@ RUN CODENAME="$(lsb_release -cs)" && \
     apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
     apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
     | tee /dev/tty \
-    | { ! grep -q 'W:.*timeout'; } && \
+    | { ! grep -q 'W:.*connection timed out'; } && \
     apt-get -qq install --no-install-recommends -y gcc-11 g++-11 lld-17 && \
     apt-get clean && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
@@ -300,7 +300,7 @@ RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         software-properties-common && \
     apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
     | tee /dev/tty \
-    | { ! grep -q 'W:.*timeout'; } && \
+    | { ! grep -q 'W:.*connection timed out'; } && \
     apt-get -qq install -y --no-install-recommends libstdc++6 && \
     apt-get clean
 
