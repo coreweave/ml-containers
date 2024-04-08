@@ -3,33 +3,33 @@ image:
   - cuda: 12.2.2
     os: ubuntu22.04
     nccl: 2.19.3-1
-    nccl-tests-hash: a72ab6c
+    nccl-tests-hash: 868dc3d
   - cuda: 12.1.1
     os: ubuntu22.04
     nccl: 2.18.3-1
-    nccl-tests-hash: a72ab6c
+    nccl-tests-hash: 868dc3d
   - cuda: 12.0.1
     os: ubuntu22.04
     nccl: 2.18.5-1
-    nccl-tests-hash: a72ab6c
+    nccl-tests-hash: 868dc3d
   # Ubuntu 20.04
   - cuda: 12.2.2
     os: ubuntu20.04
-    nccl: 2.19.3-1
-    nccl-tests-hash: fb613ea
+    nccl: 2.20.3-1
+    nccl-tests-hash: 868dc3d
   - cuda: 12.1.1
     os: ubuntu20.04
     nccl: 2.18.3-1
-    nccl-tests-hash: fb613ea
+    nccl-tests-hash: 868dc3d
   - cuda: 12.0.1
     os: ubuntu20.04
     nccl: 2.19.3-1
-    nccl-tests-hash: fb613ea
+    nccl-tests-hash: 868dc3d
   - cuda: 11.8.0
     os: ubuntu20.04
     nccl: 2.16.5-1
-    nccl-tests-hash: fb613ea
+    nccl-tests-hash: 868dc3d
 include:
-  - torch: 2.2.0
-    vision: 0.17.0
-    audio: 2.2.0
+  - torch: 2.2.2
+    vision: 0.17.2
+    audio: 2.2.2
