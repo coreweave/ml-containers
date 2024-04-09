@@ -13,15 +13,18 @@ jobs:
     strategy:
       matrix:
         image:
-          - cuda: 12.1.1
-            nccl: 2.18.3-1
-            nccl-tests-hash: 253a5b1
+          - cuda: 12.2.2
+            nccl: 2.20.3-1
+            nccl-tests-hash: 868dc3d
+#          - cuda: 12.1.1
+#            nccl: 2.18.3-1
+#            nccl-tests-hash: 253a5b1
           - cuda: 12.0.1
-            nccl: 2.18.3-1
-            nccl-tests-hash: 253a5b1
-          - cuda: 11.8.0
-            nccl: 2.16.2-1
-            nccl-tests-hash: 253a5b1
+            nccl: 2.19.3-1
+            nccl-tests-hash: 868dc3d
+#          - cuda: 11.8.0
+#            nccl: 2.16.2-1
+#            nccl-tests-hash: 253a5b1
         include:
           - torch: 2.0.1
             vision: 0.15.2
