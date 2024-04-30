@@ -105,13 +105,16 @@ RUN apt-get -qq update && apt-get -qq install -y \
 RUN CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
-    apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
-    | sed -e '/connection timed out/{p; Q1}' && \
-    apt-get -qq install --no-install-recommends -y gcc-11 g++-11 lld-17 && \
-    apt-get clean && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
-    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
+    SETUP_TOOLCHAIN() { \
+        apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
+        | sed -e '/connection timed out/{p; Q1}' && \
+        apt-get -qq install --no-install-recommends -y gcc-11 g++-11 lld-17 && \
+        apt-get clean && \
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
+        update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
+        update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1; \
+    } && \
+    { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; }
 
 RUN mkdir /build /build/dist
 WORKDIR /build
@@ -297,10 +300,13 @@ RUN apt-get -qq update && apt-get -qq install -y \
 
 RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         software-properties-common && \
-    apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
-    | sed -e '/connection timed out/{p; Q1}' && \
-    apt-get -qq install -y --no-install-recommends libstdc++6 && \
-    apt-get clean
+    SETUP_LIBSTDCXX() { \
+        apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
+        | sed -e '/connection timed out/{p; Q1}' && \
+        apt-get -qq install -y --no-install-recommends libstdc++6 && \
+        apt-get clean; \
+    } && \
+    { SETUP_LIBSTDCXX || { sleep "$(shuf -i10-20 -n1)" && SETUP_LIBSTDCXX; }; }
 
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_VISION_VERSION
