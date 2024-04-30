@@ -109,12 +109,12 @@ RUN CODENAME="$(lsb_release -cs)" && \
         apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
         | sed -e '/connection timed out/{p; Q1}' && \
         apt-get -qq install --no-install-recommends -y gcc-11 g++-11 lld-17 && \
-        apt-get clean && \
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
-        update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
-        update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1; \
+        apt-get clean; \
     } && \
-    { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; }
+    { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
+    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
 
 RUN mkdir /build /build/dist
 WORKDIR /build
