@@ -70,7 +70,7 @@ ARG BUILD_CCACHE_SIZE="1Gi"
 # ninja-build, ccache, and lld are optional but improve the build
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
-      libpng-dev libjpeg-dev pkg-config python3-distutils python3-numpy \
+      libpng-dev libjpeg-dev pkg-config python3-distutils \
       build-essential ninja-build && \
     apt-get clean && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
@@ -152,6 +152,7 @@ RUN chmod 755 /build/storage-info.sh
 
 ## Build torch
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
+    pip3 install --no-cache-dir --upgrade numpy && \
     cd pytorch && pip3 install --no-cache-dir -r requirements.txt
 
 # Build tool & library paths, shared for all libraries to be built
@@ -362,4 +363,5 @@ WORKDIR /usr/src/app
 
 # Install custom PyTorch wheels.
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
+    pip3 install --no-cache-dir -U numpy && \
     pip3 install --no-cache-dir -U ./*.whl
