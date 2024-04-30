@@ -119,6 +119,7 @@ RUN CODENAME="$(lsb_release -cs)" && \
 RUN mkdir /build /build/dist
 WORKDIR /build
 COPY --chmod=755 effective_cpu_count.sh .
+COPY --chmod=755 scale.sh .
 
 COPY <<-"EOT" /build/version-string.sh
     #!/bin/sh
@@ -154,7 +155,7 @@ ARG BUILD_TRITON_VERSION
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
     --mount=type=cache,target=/ccache \
     if [ -n "$BUILD_TRITON_VERSION" ]; then \
-      export MAX_JOBS="$(./effective_cpu_count.sh)" && \
+      export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
       cd triton/python && \
       python -m pip wheel -w wheels/ --no-build-isolation --no-deps -vv . && \
       pip install wheels/*.whl; \
@@ -180,7 +181,7 @@ ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 # remain the same.
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
     cd pytorch && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -217,7 +218,7 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
     cd vision && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -253,7 +254,7 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
     cd audio && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
