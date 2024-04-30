@@ -123,7 +123,7 @@ COPY --chmod=755 scale.sh .
 
 COPY <<-"EOT" /build/version-string.sh
     #!/bin/sh
-    set -x;
+    set -e;
     VERSION="$1";
 
     IS_HASH() {
@@ -142,7 +142,7 @@ RUN chmod 755 /build/version-string.sh
 
 COPY <<-"EOT" /build/storage-info.sh
     #!/bin/sh
-    set -x;
+    set -e;
     TARGET="$(realpath "$1")";
 
     STORAGE_INFO="$(df -h '--output=fstype,used,avail,pcent,target' "$TARGET")" || exit 0;
@@ -193,9 +193,9 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 5 20)" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
-    ./storage-info.sh && \
+    ./storage-info.sh . && \
     cd pytorch && \
-    ../storage-info.sh && \
+    ../storage-info.sh . && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
     ln -s /usr/bin/c++ build/c++ && \
