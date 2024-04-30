@@ -155,7 +155,7 @@ ARG BUILD_TRITON_VERSION
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
     --mount=type=cache,target=/ccache \
     if [ -n "$BUILD_TRITON_VERSION" ]; then \
-      export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
+      export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 5 20)" && \
       cd triton/python && \
       python3 -m pip wheel -w ../../dist/ --no-build-isolation --no-deps -vv . && \
       pip3 install ../../dist/*.whl; \
@@ -181,7 +181,8 @@ ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 # remain the same.
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 5 20)" && \
+    echo "MAX_JOBS: ${MAX_JOBS}" && \
     cd pytorch && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -218,7 +219,7 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 5 20)" && \
     cd vision && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -254,7 +255,7 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 5 20)" && \
     cd audio && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
