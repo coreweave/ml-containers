@@ -30,6 +30,6 @@ image:
     nccl: 2.16.5-1
     nccl-tests-hash: 868dc3d
 include:
-  - torch: 2.2.2
-    vision: 0.17.2
-    audio: 2.2.2
+  - torch: 2.3.0
+    vision: 0.18.0
+    audio: 2.3.0
