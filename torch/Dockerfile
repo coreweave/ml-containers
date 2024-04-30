@@ -157,8 +157,8 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
     if [ -n "$BUILD_TRITON_VERSION" ]; then \
       export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 2 64)" && \
       cd triton/python && \
-      python -m pip wheel -w wheels/ --no-build-isolation --no-deps -vv . && \
-      pip install wheels/*.whl; \
+      python3 -m pip wheel -w ../../dist/ --no-build-isolation --no-deps -vv . && \
+      pip3 install ../../dist/*.whl; \
     fi
 
 ARG BUILD_TORCH_VERSION
