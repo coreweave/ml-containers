@@ -140,6 +140,16 @@ COPY <<-"EOT" /build/version-string.sh
 EOT
 RUN chmod 755 /build/version-string.sh
 
+COPY <<-"EOT" /build/storage-info.sh
+    #!/bin/sh
+    set -x;
+    TARGET="$(realpath "$1")";
+
+    STORAGE_INFO="$(df -h '--output=fstype,used,avail,pcent,target' "$TARGET")" || exit 0;
+    printf 'Storage info for %s:\n%s\n' "$TARGET" "$STORAGE_INFO";
+EOT
+RUN chmod 755 /build/storage-info.sh
+
 ## Build torch
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
     cd pytorch && pip3 install --no-cache-dir -r requirements.txt
@@ -183,7 +193,9 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 5 20)" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
+    ./storage-info.sh && \
     cd pytorch && \
+    ../storage-info.sh && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
     ln -s /usr/bin/c++ build/c++ && \
