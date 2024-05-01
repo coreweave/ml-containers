@@ -16,6 +16,9 @@ on:
         required: false
         type: boolean
         default: true
+      cache-key:
+        required: false
+        type: string
 
   workflow_dispatch:
     inputs:
@@ -152,6 +155,7 @@ jobs:
       folder: torch-extras
       #tag-suffix: ${{ inputs.tag }}-flash_attn${{ matrix.flash-attn }}
       tag-suffix: ${{ inputs.tag }}
+      cache-key: ${{ inputs.cache-key }}
       build-args: |
         BASE_IMAGE=${{ inputs.base-image }}
         FLASH_ATTN_VERSION=${{ matrix.flash-attn }}

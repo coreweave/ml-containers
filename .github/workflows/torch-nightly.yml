@@ -116,6 +116,7 @@ jobs:
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
       triton-version: ${{ needs.get-nightly-info.outputs.triton-commit }}
+      cache-key: base-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
   build-nccl:
     name: Build Nightly torch:nccl
@@ -136,4 +137,5 @@ jobs:
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
       triton-version: ${{ needs.get-nightly-info.outputs.triton-commit }}
+      cache-key: nccl-cuda${{ matrix.image.cuda }}-${{ matrix.image.os }}
       build-extras: true

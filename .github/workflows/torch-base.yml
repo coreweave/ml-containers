@@ -41,4 +41,5 @@ jobs:
       torch-version: ${{ matrix.torch }}
       torchvision-version: ${{ matrix.vision }}
       torchaudio-version: ${{ matrix.audio }}
+      cache-key: base-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
