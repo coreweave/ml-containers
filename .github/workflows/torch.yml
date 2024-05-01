@@ -93,7 +93,7 @@ jobs:
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
-        BUILD_CCACHE_SIZE=250Mi
+        BUILD_CCACHE_SIZE=5Gi
         BUILDER_BASE_IMAGE=${{ inputs.builder-base-image }}
         FINAL_BASE_IMAGE=${{ inputs.base-image }}
         BUILD_TORCH_VERSION=${{ inputs.torch-version }}
