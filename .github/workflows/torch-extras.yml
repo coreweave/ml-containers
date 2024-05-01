@@ -144,7 +144,7 @@ jobs:
       # if you need to build for multiple versions of flash-attn
       # fix tag-suffix below to reflect your versions in the tag
       matrix:
-        flash-attn: [ 2.4.2 ]
+        flash-attn: [ 2.5.8 ]
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
