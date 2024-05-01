@@ -303,7 +303,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install core packages
 RUN apt-get -qq update && apt-get -qq install -y \
-      libncurses5 python3 python3-pip python3-distutils python3-numpy \
+      libncurses5 python3 python3-pip python3-distutils \
       libpng16-16 libjpeg-turbo8 libsodium23 \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
