@@ -89,7 +89,7 @@ FROM builder-base as deepspeed-builder
 # DeepSpeed build flags
 # See: https://www.deepspeed.ai/tutorials/advanced-install
 ARG DS_BUILD_OPS="1"
-ARG DS_BUILD_CCL_COMM=""
+ARG DS_BUILD_CCL_COMM="0"
 ARG DS_BUILD_CPU_ADAM=""
 ARG DS_BUILD_CPU_LION=""
 # Requires CUTLASS
