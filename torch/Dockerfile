@@ -2,9 +2,9 @@
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.0.1-devel-ubuntu22.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu22.04"
 
-ARG BUILD_TORCH_VERSION="2.2.0"
-ARG BUILD_TORCH_VISION_VERSION="0.17.0"
-ARG BUILD_TORCH_AUDIO_VERSION="2.2.0"
+ARG BUILD_TORCH_VERSION="2.3.0"
+ARG BUILD_TORCH_VISION_VERSION="0.18.0"
+ARG BUILD_TORCH_AUDIO_VERSION="2.3.0"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
@@ -70,7 +70,7 @@ ARG BUILD_CCACHE_SIZE="1Gi"
 # ninja-build, ccache, and lld are optional but improve the build
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
-      libpng-dev libjpeg-dev pkg-config python3-distutils python3-numpy \
+      libpng-dev libjpeg-dev pkg-config python3-distutils \
       build-essential ninja-build && \
     apt-get clean && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
@@ -105,10 +105,13 @@ RUN apt-get -qq update && apt-get -qq install -y \
 RUN CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
-    apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
-    | sed -e '/connection timed out/{p; Q1}' && \
-    apt-get -qq install --no-install-recommends -y gcc-11 g++-11 lld-17 && \
-    apt-get clean && \
+    SETUP_TOOLCHAIN() { \
+        apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
+        | sed -e '/connection timed out/{p; Q1}' && \
+        apt-get -qq install --no-install-recommends -y gcc-11 g++-11 lld-17 && \
+        apt-get clean; \
+    } && \
+    { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
@@ -116,10 +119,11 @@ RUN CODENAME="$(lsb_release -cs)" && \
 RUN mkdir /build /build/dist
 WORKDIR /build
 COPY --chmod=755 effective_cpu_count.sh .
+COPY --chmod=755 scale.sh .
 
 COPY <<-"EOT" /build/version-string.sh
     #!/bin/sh
-    set -x;
+    set -e;
     VERSION="$1";
 
     IS_HASH() {
@@ -136,8 +140,19 @@ COPY <<-"EOT" /build/version-string.sh
 EOT
 RUN chmod 755 /build/version-string.sh
 
+COPY <<-"EOT" /build/storage-info.sh
+    #!/bin/sh
+    set -e;
+    TARGET="$(realpath "$1")";
+
+    STORAGE_INFO="$(df -h '--output=fstype,used,avail,pcent,target' "$TARGET")" || exit 0;
+    printf 'Storage info for %s:\n%s\n' "$TARGET" "$STORAGE_INFO";
+EOT
+RUN chmod 755 /build/storage-info.sh
+
 ## Build torch
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
+    pip3 install --no-cache-dir --upgrade numpy && \
     cd pytorch && pip3 install --no-cache-dir -r requirements.txt
 
 # Build tool & library paths, shared for all libraries to be built
@@ -151,10 +166,10 @@ ARG BUILD_TRITON_VERSION
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
     --mount=type=cache,target=/ccache \
     if [ -n "$BUILD_TRITON_VERSION" ]; then \
-      export MAX_JOBS="$(./effective_cpu_count.sh)" && \
+      export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
       cd triton/python && \
-      python -m pip wheel -w wheels/ --no-build-isolation --no-deps -vv . && \
-      pip install wheels/*.whl; \
+      python3 -m pip wheel -w ../../dist/ --no-build-isolation --no-deps -vv . && \
+      pip3 install ../../dist/*.whl; \
     fi
 
 ARG BUILD_TORCH_VERSION
@@ -177,8 +192,11 @@ ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 # remain the same.
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
+    echo "MAX_JOBS: ${MAX_JOBS}" && \
+    ./storage-info.sh . && \
     cd pytorch && \
+    ../storage-info.sh . && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
     ln -s /usr/bin/c++ build/c++ && \
@@ -214,7 +232,7 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
     cd vision && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -250,7 +268,7 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./effective_cpu_count.sh)" && \
+    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
     cd audio && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -285,7 +303,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install core packages
 RUN apt-get -qq update && apt-get -qq install -y \
-      libncurses5 python3 python3-pip python3-distutils python3-numpy \
+      libncurses5 python3 python3-pip python3-distutils \
       libpng16-16 libjpeg-turbo8 libsodium23 \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
@@ -297,10 +315,13 @@ RUN apt-get -qq update && apt-get -qq install -y \
 
 RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         software-properties-common && \
-    apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
-    | sed -e '/connection timed out/{p; Q1}' && \
-    apt-get -qq install -y --no-install-recommends libstdc++6 && \
-    apt-get clean
+    SETUP_LIBSTDCXX() { \
+        apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
+        | sed -e '/connection timed out/{p; Q1}' && \
+        apt-get -qq install -y --no-install-recommends libstdc++6 && \
+        apt-get clean; \
+    } && \
+    { SETUP_LIBSTDCXX || { sleep "$(shuf -i10-20 -n1)" && SETUP_LIBSTDCXX; }; }
 
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_VISION_VERSION
@@ -342,4 +363,5 @@ WORKDIR /usr/src/app
 
 # Install custom PyTorch wheels.
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
+    pip3 install --no-cache-dir -U numpy && \
     pip3 install --no-cache-dir -U ./*.whl

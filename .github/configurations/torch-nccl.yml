@@ -15,8 +15,8 @@ image:
   # Ubuntu 20.04
   - cuda: 12.2.2
     os: ubuntu20.04
-    nccl: 2.20.3-1
-    nccl-tests-hash: 868dc3d
+    nccl: 2.21.5-1
+    nccl-tests-hash: 027b52a
   - cuda: 12.1.1
     os: ubuntu20.04
     nccl: 2.18.3-1
@@ -30,6 +30,6 @@ image:
     nccl: 2.16.5-1
     nccl-tests-hash: 868dc3d
 include:
-  - torch: 2.2.2
-    vision: 0.17.2
-    audio: 2.2.2
+  - torch: 2.3.0
+    vision: 0.18.0
+    audio: 2.3.0

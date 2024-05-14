@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.2
 
 ARG BASE_IMAGE
-ARG DEEPSPEED_VERSION="0.12.6"
-ARG FLASH_ATTN_VERSION="2.4.2"
-ARG APEX_COMMIT="2386a912164b0c5cfcd8be7a2b890fbac5607c82"
+ARG DEEPSPEED_VERSION="0.14.2"
+ARG FLASH_ATTN_VERSION="2.5.8"
+ARG APEX_COMMIT="a7de60e57f0534266841e1733262601ad76aaa74"
 ARG XFORMERS_VERSION="0.0.23.post1"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
@@ -89,7 +89,7 @@ FROM builder-base as deepspeed-builder
 # DeepSpeed build flags
 # See: https://www.deepspeed.ai/tutorials/advanced-install
 ARG DS_BUILD_OPS="1"
-ARG DS_BUILD_CCL_COMM=""
+ARG DS_BUILD_CCL_COMM="0"
 ARG DS_BUILD_CPU_ADAM=""
 ARG DS_BUILD_CPU_LION=""
 # Requires CUTLASS
