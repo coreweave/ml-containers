@@ -98,12 +98,14 @@ ARG BUILD_CCACHE_SIZE="1Gi"
 # ninja-build, ccache, and lld are optional but improve the build
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
-      libpng-dev libjpeg-dev pkg-config python3-distutils \
+      libomp5 libpng-dev libjpeg-dev pkg-config python3-distutils \
       build-essential ninja-build && \
     apt-get clean && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
+    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
+    ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
+    ldconfig
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
@@ -372,14 +374,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install core packages
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip python3-distutils \
-      libpng16-16 libjpeg-turbo8 libsodium23 \
+      libomp5 libpng16-16 libjpeg-turbo8 libsodium23 \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
+    apt-get clean && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
-    apt-get clean
+    ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
+    ldconfig
 
 RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         software-properties-common && \
