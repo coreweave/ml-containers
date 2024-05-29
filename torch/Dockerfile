@@ -74,16 +74,18 @@ ARG AOCL_VER
 ARG AOCL_URL
 
 RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
-    ./install.sh -l blis -t "${AOCL_BASE}" -i lp64 && \
-    ./install.sh -l libflame -t "${AOCL_BASE}" -i lp64 && \
+    INSTALL_LIB() { ./install.sh -l "$1" -t "${AOCL_BASE}" -i lp64; } && \
+    INSTALL_LIB blis && \
+    INSTALL_LIB libflame && \
+    INSTALL_LIB utils && \
     . ./amd-libs.cfg && \
     rm -r "${AOCL_ROOT}/include_ILP64" && \
     rm -r "${AOCL_ROOT}/lib_ILP64" && \
     ln -s "${AOCL_ROOT}/amd-libs.cfg" "${AOCL_BASE}/amd-libs.cfg" && \
     ln -s "${AOCL_ROOT}/include" "${AOCL_BASE}/include" && \
     ln -s "${AOCL_ROOT}/lib" "${AOCL_BASE}/lib" && \
-    echo "${AOCL_BASE}/lib" > "${AOCL_BASE}/aocl.conf" && \
-    chmod 644 "${AOCL_BASE}/aocl.conf" && \
+    echo "${AOCL_BASE}/lib" \
+    | install -m 0644 /dev/stdin "${AOCL_BASE}/aocl.conf" && \
     rm -r ./*
 
 
