@@ -9,6 +9,10 @@ ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
 
+ARG AOCL_BASE="/opt/aocl"
+ARG AOCL_VER="4.2.0"
+ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
+
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
 FROM alpine/git:2.40.1 as downloader-base
@@ -60,6 +64,30 @@ RUN if [ -n "${BUILD_TRITON_VERSION}" ]; then \
       mkdir triton; \
     fi;
 
+FROM alpine/curl:8.7.1 as aocl-downloader
+WORKDIR /tmp/install
+
+RUN apk add --no-cache bash
+
+ARG AOCL_BASE
+ARG AOCL_VER
+ARG AOCL_URL
+
+RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
+    INSTALL_LIB() { ./install.sh -l "$1" -t "${AOCL_BASE}" -i lp64; } && \
+    INSTALL_LIB blis && \
+    INSTALL_LIB libflame && \
+    INSTALL_LIB utils && \
+    . ./amd-libs.cfg && \
+    rm -r "${AOCL_ROOT}/include_ILP64" && \
+    rm -r "${AOCL_ROOT}/lib_ILP64" && \
+    ln -s "${AOCL_ROOT}/amd-libs.cfg" "${AOCL_BASE}/amd-libs.cfg" && \
+    ln -s "${AOCL_ROOT}/include" "${AOCL_BASE}/include" && \
+    ln -s "${AOCL_ROOT}/lib" "${AOCL_BASE}/lib" && \
+    echo "${AOCL_BASE}/lib" \
+    | install -m 0644 /dev/stdin "${AOCL_BASE}/aocl.conf" && \
+    rm -r ./*
+
 
 ## Build PyTorch on a builder image.
 FROM ${BUILDER_BASE_IMAGE} as builder
@@ -70,12 +98,14 @@ ARG BUILD_CCACHE_SIZE="1Gi"
 # ninja-build, ccache, and lld are optional but improve the build
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
-      libpng-dev libjpeg-dev pkg-config python3-distutils \
+      libomp5 libpng-dev libjpeg-dev pkg-config python3-distutils \
       build-essential ninja-build && \
     apt-get clean && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
+    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
+    ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
+    ldconfig
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
@@ -115,6 +145,37 @@ RUN CODENAME="$(lsb_release -cs)" && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
+
+# Install AOCL-BLAS and AOCL-LAPACK
+# See: https://www.amd.com/en/developer/aocl/dense.html
+ARG AOCL_BASE
+COPY --from=aocl-downloader "${AOCL_BASE}" "${AOCL_BASE}"
+
+# `ldconfig` lets the dynamic linker access AOCL libraries
+RUN install -m 0644 -t /etc/ld.so.conf.d "${AOCL_BASE}/aocl.conf" && \
+    ldconfig
+
+# These environment variables are only for the build stage,
+# and register paths to build-time AOCL resources.
+# This could alternatively be done by invoking `. "${AOCL_BASE}/amd-libs.cfg"`
+# in every RUN compilation step, but this will make sure it is never missed.
+#
+# PyTorch's logic to find LAPACK during CMake configuration
+# additionally requires its installed path to either be in:
+# - One of:
+#   - /usr/local/lib, or
+#   - /usr/lib, or
+#   - /usr/local/lib64, or
+#   - /usr/lib64, or
+#   - /usr/lib/aarch64-linux-gnu, or
+# - $LD_LIBRARY_PATH
+# While skipping $LIBRARY_PATH, and ld's normal configured paths,
+# so it is necessary to add $LD_LIBRARY_PATH here as well.
+# See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Modules/FindLAPACK.cmake#L56-L59
+ENV C_INCLUDE_PATH="${AOCL_BASE}/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCL_BASE}/include${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}" \
+    LD_LIBRARY_PATH="${AOCL_BASE}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    LIBRARY_PATH="${AOCL_BASE}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 
 RUN mkdir /build /build/dist
 WORKDIR /build
@@ -190,6 +251,19 @@ ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 #
 # This step is itself cacheable as long as the downloaded files (and ARCH_LIST)
 # remain the same.
+#
+# NB: This cannot specify BLAS=FLAME directly, because PyTorch (v2.3.0)'s code
+# to explicitly choose a BLAS implementation is missing that option
+# (See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Dependencies.cmake#L195-L266),
+# and using BLAS=blis makes it ignore the libflame LAPACK library, because
+# that triggers its FindBLIS logic rather than FindBLAS, and FindLAPACK depends
+# on a variable set only during FindBLAS (BLAS_INFO=FLAME)
+# (See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Modules/FindLAPACK.cmake#L176-L189).
+# Thus, we have to force it to use its generic FindBLAS logic,
+# and narrow it down from there by specifying WITH_BLAS=FLAME
+# (See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Modules/FindBLAS.cmake#L259-L271).
+# Without WITH_BLAS, it would detect the BLAS implementation as
+# BLAS_INFO=blis instead of BLAS_INFO=FLAME and wouldn't include LAPACK either.
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
@@ -208,7 +282,6 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
         USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
-    USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
     CUDA_HOST_COMPILER=cc \
@@ -216,8 +289,9 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     USE_NNPACK=1 \
     CC=cc \
     CXX=c++ \
-    USE_EIGEN_FOR_BLAS=ON \
-    USE_MKL=OFF \
+    USE_BLAS=1 \
+    USE_LAPACK=1 \
+    WITH_BLAS=FLAME \
     PYTORCH_BUILD_VERSION="$(../version-string.sh "$TORCH_VERSION")" \
     PYTORCH_BUILD_NUMBER=0 \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
@@ -254,8 +328,6 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     USE_NNPACK=1 \
     CC=cc \
     CXX=c++ \
-    USE_EIGEN_FOR_BLAS=ON \
-    USE_MKL=OFF \
     BUILD_VERSION="$(../version-string.sh "$TORCH_VISION_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
@@ -290,8 +362,6 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     USE_NNPACK=1 \
     CC=cc \
     CXX=c++ \
-    USE_EIGEN_FOR_BLAS=ON \
-    USE_MKL=OFF \
     BUILD_VERSION="$(../version-string.sh "$TORCH_AUDIO_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
@@ -304,14 +374,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install core packages
 RUN apt-get -qq update && apt-get -qq install -y \
       libncurses5 python3 python3-pip python3-distutils \
-      libpng16-16 libjpeg-turbo8 libsodium23 \
+      libomp5 libpng16-16 libjpeg-turbo8 libsodium23 \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
+    apt-get clean && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
-    apt-get clean
+    ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
+    ldconfig
 
 RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         software-properties-common && \
@@ -322,6 +394,15 @@ RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         apt-get clean; \
     } && \
     { SETUP_LIBSTDCXX || { sleep "$(shuf -i10-20 -n1)" && SETUP_LIBSTDCXX; }; }
+
+# Install AOCL-BLAS and AOCL-LAPACK
+# See: https://www.amd.com/en/developer/aocl/dense.html
+ARG AOCL_BASE
+COPY --from=aocl-downloader "${AOCL_BASE}" "${AOCL_BASE}"
+
+# `ldconfig` lets the dynamic linker access AOCL libraries
+RUN install -m 0644 -t /etc/ld.so.conf.d "${AOCL_BASE}/aocl.conf" && \
+    ldconfig
 
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_VISION_VERSION
