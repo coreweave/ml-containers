@@ -4,10 +4,6 @@ image:
     os: ubuntu22.04
     nccl: 2.19.3-1
     nccl-tests-hash: 85f9143
-  - cuda: 12.1.1
-    os: ubuntu22.04
-    nccl: 2.18.3-1
-    nccl-tests-hash: 85f9143
   - cuda: 12.0.1
     os: ubuntu22.04
     nccl: 2.18.5-1
@@ -16,10 +12,6 @@ image:
   - cuda: 12.2.2
     os: ubuntu20.04
     nccl: 2.21.5-1
-    nccl-tests-hash: 85f9143
-  - cuda: 12.1.1
-    os: ubuntu20.04
-    nccl: 2.18.3-1
     nccl-tests-hash: 85f9143
   - cuda: 12.0.1
     os: ubuntu20.04
