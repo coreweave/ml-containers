@@ -41,7 +41,7 @@ FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
 ARG COMMIT_HASH
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
-      https://github.com/coreweave/vllm.git && \
+      https://github.com/vllm-project/vllm.git && \
     cd vllm && \
     git checkout "${COMMIT_HASH}" && \
     git submodule update --init --recursive --jobs 8 \
