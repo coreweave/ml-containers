@@ -35,7 +35,7 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip git ninja-build && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging 'setuptools<70.0.0' wheel
+    pip3 install -U --no-cache-dir pip packaging 'setuptools<70.0.0' wheel cmake
 
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
