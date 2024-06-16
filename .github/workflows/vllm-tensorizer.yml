@@ -4,6 +4,9 @@ on:
       commit:
         description: 'Commit to build'
         required: true
+      vllm-flash-attn-version:
+        description: 'vllm-flash-attn version to build'
+        required: true
   push:
     paths:
       - "vllm-tensorizer/**"
@@ -21,3 +24,4 @@ jobs:
       tag-suffix: ${{ inputs.commit || '51602eefd38250325e541abd28f051ffd7676c3f'}}
       build-args: |
         COMMIT_HASH=${{ inputs.commit || '51602eefd38250325e541abd28f051ffd7676c3f'}}
+        VLLM_FLASH_ATTN_VERSION=${{ inputs.vllm-flash-attn-version || '2.5.9'}}
