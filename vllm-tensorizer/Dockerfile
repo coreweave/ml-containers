@@ -1,4 +1,4 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-22.04-58a49a2-base-cuda12.1.1-torch2.1.2-vision0.16.2-audio2.1.2-flash_attn2.4.2"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:696032c-base-cuda12.2.2-ubuntu22.04-torch2.3.0-vision0.18.0-audio2.3.0"
 
 FROM scratch as freezer
 WORKDIR /
@@ -6,7 +6,6 @@ COPY --chmod=755 freeze.sh /
 
 FROM ${BASE_IMAGE} as builder-base
 
-ARG MAX_JOBS=""
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
@@ -25,6 +24,7 @@ RUN export \
       libcusolver-dev-${CUDA_PACKAGE_VERSION} \
       cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
+      cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
       ninja-build && \
     apt-get clean
@@ -35,28 +35,49 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip git ninja-build && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel
+    pip3 install -U --no-cache-dir pip packaging 'setuptools<70.0.0' wheel cmake
 
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
 ARG COMMIT_HASH
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
-      https://github.com/coreweave/vllm.git && \
+      https://github.com/vllm-project/vllm.git && \
     cd vllm && \
     git checkout "${COMMIT_HASH}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
 
+FROM alpine/git:2.36.3 as vllm-flash-attn-downloader
+WORKDIR /git
+ARG VLLM_FLASH_ATTN_VERSION
+RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
+      https://github.com/vllm-project/flash-attention.git && \
+    cd flash-attention && \
+    git checkout "v${VLLM_FLASH_ATTN_VERSION}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=blob:none
+
 FROM builder-base as vllm-builder
 WORKDIR /workspace
-RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
-    --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
-    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
-    LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}" \
-      python3 -m pip wheel -w /wheels \
+
+ENV LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}"
+
+RUN --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
+    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
+
+RUN --mount=type=bind,from=vllm-flash-attn-downloader,source=/git/flash-attention,target=/workspace,rw \
+    python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /tmp/frozen/constraints.txt \
+      -c /tmp/constraints.txt \
       ./
+
+RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    pip3 install /wheels/*.whl && \
+    python3 -m pip wheel -w /wheels \
+      -v --no-cache-dir --no-build-isolation --no-deps \
+      -c /tmp/constraints.txt \
+      ./ && \
+    pip3 uninstall -y vllm-flash-attn
 
 WORKDIR /wheels
 
