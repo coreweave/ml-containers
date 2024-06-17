@@ -143,22 +143,15 @@ jobs:
   build-call:
     name: Build torch-extras via Workflow Call
     if: inputs.skip-bases-check
-    strategy:
-      # if you need to build for multiple versions of flash-attn
-      # fix tag-suffix below to reflect your versions in the tag
-      matrix:
-        flash-attn: [ 2.5.8 ]
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
-      #tag-suffix: ${{ inputs.tag }}-flash_attn${{ matrix.flash-attn }}
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
         BASE_IMAGE=${{ inputs.base-image }}
-        FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
 
   build-self:
     name: Build torch-extras via Event Trigger
@@ -166,17 +159,12 @@ jobs:
     if: needs.get-required-bases.outputs.bases-list && needs.get-required-bases.outputs.bases-list != '[]'
     strategy:
       matrix:
-        # if you need to build for multiple versions of flash-attn
-        # fix tag-suffix below to reflect your versions in the tag
-        flash-attn: [ 2.5.8 ]
         bases: ${{ fromJSON(needs.get-required-bases.outputs.bases-list) }}
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
-      #tag-suffix: ${{ matrix.bases.tag }}-flash_attn${{ matrix.flash-attn }}
       tag-suffix: ${{ matrix.bases.tag }}
       build-args: |
         BASE_IMAGE=${{ matrix.bases.image }}
-        FLASH_ATTN_VERSION=${{ matrix.flash-attn }}
