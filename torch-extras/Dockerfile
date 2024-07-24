@@ -168,6 +168,7 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     ( \
       for EXT_DIR in $(realpath -s -e \
         . \
+        hopper \
         csrc/ft_attention \
         csrc/fused_dense_lib \
         csrc/fused_softmax \
