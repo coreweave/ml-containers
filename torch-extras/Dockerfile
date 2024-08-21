@@ -30,7 +30,7 @@ WORKDIR /git
 ARG TE_VERSION
 RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       --filter=blob:none --also-filter-submodules \
-      hhttps://github.com/NVIDIA/TransformerEngine && \
+      https://github.com/NVIDIA/TransformerEngine && \
     cd TransformerEngine && \
     git checkout "v${TE_VERSION}" && \
     git submodule update --init --recursive --jobs 8 \
