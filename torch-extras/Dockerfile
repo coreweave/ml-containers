@@ -278,7 +278,8 @@ RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=Tr
        export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
        export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
        cd TransformerEngine && \
-          python3 setup.py bdist_wheel --dist-dir /wheels 
+          python3 setup.py bdist_wheel --dist-dir /wheels \
+    fi;
     #|| true && \
     #chmod 755 .eggs/cmake-*-py*.egg/cmake/data/bin/cmake && \
     #python3 setup.py bdist_wheel --dist-dir /wheels
