@@ -266,6 +266,8 @@ RUN python3 -m pip install -U --no-cache-dir \
 
 SHELL ["/bin/sh", "-c"]
 
+WORKDIR /build
+
 FROM builder-base as te-builder
 
 RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
