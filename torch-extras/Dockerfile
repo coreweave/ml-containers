@@ -32,7 +32,7 @@ RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       --filter=blob:none --also-filter-submodules \
       https://github.com/NVIDIA/TransformerEngine && \
     cd TransformerEngine && \
-    git checkout "v${TE_VERSION}" && \
+    git checkout "release_v${TE_VERSION}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
 
