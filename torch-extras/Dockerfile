@@ -264,6 +264,8 @@ RUN python3 -m pip install -U --no-cache-dir \
       xformers==${XFORMERS_VERSION} 2> \
     >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
 
+SHELL ["/bin/sh", "-c"]
+
 FROM builder-base as te-builder
 
 RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
@@ -273,9 +275,10 @@ RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=Tr
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
     export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
     cd TransformerEngine && \
-    python3 setup.py bdist_wheel --dist-dir /wheels || true && \
-    chmod 755 .eggs/cmake-*-py*.egg/cmake/data/bin/cmake && \
-    python3 setup.py bdist_wheel --dist-dir /wheels
+    python3 setup.py bdist_wheel --dist-dir /wheels 
+    #|| true && \
+    #chmod 755 .eggs/cmake-*-py*.egg/cmake/data/bin/cmake && \
+    #python3 setup.py bdist_wheel --dist-dir /wheels
 
 FROM ${BASE_IMAGE}
 
@@ -283,7 +286,6 @@ RUN apt-get -qq update && \
     apt-get install -y --no-install-recommends libaio-dev && \
     apt-get clean
 
-SHELL ["/bin/sh", "-c"]
 
 RUN --mount=type=bind,from=deepspeed-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
