@@ -31,7 +31,7 @@ ARG TE_VERSION
 RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       --filter=blob:none --also-filter-submodules \
       https://github.com/NVIDIA/TransformerEngine \
-      -b "release_v${TE_VERSION}" && \
+      -b "v${TE_VERSION}" && \
     cd TransformerEngine && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
