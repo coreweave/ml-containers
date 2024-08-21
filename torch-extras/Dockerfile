@@ -270,16 +270,16 @@ WORKDIR /build
 
 FROM builder-base as te-builder
 
+ENV CUDNN_LIB_DIR=/usr/local/cuda/lib64
+
 RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
-    if dpkg-query --status libcudnn8-dev > /dev/null 2> /dev/null; then \
        python3 -m pip install -U --no-cache-dir \
           packaging setuptools wheel pip && \
        export CC=$(realpath -e ./compiler) && \
        export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
        export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
        cd TransformerEngine && \
-          python3 setup.py bdist_wheel --dist-dir /wheels \
-    fi;
+          python3 setup.py bdist_wheel --dist-dir /wheels
     #|| true && \
     #chmod 755 .eggs/cmake-*-py*.egg/cmake/data/bin/cmake && \
     #python3 setup.py bdist_wheel --dist-dir /wheels
