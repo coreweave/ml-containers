@@ -5,7 +5,7 @@ ARG DEEPSPEED_VERSION="0.14.4"
 ARG FLASH_ATTN_VERSION="2.6.3"
 ARG APEX_COMMIT="23c1f86520e22b505e8fdfcf6298273dff2d93d8"
 ARG XFORMERS_VERSION="0.0.27.post2"
-ARG TE_VERSION="1.9"
+ARG TE_VERSION="1.9.0"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
@@ -30,9 +30,9 @@ WORKDIR /git
 ARG TE_VERSION
 RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       --filter=blob:none --also-filter-submodules \
-      https://github.com/NVIDIA/TransformerEngine && \
+      https://github.com/NVIDIA/TransformerEngine \
+      -b "release_v${TE_VERSION}" && \
     cd TransformerEngine && \
-    git checkout "release_v${TE_VERSION}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
 
