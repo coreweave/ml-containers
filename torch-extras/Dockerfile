@@ -54,7 +54,7 @@ RUN export \
       libcusolver-dev-${CUDA_PACKAGE_VERSION} \
       cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
-      cudnn9-${CUDA_MAJOR_VERSION} \
+      cudnn9-cuda${CUDA_MAJOR_VERSION} \
       libaio-dev \
       ninja-build && \
     apt-get clean
