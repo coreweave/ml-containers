@@ -34,7 +34,7 @@ RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
       -b "v${TE_VERSION}" && \
     cd TransformerEngine && \
     git submodule update --init --recursive --jobs 8 \
-      --depth 1 --filter=blob:none
+      --filter=blob:none
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
@@ -55,7 +55,6 @@ RUN export \
       cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       cudnn9-cuda-${CUDA_MAJOR_VERSION} \
-      nsight-systems-cli \
       libaio-dev \
       ninja-build && \
     apt-get clean
