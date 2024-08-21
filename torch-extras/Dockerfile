@@ -271,13 +271,14 @@ WORKDIR /build
 FROM builder-base as te-builder
 
 RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
-    python3 -m pip install -U --no-cache-dir \
-      packaging setuptools wheel pip && \
-    export CC=$(realpath -e ./compiler) && \
-    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
-    export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
-    cd TransformerEngine && \
-    python3 setup.py bdist_wheel --dist-dir /wheels 
+    if dpkg-query --status libcudnn8-dev > /dev/null 2> /dev/null; then \
+       python3 -m pip install -U --no-cache-dir \
+          packaging setuptools wheel pip && \
+       export CC=$(realpath -e ./compiler) && \
+       export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+       export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+       cd TransformerEngine && \
+          python3 setup.py bdist_wheel --dist-dir /wheels 
     #|| true && \
     #chmod 755 .eggs/cmake-*-py*.egg/cmake/data/bin/cmake && \
     #python3 setup.py bdist_wheel --dist-dir /wheels
@@ -298,4 +299,4 @@ RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=xformers-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=te-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl || true
