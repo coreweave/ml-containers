@@ -28,7 +28,7 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
 FROM alpine/git:2.36.3 as te-downloader
 WORKDIR /git
 ARG TE_VERSION
-RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
+RUN git clone --recurse-submodules --shallow-submodules -j8 \
       --filter=blob:none --also-filter-submodules \
       https://github.com/NVIDIA/TransformerEngine \
       -b "v${TE_VERSION}" && \
