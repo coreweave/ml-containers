@@ -272,6 +272,8 @@ WORKDIR /build
 FROM builder-base as te-builder
 
 ENV CUDNN_LIB_DIR=/usr/local/cuda/lib64
+ENV CUDA_BIN_PATH=/usr/local/cuda/bin
+ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
 
 RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
        python3 -m pip install -U --no-cache-dir \
