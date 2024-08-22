@@ -46,7 +46,7 @@ RUN export \
     export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
     apt-get install -y --no-install-recommends \
-      cudnn9-cuda-${CUDA_PACKAGE_VERSON} \
+      cudnn9-cuda-${CUDA_PACKAGE_VERSON} && \
     apt-get -qq update && apt-get install -y --no-install-recommends \
       cuda-nvcc-${CUDA_PACKAGE_VERSION} \
       cuda-nvml-dev-${CUDA_PACKAGE_VERSION} \
