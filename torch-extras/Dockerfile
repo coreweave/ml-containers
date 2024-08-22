@@ -45,6 +45,8 @@ RUN export \
       CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
     export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    apt-get install -y --no-install-reccomends \
+      cudnn9-cuda-${CUDA_PACKAGE_VERSON} \
     apt-get -qq update && apt-get install -y --no-install-recommends \
       cuda-nvcc-${CUDA_PACKAGE_VERSION} \
       cuda-nvml-dev-${CUDA_PACKAGE_VERSION} \
@@ -54,7 +56,6 @@ RUN export \
       libcusolver-dev-${CUDA_PACKAGE_VERSION} \
       cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
-      cudnn9-cuda-${CUDA_PACKAGE_VERSION} \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
