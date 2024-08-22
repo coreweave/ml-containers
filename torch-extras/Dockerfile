@@ -286,7 +286,7 @@ RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=Tr
        cd TransformerEngine && \
        if [ `python3 -V | cut -f 2 -d ' ' | cut -f 2 -d '.'` -lt "9" ] ; then \
        sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
-          build_tools/utils.py; fi; && \
+          build_tools/utils.py; fi && \
        python3 setup.py bdist_wheel --dist-dir /wheels
     #|| true && \
     #chmod 755 .eggs/cmake-*-py*.egg/cmake/data/bin/cmake && \
