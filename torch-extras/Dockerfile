@@ -56,6 +56,7 @@ RUN export \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       cudnn9-cuda-${CUDA_MAJOR_VERSION} \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
+      cuda-nvrtc-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
       ninja-build && \
     apt-get clean
