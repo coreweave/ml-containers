@@ -280,12 +280,13 @@ ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
 RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
        python3 -m pip install -U --no-cache-dir \
           packaging setuptools wheel pip && \
-       sed -i "s/from functools import cache/from functools import lru_cache as cache/" build_tools/utils.py && \
        export CC=$(realpath -e ./compiler) && \
        export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
        export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
        cd TransformerEngine && \
-          python3 setup.py bdist_wheel --dist-dir /wheels
+       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
+          build_tools/utils.py && \
+       python3 setup.py bdist_wheel --dist-dir /wheels
     #|| true && \
     #chmod 755 .eggs/cmake-*-py*.egg/cmake/data/bin/cmake && \
     #python3 setup.py bdist_wheel --dist-dir /wheels
