@@ -45,9 +45,9 @@ RUN export \
       CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
     export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    #apt-get install -y --no-install-recommends \
     apt-get install -y --no-install-recommends \
-      cudnn9-cuda-${CUDA_PACKAGE_VERSON} && \
-    apt-get -qq update && apt-get install -y --no-install-recommends \
+      cudnn9-cuda-${CUDA_PACKAGE_VERSON} \
       cuda-nvcc-${CUDA_PACKAGE_VERSION} \
       cuda-nvml-dev-${CUDA_PACKAGE_VERSION} \
       libcurand-dev-${CUDA_PACKAGE_VERSION} \
