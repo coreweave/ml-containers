@@ -457,8 +457,6 @@ RUN export \
 
 WORKDIR /build
 
-FROM builder-base as te-builder
-
 ENV CUDNN_LIB_DIR=/usr/local/cuda/lib64
 ENV CUDA_BIN_PATH=/usr/local/cuda/bin
 ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
