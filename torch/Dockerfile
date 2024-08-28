@@ -58,17 +58,9 @@ RUN ./clone.sh pytorch/audio audio "${BUILD_TORCH_AUDIO_VERSION}"
 # The torchaudio build requires that this directory remain a full git repository,
 # so no rm -rf audio/.git is done for this one.
 
-FROM alpine/git:2.36.3 as te-downloader
-WORKDIR /git
+FROM downloader-base as transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
-RUN git clone --recurse-submodules --shallow-submodules -j8 \
-	--filter=blob:none --also-filter-submodules \
-	https://github.com/NVIDIA/TransformerEngine \
-	b "v${BUILD_TRANSFORMERENGINE_VERSION}" && \
-    cd TransformerEngine && \
-    git submodule update --init --recursive --jobs 8 \
-	--filter=blob:none
-
+RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
 
 FROM downloader-base as triton-downloader
 ARG BUILD_TRITON_VERSION
@@ -380,6 +372,21 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
+ENV CUDNN_LIB_DIR=/usr/local/cuda/lib64
+ENV CUDA_BIN_PATH=/usr/local/cuda/bin
+ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
+
+RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
+       python3 -m pip install -U --no-cache-dir \
+          packaging setuptools wheel pip && \
+       export CC=$(realpath -e ./compiler) && \
+       export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+       export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+       cd TransformerEngine && \
+       if [ `python3 -V | cut -f 2 -d ' ' | cut -f 2 -d '.'` -lt "9" ] ; then \
+       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
+          build_tools/utils.py; fi && \
+       python3 setup.py bdist_wheel --dist-dir /build/dist
 
 ## Build the final torch image.
 FROM ${FINAL_BASE_IMAGE}
@@ -454,24 +461,6 @@ RUN export \
     apt-get clean && \
     ldconfig
 
-
-WORKDIR /build
-
-ENV CUDNN_LIB_DIR=/usr/local/cuda/lib64
-ENV CUDA_BIN_PATH=/usr/local/cuda/bin
-ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
-
-RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
-       python3 -m pip install -U --no-cache-dir \
-          packaging setuptools wheel pip && \
-       export CC=$(realpath -e ./compiler) && \
-       export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
-       export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
-       cd TransformerEngine && \
-       if [ `python3 -V | cut -f 2 -d ' ' | cut -f 2 -d '.'` -lt "9" ] ; then \
-       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
-          build_tools/utils.py; fi && \
-       python3 setup.py bdist_wheel --dist-dir /build/dist
 
 WORKDIR /usr/src/app
 
