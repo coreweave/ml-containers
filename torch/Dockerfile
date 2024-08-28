@@ -5,8 +5,10 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu22.04"
 ARG BUILD_TORCH_VERSION="2.4.0"
 ARG BUILD_TORCH_VISION_VERSION="0.19.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.4.0"
+ARG BUILD_TRANSFORMERENGINE_VERSION="1.9"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
+
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
 
 ARG AOCL_BASE="/opt/aocl"
@@ -55,6 +57,18 @@ ARG BUILD_TORCH_AUDIO_VERSION
 RUN ./clone.sh pytorch/audio audio "${BUILD_TORCH_AUDIO_VERSION}"
 # The torchaudio build requires that this directory remain a full git repository,
 # so no rm -rf audio/.git is done for this one.
+
+FROM alpine/git:2.36.3 as te-downloader
+WORKDIR /git
+ARG BUILD_TRANSFORMERENGINE_VERSION
+RUN git clone --recurse-submodules --shallow-submodules -j8 \
+	--filter=blob:none --also-filter-submodules \
+	https://github.com/NVIDIA/TransformerEngine \
+	b "v${BUILD_TRANSFORMERENGINE_VERSION}" && \
+    cd TransformerEngine && \
+    git submodule update --init --recursive --jobs 8 \
+	--filter=blob:none
+
 
 FROM downloader-base as triton-downloader
 ARG BUILD_TRITON_VERSION
@@ -439,6 +453,27 @@ RUN export \
       apt-get -qq install --no-upgrade -y "libnccl2=$NCCL_PACKAGE_VERSION"; fi; } && \
     apt-get clean && \
     ldconfig
+
+
+WORKDIR /build
+
+FROM builder-base as te-builder
+
+ENV CUDNN_LIB_DIR=/usr/local/cuda/lib64
+ENV CUDA_BIN_PATH=/usr/local/cuda/bin
+ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
+
+RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
+       python3 -m pip install -U --no-cache-dir \
+          packaging setuptools wheel pip && \
+       export CC=$(realpath -e ./compiler) && \
+       export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+       export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+       cd TransformerEngine && \
+       if [ `python3 -V | cut -f 2 -d ' ' | cut -f 2 -d '.'` -lt "9" ] ; then \
+       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
+          build_tools/utils.py; fi && \
+       python3 setup.py bdist_wheel --dist-dir /build/dist
 
 WORKDIR /usr/src/app
 

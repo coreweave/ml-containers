@@ -5,7 +5,6 @@ ARG DEEPSPEED_VERSION="0.14.4"
 ARG FLASH_ATTN_VERSION="2.6.3"
 ARG APEX_COMMIT="23c1f86520e22b505e8fdfcf6298273dff2d93d8"
 ARG XFORMERS_VERSION="0.0.27.post2"
-ARG TE_VERSION="1.9"
 
 FROM alpine/git:2.36.3 as flash-attn-downloader
 WORKDIR /git
@@ -24,17 +23,6 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
-
-FROM alpine/git:2.36.3 as te-downloader
-WORKDIR /git
-ARG TE_VERSION
-RUN git clone --recurse-submodules --shallow-submodules -j8 \
-      --filter=blob:none --also-filter-submodules \
-      https://github.com/NVIDIA/TransformerEngine \
-      -b "v${TE_VERSION}" && \
-    cd TransformerEngine && \
-    git submodule update --init --recursive --jobs 8 \
-      --filter=blob:none
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
@@ -272,27 +260,6 @@ SHELL ["/bin/sh", "-c"]
 
 WORKDIR /build
 
-FROM builder-base as te-builder
-
-ENV CUDNN_LIB_DIR=/usr/local/cuda/lib64
-ENV CUDA_BIN_PATH=/usr/local/cuda/bin
-ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
-
-RUN --mount=type=bind,from=te-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
-       python3 -m pip install -U --no-cache-dir \
-          packaging setuptools wheel pip && \
-       export CC=$(realpath -e ./compiler) && \
-       export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
-       export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
-       cd TransformerEngine && \
-       if [ `python3 -V | cut -f 2 -d ' ' | cut -f 2 -d '.'` -lt "9" ] ; then \
-       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
-          build_tools/utils.py; fi && \
-       python3 setup.py bdist_wheel --dist-dir /wheels
-    #|| true && \
-    #chmod 755 .eggs/cmake-*-py*.egg/cmake/data/bin/cmake && \
-    #python3 setup.py bdist_wheel --dist-dir /wheels
-
 FROM ${BASE_IMAGE}
 
 RUN apt-get -qq update && \
@@ -308,5 +275,3 @@ RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=xformers-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
-RUN --mount=type=bind,from=te-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl || true
