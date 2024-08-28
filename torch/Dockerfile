@@ -454,7 +454,6 @@ RUN export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
-      cudnn9-cuda-${CUDA_MAJOR_VERSION} \
       libcurand-${CUDA_PACKAGE_VERSION} \
       libcufft-${CUDA_PACKAGE_VERSION} \
       libcublas-${CUDA_PACKAGE_VERSION} \
