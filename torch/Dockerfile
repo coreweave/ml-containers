@@ -113,6 +113,16 @@ RUN apt-get -qq update && apt-get -qq install -y \
     ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
     ldconfig
 
+RUN export \
+      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
+      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
+    export \
+      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    apt-get -qq update && \
+    apt-get -qq install --no-upgrade -y \
+	cuda-nvtx-${CUDA_PACKAGE_VERSION} \
+	cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION}
+
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
     CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2-linux-x86_64.tar.xz' && \
@@ -444,6 +454,7 @@ RUN export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
+      cudnn9-cuda-${CUDA_MAJOR_VERSION} \
       libcurand-${CUDA_PACKAGE_VERSION} \
       libcufft-${CUDA_PACKAGE_VERSION} \
       libcublas-${CUDA_PACKAGE_VERSION} \
