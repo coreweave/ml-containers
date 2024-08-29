@@ -390,7 +390,6 @@ ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
        python3 -m pip install -U --no-cache-dir \
           packaging setuptools wheel pip && \
-       export CC=$(realpath -e ./compiler) && \
        export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
        export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
        cd TransformerEngine && \
