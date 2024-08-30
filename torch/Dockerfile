@@ -400,15 +400,15 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
 
 # Build TransformerEngine
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
-       python3 -m pip install -U --no-cache-dir \
-          packaging setuptools wheel pip && \
-       export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
-       export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
-       cd TransformerEngine && \
-       if [ `python3 -V | cut -f 2 -d ' ' | cut -f 2 -d '.'` -lt "9" ] ; then \
-       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
-          build_tools/utils.py; fi && \
-       python3 setup.py bdist_wheel --dist-dir /build/dist
+    python3 -m pip install -U --no-cache-dir \
+      packaging setuptools wheel pip && \
+    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+    cd TransformerEngine && \
+    if python3 -c "import sys; sys.exit(sys.version_info.minor > 8)"; then \
+      sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
+        build_tools/utils.py; \
+    fi && \
+    python3 setup.py bdist_wheel --dist-dir /build/dist
 
 ## Build the final torch image.
 FROM ${FINAL_BASE_IMAGE}
