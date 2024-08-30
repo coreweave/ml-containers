@@ -118,11 +118,23 @@ RUN export \
       CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
     export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    CHECK_VERSION() { \
+      dpkg-query --status "$1" 2>/dev/null \
+      | sed -ne 's/Version: //p' \
+      | grep .; \
+    } && \
+    LIBCUDNN_VER="$( \
+      CHECK_VERSION libcudnn8-dev || \
+      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}"; \
+    )" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
-        cudnn9-cuda-${CUDA_MAJOR_VERSION} \
-	cuda-nvtx-${CUDA_PACKAGE_VERSION} \
-	cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION}
+      cuda-nvtx-${CUDA_PACKAGE_VERSION} \
+      cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} && \
+    if [ -z "$LIBCUDNN_VER" ]; then \
+      apt-get -qq install --no-upgrade -y "cudnn9-cuda-${CUDA_MAJOR_VERSION}"; \
+    fi && \
+    apt-get clean
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
@@ -294,11 +306,11 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
-        USE_CUDNN=1 \
         USE_NCCL=1 USE_SYSTEM_NCCL=1 \
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
         USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
+    USE_CUDNN=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
     CUDA_HOST_COMPILER=cc \
@@ -331,11 +343,11 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
-        USE_CUDNN=1 \
         USE_NCCL=1 USE_SYSTEM_NCCL=1 \
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
         USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
+    USE_CUDNN=1 \
     USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
@@ -365,11 +377,11 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
-        USE_CUDNN=1 \
         USE_NCCL=1 USE_SYSTEM_NCCL=1 \
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
         USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
+    USE_CUDNN=1 \
     USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
@@ -383,10 +395,7 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
-ENV CUDNN_LIB_DIR=/usr/local/cuda/lib64
-ENV CUDA_BIN_PATH=/usr/local/cuda/bin
-ENV CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/
-
+# Build TransformerEngine
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
        python3 -m pip install -U --no-cache-dir \
           packaging setuptools wheel pip && \

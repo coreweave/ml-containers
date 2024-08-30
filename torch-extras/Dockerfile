@@ -201,6 +201,16 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
+    CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
+    CHECK_VERSION() { \
+      dpkg-query --status "$1" 2>/dev/null \
+      | sed -ne 's/Version: //p' \
+      | grep .; \
+    } && \
+    LIBCUDNN_VER="$( \
+      CHECK_VERSION libcudnn8-dev || \
+      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}"; \
+    )" && \
     export CC=$(realpath -e ./compiler) && \
     export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)" && \
     export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
@@ -224,7 +234,7 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
         --peer_memory \
         --nccl_p2p \
         --fast_bottleneck && \
-      if dpkg-query --status libcudnn8-dev > /dev/null 2> /dev/null; then \
+      if [ -n "$LIBCUDNN_VER" ]; then \
         echo \
           --bnp \
           --cudnn_gbn \
