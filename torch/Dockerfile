@@ -120,7 +120,7 @@ RUN export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
-        cudnn9-cuda-${CUDA_PACKAGE_VERSION} \
+        cudnn9-cuda-${CUDA_MAJOR_VERSION} \
 	cuda-nvtx-${CUDA_PACKAGE_VERSION} \
 	cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION}
 
