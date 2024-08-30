@@ -125,7 +125,8 @@ RUN export \
     } && \
     LIBCUDNN_VER="$( \
       CHECK_VERSION libcudnn8-dev || \
-      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}"; \
+      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
+      :; \
     )" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \

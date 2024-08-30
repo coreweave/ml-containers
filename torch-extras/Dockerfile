@@ -209,7 +209,8 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     } && \
     LIBCUDNN_VER="$( \
       CHECK_VERSION libcudnn8-dev || \
-      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}"; \
+      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
+      :; \
     )" && \
     export CC=$(realpath -e ./compiler) && \
     export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)" && \
