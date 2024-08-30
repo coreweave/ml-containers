@@ -324,9 +324,11 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     WITH_BLAS=FLAME \
     PYTORCH_BUILD_VERSION="$(../version-string.sh "$TORCH_VERSION")" \
     PYTORCH_BUILD_NUMBER=0 \
-    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all -diag-suppress 191,186,177" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
+
+ENV NVCC_APPEND_FLAGS="-diag-suppress 191,186,177"
 
 ## Build torchvision
 ARG BUILD_TORCH_VISION_VERSION
