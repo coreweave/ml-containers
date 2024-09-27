@@ -2,16 +2,8 @@
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.14.4"
-ARG FLASH_ATTN_VERSION="2.6.3"
 ARG APEX_COMMIT="23c1f86520e22b505e8fdfcf6298273dff2d93d8"
 ARG XFORMERS_VERSION="0.0.27.post2"
-
-FROM alpine/git:2.36.3 as flash-attn-downloader
-WORKDIR /git
-ARG FLASH_ATTN_VERSION
-RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
-      --filter=blob:none --also-filter-submodules \
-      https://github.com/Dao-AILab/flash-attention -b v${FLASH_ATTN_VERSION}
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -155,40 +147,6 @@ SHELL ["/bin/sh", "-c"]
 WORKDIR /wheels
 
 
-FROM builder-base as flash-attn-builder
-
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
-    python3 -m pip install -U --no-cache-dir \
-      packaging setuptools wheel pip && \
-    export CC=$(realpath -e ./compiler) \
-      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" \
-      NVCC_APPEND_FLAGS='-diag-suppress 186,177' \
-      PYTHONUNBUFFERED=1 \
-      FLASH_ATTENTION_FORCE_BUILD='TRUE' && \
-    cd flash-attention && \
-    ( \
-      for EXT_DIR in $(realpath -s -e \
-        . \
-        csrc/ft_attention \
-        csrc/fused_dense_lib \
-        csrc/fused_softmax \
-        csrc/layer_norm \
-        csrc/rotary \
-        csrc/xentropy); \
-      do \
-          cd $EXT_DIR && \
-          python3 setup.py bdist_wheel --dist-dir /wheels && \
-          cd - || \
-          exit 1; \
-      done; \
-    ) | \
-    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
-SHELL ["/bin/sh", "-c"]
-
-WORKDIR /wheels
-
-
 FROM builder-base as apex-builder
 
 RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && \
@@ -278,8 +236,6 @@ RUN apt-get -qq update && \
 
 
 RUN --mount=type=bind,from=deepspeed-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
-RUN --mount=type=bind,from=flash-attn-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
