@@ -488,5 +488,5 @@ WORKDIR /usr/src/app
 
 # Install custom PyTorch wheels.
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
-    pip3 install --no-cache-dir -U numpy && \
+    pip3 install --no-cache-dir -U numpy packaging && \
     pip3 install --no-cache-dir -U ./*.whl
