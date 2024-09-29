@@ -5,8 +5,11 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu22.04"
 ARG BUILD_TORCH_VERSION="2.4.0"
 ARG BUILD_TORCH_VISION_VERSION="0.19.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.4.0"
+ARG BUILD_TRANSFORMERENGINE_VERSION="458c7de038ed34bdaf471ced4e3162a28055def7"
+ARG BUILD_FLASH_ATTN_VERSION="2.6.3"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
+
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
 
 ARG AOCL_BASE="/opt/aocl"
@@ -56,6 +59,15 @@ RUN ./clone.sh pytorch/audio audio "${BUILD_TORCH_AUDIO_VERSION}"
 # The torchaudio build requires that this directory remain a full git repository,
 # so no rm -rf audio/.git is done for this one.
 
+FROM downloader-base as transformerengine-downloader
+ARG BUILD_TRANSFORMERENGINE_VERSION
+RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
+
+FROM downloader-base as flash-attn-downloader
+WORKDIR /git
+ARG BUILD_FLASH_ATTN_VERSION
+RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}"
+
 FROM downloader-base as triton-downloader
 ARG BUILD_TRITON_VERSION
 RUN if [ -n "${BUILD_TRITON_VERSION}" ]; then \
@@ -90,7 +102,7 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
 
 
 ## Build PyTorch on a builder image.
-FROM ${BUILDER_BASE_IMAGE} as builder
+FROM ${BUILDER_BASE_IMAGE} as builder-base
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG BUILD_CCACHE_SIZE="1Gi"
@@ -106,6 +118,30 @@ RUN apt-get -qq update && apt-get -qq install -y \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
     ldconfig
+
+RUN export \
+      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
+      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
+    export \
+      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    CHECK_VERSION() { \
+      dpkg-query --status "$1" 2>/dev/null \
+      | sed -ne 's/Version: //p' \
+      | grep .; \
+    } && \
+    LIBCUDNN_VER="$( \
+      CHECK_VERSION libcudnn8-dev || \
+      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
+      :; \
+    )" && \
+    apt-get -qq update && \
+    apt-get -qq install --no-upgrade -y \
+      cuda-nvtx-${CUDA_PACKAGE_VERSION} \
+      cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} && \
+    if [ -z "$LIBCUDNN_VER" ]; then \
+      apt-get -qq install --no-upgrade -y "cudnn9-cuda-${CUDA_MAJOR_VERSION}"; \
+    fi && \
+    apt-get clean
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
@@ -138,12 +174,13 @@ RUN CODENAME="$(lsb_release -cs)" && \
     SETUP_TOOLCHAIN() { \
         apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
         | sed -e '/connection timed out/{p; Q1}' && \
-        apt-get -qq install --no-install-recommends -y gcc-11 g++-11 lld-17 && \
+        apt-get -qq install --no-install-recommends -y gcc-11 g++-11 gfortran-11 lld-17 && \
         apt-get clean; \
     } && \
     { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
+    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
     update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
 
 # Install AOCL-BLAS and AOCL-LAPACK
@@ -181,6 +218,8 @@ RUN mkdir /build /build/dist
 WORKDIR /build
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
+COPY compiler_wrapper.f95 .
+RUN gfortran -O3 ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
 COPY <<-"EOT" /build/version-string.sh
     #!/bin/sh
@@ -277,11 +316,11 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
-        USE_CUDNN=1 \
         USE_NCCL=1 USE_SYSTEM_NCCL=1 \
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
         USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
+    USE_CUDNN=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
     CUDA_HOST_COMPILER=cc \
@@ -294,9 +333,17 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     WITH_BLAS=FLAME \
     PYTORCH_BUILD_VERSION="$(../version-string.sh "$TORCH_VERSION")" \
     PYTORCH_BUILD_NUMBER=0 \
-    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all -diag-suppress 191,186,177" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
+
+ENV NVCC_APPEND_FLAGS="-diag-suppress 191,186,177"
+
+RUN python3 -m pip install -U --no-cache-dir \
+      packaging setuptools wheel pip
+
+FROM builder-base as torchvision-builder
+RUN rm ./dist/*
 
 ## Build torchvision
 ARG BUILD_TORCH_VISION_VERSION
@@ -314,11 +361,11 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
-        USE_CUDNN=1 \
         USE_NCCL=1 USE_SYSTEM_NCCL=1 \
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
         USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
+    USE_CUDNN=1 \
     USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
@@ -331,6 +378,9 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     BUILD_VERSION="$(../version-string.sh "$TORCH_VISION_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
+
+FROM builder-base as torchaudio-builder
+RUN rm ./dist/*
 
 ## Build torchaudio
 ARG BUILD_TORCH_AUDIO_VERSION
@@ -348,11 +398,11 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
-        USE_CUDNN=1 \
         USE_NCCL=1 USE_SYSTEM_NCCL=1 \
         UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
         USE_NCCL_WITH_UCC=1 \
         USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
+    USE_CUDNN=1 \
     USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
@@ -366,6 +416,53 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
+FROM builder-base as transformerengine-builder
+RUN rm ./dist/*
+
+# Build TransformerEngine
+RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
+    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+    cd TransformerEngine && \
+    if python3 -c "import sys; sys.exit(sys.version_info.minor > 8)"; then \
+      sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
+        build_tools/utils.py; \
+    fi && \
+    python3 setup.py bdist_wheel --dist-dir /build/dist
+
+FROM builder-base as flash-attn-builder
+RUN rm ./dist/*
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
+    export CC=$(realpath -e ./compiler) \
+      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" \
+      PYTHONUNBUFFERED=1 \
+      FLASH_ATTENTION_FORCE_BUILD='TRUE' && \
+    cd flash-attention && \
+    ( \
+      for EXT_DIR in $(realpath -s -e \
+        . \
+        csrc/ft_attention \
+        csrc/fused_dense_lib \
+        csrc/fused_softmax \
+        csrc/layer_norm \
+        csrc/rotary \
+        csrc/xentropy); \
+      do \
+          cd $EXT_DIR && \
+          python3 setup.py bdist_wheel --dist-dir /build/dist && \
+          cd - || \
+          exit 1; \
+      done; \
+    ) | \
+    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
+SHELL ["/bin/sh", "-c"]
+
+FROM builder-base as builder
+COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
+COPY --link --from=torchvision-builder /build/dist/ /build/dist/
+COPY --link --from=transformerengine-builder /build/dist/ /build/dist/
+COPY --link --from=flash-attn-builder /build/dist/ /build/dist/
 
 ## Build the final torch image.
 FROM ${FINAL_BASE_IMAGE}
@@ -440,9 +537,10 @@ RUN export \
     apt-get clean && \
     ldconfig
 
+
 WORKDIR /usr/src/app
 
 # Install custom PyTorch wheels.
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
-    pip3 install --no-cache-dir -U numpy && \
+    pip3 install --no-cache-dir -U numpy packaging && \
     pip3 install --no-cache-dir -U ./*.whl

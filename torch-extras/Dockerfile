@@ -2,16 +2,8 @@
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.14.4"
-ARG FLASH_ATTN_VERSION="2.6.3"
 ARG APEX_COMMIT="23c1f86520e22b505e8fdfcf6298273dff2d93d8"
 ARG XFORMERS_VERSION="0.0.27.post2"
-
-FROM alpine/git:2.36.3 as flash-attn-downloader
-WORKDIR /git
-ARG FLASH_ATTN_VERSION
-RUN git clone --recurse-submodules --shallow-submodules -j8 --depth 1 \
-      --filter=blob:none --also-filter-submodules \
-      https://github.com/Dao-AILab/flash-attention -b v${FLASH_ATTN_VERSION}
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -24,7 +16,6 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
 
-
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
 # in the final image.
@@ -34,7 +25,8 @@ RUN export \
       CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
     export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
-    apt-get -qq update && apt-get install -y --no-install-recommends \
+    #apt-get install -y --no-install-recommends \
+    apt-get install -y --no-install-recommends \
       cuda-nvcc-${CUDA_PACKAGE_VERSION} \
       cuda-nvml-dev-${CUDA_PACKAGE_VERSION} \
       libcurand-dev-${CUDA_PACKAGE_VERSION} \
@@ -43,6 +35,8 @@ RUN export \
       libcusolver-dev-${CUDA_PACKAGE_VERSION} \
       cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
+      cuda-nvtx-${CUDA_PACKAGE_VERSION} \
+      cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
       ninja-build && \
     apt-get clean
@@ -153,40 +147,6 @@ SHELL ["/bin/sh", "-c"]
 WORKDIR /wheels
 
 
-FROM builder-base as flash-attn-builder
-
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
-    python3 -m pip install -U --no-cache-dir \
-      packaging setuptools wheel pip && \
-    export CC=$(realpath -e ./compiler) \
-      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" \
-      NVCC_APPEND_FLAGS='-diag-suppress 186,177' \
-      PYTHONUNBUFFERED=1 \
-      FLASH_ATTENTION_FORCE_BUILD='TRUE' && \
-    cd flash-attention && \
-    ( \
-      for EXT_DIR in $(realpath -s -e \
-        . \
-        csrc/ft_attention \
-        csrc/fused_dense_lib \
-        csrc/fused_softmax \
-        csrc/layer_norm \
-        csrc/rotary \
-        csrc/xentropy); \
-      do \
-          cd $EXT_DIR && \
-          python3 setup.py bdist_wheel --dist-dir /wheels && \
-          cd - || \
-          exit 1; \
-      done; \
-    ) | \
-    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
-SHELL ["/bin/sh", "-c"]
-
-WORKDIR /wheels
-
-
 FROM builder-base as apex-builder
 
 RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && \
@@ -199,6 +159,17 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
+    CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
+    CHECK_VERSION() { \
+      dpkg-query --status "$1" 2>/dev/null \
+      | sed -ne 's/Version: //p' \
+      | grep .; \
+    } && \
+    LIBCUDNN_VER="$( \
+      CHECK_VERSION libcudnn8-dev || \
+      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
+      :; \
+    )" && \
     export CC=$(realpath -e ./compiler) && \
     export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)" && \
     export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
@@ -222,7 +193,7 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
         --peer_memory \
         --nccl_p2p \
         --fast_bottleneck && \
-      if dpkg-query --status libcudnn8-dev > /dev/null 2> /dev/null; then \
+      if [ -n "$LIBCUDNN_VER" ]; then \
         echo \
           --bnp \
           --cudnn_gbn \
@@ -234,7 +205,6 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     xargs -a ../apex-extensions.conf python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation --no-deps ./
 
 WORKDIR /wheels
-
 
 FROM builder-base as xformers-builder
 
@@ -253,8 +223,10 @@ RUN python3 -m pip install -U --no-cache-dir \
       --no-binary=xformers \
       xformers==${XFORMERS_VERSION} 2> \
     >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
+
 SHELL ["/bin/sh", "-c"]
 
+WORKDIR /build
 
 FROM ${BASE_IMAGE}
 
@@ -262,9 +234,8 @@ RUN apt-get -qq update && \
     apt-get install -y --no-install-recommends libaio-dev && \
     apt-get clean
 
+
 RUN --mount=type=bind,from=deepspeed-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
-RUN --mount=type=bind,from=flash-attn-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
