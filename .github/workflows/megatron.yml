@@ -20,4 +20,4 @@ jobs:
       image-name: megatron
       folder: megatron
       build-args: |
-        BASE_IMAGE=${{ inputs.base-image }}
+        BASE_IMAGE=${{ github.event.inputs.base-image }}
