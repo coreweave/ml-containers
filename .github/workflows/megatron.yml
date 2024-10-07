@@ -4,7 +4,6 @@ on:
       base-image:
         description: 'Base image to use'
         required: true
-        default: 'ghcr.io/coreweave/ml-containers/torch-extras:bfe03aa-nccl-cuda12.4.1-ubuntu22.04-nccl2.21.5-1-torch2.4.0-vision0.19.0-audio2.4.0'
   push:
     paths:
       - "megatron/**"
@@ -14,10 +13,12 @@ on:
 
 jobs:
   build:
+    env:
+      DEFAULT_IMAGE: ghcr.io/coreweave/ml-containers/torch-extras:bfe03aa-nccl-cuda12.4.1-ubuntu22.04-nccl2.21.5-1-torch2.4.0-vision0.19.0-audio2.4.0
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
       image-name: megatron
       folder: megatron
       build-args: |
-        BASE_IMAGE=${{ github.event.inputs.base-image }}
+        BASE_IMAGE=${{ inputs.base-image || env.DEFAULT_IMAGE }}
