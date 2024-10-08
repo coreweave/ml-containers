@@ -1,0 +1,4 @@
+pyyaml==6.0.2
+regex==2024.9.11
+transformers==4.45.2
+triton==3.0.0
