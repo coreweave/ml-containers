@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
-ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.0.1-devel-ubuntu22.04"
-ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu22.04"
+ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.4.1-devel-ubuntu22.04"
+ARG FINAL_BASE_IMAGE="nvidia/cuda:12.4.1-base-ubuntu22.04"
 
 ARG BUILD_TORCH_VERSION="2.4.1"
 ARG BUILD_TORCH_VISION_VERSION="0.19.1"

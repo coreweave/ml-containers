@@ -1,15 +1,5 @@
-cuda: [ 12.4.1, 12.3.2, 12.2.2, 12.0.1, 11.8.0 ]
+cuda: [ 12.6.1, 12.4.1, 12.2.2 ]
 os: [ ubuntu22.04, ubuntu20.04 ]
-exclude:
-  # Not a supported combination
-  - cuda: 11.8.0
-    os: ubuntu22.04
-  - cuda: 11.8.0
-    os: ubuntu20.04
-  - cuda: 12.0.1
-    os: ubuntu20.04
-  - cuda: 12.0.1
-    os: ubuntu22.04
 include:
   - torch: 2.4.1
     vision: 0.19.1
