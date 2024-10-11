@@ -59,6 +59,11 @@ RUN ./clone.sh pytorch/audio audio "${BUILD_TORCH_AUDIO_VERSION}"
 # The torchaudio build requires that this directory remain a full git repository,
 # so no rm -rf audio/.git is done for this one.
 
+# torchaudio is broken for CUDA 12.5+ without this patch (as of v2.4.1)
+# See https://github.com/pytorch/audio/pull/3811
+COPY torchaudio-cu125-pr3811.patch patch
+RUN git -C audio apply --index patch && rm patch
+
 FROM downloader-base as transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
 RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
