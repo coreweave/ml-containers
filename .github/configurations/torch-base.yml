@@ -11,6 +11,6 @@ exclude:
   - cuda: 12.0.1
     os: ubuntu22.04
 include:
-  - torch: 2.4.0
-    vision: 0.19.0
-    audio: 2.4.0
+  - torch: 2.4.1
+    vision: 0.19.1
+    audio: 2.4.1
