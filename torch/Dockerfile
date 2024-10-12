@@ -124,28 +124,19 @@ RUN apt-get -qq update && apt-get -qq install -y \
     ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
     ldconfig
 
+COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+
 RUN export \
-      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
-      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
+      CUDA_MAJOR_VERSION=$(echo "$CUDA_VERSION" | cut -d. -f1) \
+      CUDA_MINOR_VERSION=$(echo "$CUDA_VERSION" | cut -d. -f2) && \
     export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
-    CHECK_VERSION() { \
-      dpkg-query --status "$1" 2>/dev/null \
-      | sed -ne 's/Version: //p' \
-      | grep .; \
-    } && \
-    LIBCUDNN_VER="$( \
-      CHECK_VERSION libcudnn8-dev || \
-      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
-      :; \
-    )" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} && \
-    if [ -z "$LIBCUDNN_VER" ]; then \
-      apt-get -qq install --no-upgrade -y "cudnn9-cuda-${CUDA_MAJOR_VERSION}"; \
-    fi && \
+    /tmp/install_cudnn.sh "${CUDA_VERSION}" dev && \
+    rm /tmp/install_cudnn.sh && \
     apt-get clean
 
 RUN mkdir /tmp/ccache-install && \
@@ -515,6 +506,7 @@ ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
+COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
 # - Don't mess with libnccl2 when using nccl-tests as a base,
 #   checked via the existence of the directory "/opt/nccl-tests".
@@ -539,6 +531,8 @@ RUN export \
     { if [ ! -d /opt/nccl-tests ]; then \
       export NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
       apt-get -qq install --no-upgrade -y "libnccl2=$NCCL_PACKAGE_VERSION"; fi; } && \
+    /tmp/install_cudnn.sh "$CUDA_VERSION" runtime && \
+    rm /tmp/install_cudnn.sh && \
     apt-get clean && \
     ldconfig
 
