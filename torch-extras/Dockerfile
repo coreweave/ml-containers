@@ -42,6 +42,12 @@ RUN export \
       ninja-build && \
     apt-get clean
 
+# Install the cuDNN dev package for building Apex
+# The cuDNN runtime is installed in the base torch image
+COPY --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+RUN /tmp/install_cudnn.sh "${CUDA_VERSION}" dev && \
+    rm /tmp/install_cudnn.sh
+
 # Add Kitware's apt repository to get a newer version of CMake
 RUN apt-get -qq update && apt-get -qq install -y \
       software-properties-common lsb-release && \
