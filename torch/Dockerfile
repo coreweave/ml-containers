@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.4
-ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.0.1-devel-ubuntu22.04"
-ARG FINAL_BASE_IMAGE="nvidia/cuda:12.0.1-base-ubuntu22.04"
+ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.4.1-devel-ubuntu22.04"
+ARG FINAL_BASE_IMAGE="nvidia/cuda:12.4.1-base-ubuntu22.04"
 
-ARG BUILD_TORCH_VERSION="2.4.0"
-ARG BUILD_TORCH_VISION_VERSION="0.19.0"
-ARG BUILD_TORCH_AUDIO_VERSION="2.4.0"
+ARG BUILD_TORCH_VERSION="2.4.1"
+ARG BUILD_TORCH_VISION_VERSION="0.19.1"
+ARG BUILD_TORCH_AUDIO_VERSION="2.4.1"
 ARG BUILD_TRANSFORMERENGINE_VERSION="458c7de038ed34bdaf471ced4e3162a28055def7"
 ARG BUILD_FLASH_ATTN_VERSION="2.6.3"
 ARG BUILD_TRITON_VERSION=""
@@ -58,6 +58,11 @@ ARG BUILD_TORCH_AUDIO_VERSION
 RUN ./clone.sh pytorch/audio audio "${BUILD_TORCH_AUDIO_VERSION}"
 # The torchaudio build requires that this directory remain a full git repository,
 # so no rm -rf audio/.git is done for this one.
+
+# torchaudio is broken for CUDA 12.5+ without this patch (as of v2.4.1)
+# See https://github.com/pytorch/audio/pull/3811
+COPY torchaudio-cu125-pr3811.patch /git/patch
+RUN git -C audio apply --index /git/patch && rm /git/patch
 
 FROM downloader-base as transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
@@ -119,28 +124,19 @@ RUN apt-get -qq update && apt-get -qq install -y \
     ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
     ldconfig
 
+COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+
 RUN export \
-      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
-      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
+      CUDA_MAJOR_VERSION=$(echo "$CUDA_VERSION" | cut -d. -f1) \
+      CUDA_MINOR_VERSION=$(echo "$CUDA_VERSION" | cut -d. -f2) && \
     export \
       CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
-    CHECK_VERSION() { \
-      dpkg-query --status "$1" 2>/dev/null \
-      | sed -ne 's/Version: //p' \
-      | grep .; \
-    } && \
-    LIBCUDNN_VER="$( \
-      CHECK_VERSION libcudnn8-dev || \
-      CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
-      :; \
-    )" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} && \
-    if [ -z "$LIBCUDNN_VER" ]; then \
-      apt-get -qq install --no-upgrade -y "cudnn9-cuda-${CUDA_MAJOR_VERSION}"; \
-    fi && \
+    /tmp/install_cudnn.sh "${CUDA_VERSION}" dev && \
+    rm /tmp/install_cudnn.sh && \
     apt-get clean
 
 RUN mkdir /tmp/ccache-install && \
@@ -510,6 +506,7 @@ ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
+COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
 # - Don't mess with libnccl2 when using nccl-tests as a base,
 #   checked via the existence of the directory "/opt/nccl-tests".
@@ -534,6 +531,8 @@ RUN export \
     { if [ ! -d /opt/nccl-tests ]; then \
       export NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
       apt-get -qq install --no-upgrade -y "libnccl2=$NCCL_PACKAGE_VERSION"; fi; } && \
+    /tmp/install_cudnn.sh "$CUDA_VERSION" runtime && \
+    rm /tmp/install_cudnn.sh && \
     apt-get clean && \
     ldconfig
 
