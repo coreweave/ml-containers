@@ -8,6 +8,7 @@ ARG BUILD_TORCH_AUDIO_VERSION="2.5.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="458c7de038ed34bdaf471ced4e3162a28055def7"
 ARG BUILD_FLASH_ATTN_VERSION="2.6.3"
 ARG BUILD_TRITON_VERSION=""
+ARG BUILD_TRITON="${BUILD_TRITON_VERSION:+1}"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
 
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
@@ -32,7 +33,7 @@ COPY <<-"EOT" /git/clone.sh
 
     # Try cloning REF as a tag prefixed with "v", otherwise fall back
     # to git checkout for commit hashes
-    CLONE --recurse-submodules --shallow-submodules --also-filter-submodules \
+    CLONE --recurse-submodules --shallow-submodules --also-filter-submodules --no-tags \
       "$REPO" -b "v$REF" "$DEST" || { \
         CLONE --no-single-branch --no-checkout "$REPO" "$DEST" && \
         git -C "$DEST" checkout "$REF" && \
@@ -69,17 +70,25 @@ ARG BUILD_TRANSFORMERENGINE_VERSION
 RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
 
 FROM downloader-base as flash-attn-downloader
-WORKDIR /git
 ARG BUILD_FLASH_ATTN_VERSION
 RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}"
 
-FROM downloader-base as triton-downloader
+FROM downloader-base as triton-version
+ENV TRITON_COMMIT_FILE='.ci/docker/ci_commit_pins/triton.txt'
+COPY --link --from=pytorch-downloader "/git/pytorch/${TRITON_COMMIT_FILE}" /git/version.txt
 ARG BUILD_TRITON_VERSION
 RUN if [ -n "${BUILD_TRITON_VERSION}" ]; then \
-      ./clone.sh openai/triton triton "${BUILD_TRITON_VERSION}"; \
+      echo "${BUILD_TRITON_VERSION}" > /git/version.txt; \
+    fi
+
+FROM downloader-base as triton-downloader
+COPY --link --from=triton-version /git/version.txt /git/version.txt
+ARG BUILD_TRITON
+RUN if [ "${BUILD_TRITON}" = '1' ]; then \
+      ./clone.sh openai/triton triton "$(cat /git/version.txt)"; \
     else \
       mkdir triton; \
-    fi;
+    fi
 
 FROM alpine/curl:8.7.1 as aocl-downloader
 WORKDIR /tmp/install
@@ -258,10 +267,10 @@ ENV CMAKE_PREFIX_PATH=/usr/bin/ \
     CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda/ \
     CUDNN_LIB_DIR=/usr/local/cuda/lib64
 
-ARG BUILD_TRITON_VERSION
+ARG BUILD_TRITON
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
     --mount=type=cache,target=/ccache \
-    if [ -n "$BUILD_TRITON_VERSION" ]; then \
+    if [ "$BUILD_TRITON" = '1' ]; then \
       export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
       cd triton/python && \
       python3 -m pip wheel -w ../../dist/ --no-build-isolation --no-deps -vv . && \
