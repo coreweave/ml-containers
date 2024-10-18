@@ -7,3 +7,4 @@ tensorboard-data-server==0.7.2
 transformers==4.45.2
 triton==3.0.0
 wandb==0.18.3
+sentencepiece==0.2.0
