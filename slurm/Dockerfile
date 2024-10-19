@@ -7,6 +7,12 @@ FROM $BASE_IMAGE
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qq update && \
         apt-get -qq install -y --no-install-recommends \
-        git
+        git \
+        aria2
+
+# UDP, TCP, HTTP
+EXPOSE 6800
+EXPOSE 6881-6889
+EXPOSE 80
 
 ADD motd /etc/motd
