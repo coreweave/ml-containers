@@ -13,6 +13,7 @@ RUN apt-get -qq update && \
 # UDP, TCP, HTTP
 EXPOSE 6800
 EXPOSE 6881-6889
+EXPOSE 6909
 EXPOSE 80
 
 ADD motd /etc/motd
