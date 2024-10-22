@@ -66,7 +66,7 @@ RUN ./clone.sh pytorch/audio audio "${BUILD_TORCH_AUDIO_VERSION}"
 COPY torchaudio-cu125-pr3811.patch /git/patch
 RUN if grep -qF '#include <float.h>' \
       'audio/src/libtorchaudio/cuctc/src/ctc_prefix_decoder_kernel_v2.cu'; \
-      then :; else git -C audio apply --index /git/patch; \
+      then :; else git -C audio apply -v --stat --apply /git/patch; \
     fi && \
     rm /git/patch
 
@@ -78,7 +78,7 @@ RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMEREN
 # See https://github.com/NVIDIA/TransformerEngine/pull/1222
 RUN if [ "${BUILD_TRANSFORMERENGINE_VERSION}" = '1.11' ]; then \
       wget 'https://github.com/NVIDIA/TransformerEngine/commit/fc034785f5e3a5bc5600a88766d9a1d75137ce77.patch' -qO- \
-      | git -C TransformerEngine apply -v --stat --apply --index -; \
+      | git -C TransformerEngine apply -v --stat --apply -; \
     fi
 
 FROM downloader-base as flash-attn-downloader
