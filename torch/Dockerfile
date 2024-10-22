@@ -5,7 +5,7 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:12.4.1-base-ubuntu22.04"
 ARG BUILD_TORCH_VERSION="2.5.0"
 ARG BUILD_TORCH_VISION_VERSION="0.20.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.5.0"
-ARG BUILD_TRANSFORMERENGINE_VERSION="458c7de038ed34bdaf471ced4e3162a28055def7"
+ARG BUILD_TRANSFORMERENGINE_VERSION="1.11"
 ARG BUILD_FLASH_ATTN_VERSION="2.6.3"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
@@ -73,6 +73,13 @@ RUN if grep -qF '#include <float.h>' \
 FROM downloader-base as transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
 RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
+
+# Include a patch commit that is sort-of part of v1.11 but isn't in their v1.11 release git tag
+# See https://github.com/NVIDIA/TransformerEngine/pull/1222
+RUN if [ "${BUILD_TRANSFORMERENGINE_VERSION}" = '1.11' ]; then \
+      wget 'https://github.com/NVIDIA/TransformerEngine/commit/fc034785f5e3a5bc5600a88766d9a1d75137ce77.patch' -qO- \
+      | git -C TransformerEngine apply -v --stat --apply --index -; \
+    fi
 
 FROM downloader-base as flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
