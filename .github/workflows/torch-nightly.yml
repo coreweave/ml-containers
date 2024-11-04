@@ -131,8 +131,8 @@ jobs:
     with:
       image-name: nightly-torch
       tag: ${{ format('nccl-{0}-cuda{1}-{2}-nccl{3}-{4}', needs.get-nightly-info.outputs.date, matrix.image.cuda, matrix.image.os, matrix.image.nccl, needs.get-nightly-info.outputs.version-string ) }}
-      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-${{ matrix.image.cudnn }}-devel-${{ matrix.image.os }}-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
-      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-${{ matrix.image.cudnn }}-devel-${{ matrix.image.os }}-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-devel-${{ matrix.image.os }}-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
+      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.image.cuda }}-devel-${{ matrix.image.os }}-nccl${{ matrix.image.nccl }}-${{ matrix.image.nccl-tests-hash }}
       torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}

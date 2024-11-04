@@ -1,37 +1,22 @@
 image:
   # Ubuntu 22.04
-  - cuda: 12.6.1
-    cudnn: cudnn
+  - cuda: 12.6.2
     os: ubuntu22.04
-    nccl: 2.23.4-1
-    nccl-tests-hash: 2ff05b2
   - cuda: 12.4.1
-    cudnn: cudnn
     os: ubuntu22.04
-    nccl: 2.23.4-1
-    nccl-tests-hash: 2ff05b2
   - cuda: 12.2.2
-    cudnn: cudnn8
     os: ubuntu22.04
-    nccl: 2.23.4-1
-    nccl-tests-hash: 2ff05b2
   # Ubuntu 20.04
-  - cuda: 12.6.1
-    cudnn: cudnn
+  - cuda: 12.6.2
     os: ubuntu20.04
-    nccl: 2.23.4-1
-    nccl-tests-hash: 2ff05b2
   - cuda: 12.4.1
-    cudnn: cudnn
     os: ubuntu20.04
-    nccl: 2.23.4-1
-    nccl-tests-hash: 2ff05b2
   - cuda: 12.2.2
-    cudnn: cudnn8
     os: ubuntu20.04
-    nccl: 2.21.5-1
-    nccl-tests-hash: 2ff05b2
 include:
   - torch: 2.5.1
     vision: 0.20.0
     audio: 2.5.0
+    image:
+      nccl: 2.23.4-1
+      nccl-tests-hash: c58f522
