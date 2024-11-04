@@ -1,6 +1,6 @@
-cuda: [ 12.6.1, 12.4.1, 12.2.2 ]
+cuda: [ 12.6.2, 12.4.1, 12.2.2 ]
 os: [ ubuntu22.04, ubuntu20.04 ]
 include:
-  - torch: 2.5.0
+  - torch: 2.5.1
     vision: 0.20.0
     audio: 2.5.0
