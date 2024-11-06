@@ -93,13 +93,13 @@ jobs:
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-base.yml
-      filter: 'del( .include[] | ( .torch, .vision, .audio ) )'
+      filter: 'del( .include[] | ( .torch, .vision, .audio ) ) | .exclude |= . + [{"os": "ubuntu20.04"}]'
   get-nccl-config:
     name: Get torch:nccl Config
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-nccl.yml
-      filter: 'del( .include[] | ( .torch, .vision, .audio ) )'
+      filter: 'del( .include[] | ( .torch, .vision, .audio ) ) | .exclude |= . + [{"os": "ubuntu20.04"}]'
 
   build-base:
     name: Build Nightly torch:base
