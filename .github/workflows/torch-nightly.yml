@@ -93,13 +93,13 @@ jobs:
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-base.yml
-      filter: del(.include)
+      filter: '.include = ( .include | del(.torch, .vision, .audio) )'
   get-nccl-config:
     name: Get torch:nccl Config
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-nccl.yml
-      filter: del(.include)
+      filter: '.include = ( .include | del(.torch, .vision, .audio) )'
 
   build-base:
     name: Build Nightly torch:base
