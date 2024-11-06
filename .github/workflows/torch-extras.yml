@@ -51,13 +51,17 @@ jobs:
   get-required-bases:
     name: Get Latest Required Base Images
     if: inputs.skip-bases-check != true
-    runs-on: ["self-hosted", "Linux"]
+    runs-on: [ cw ]
+    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.4.0'
+    defaults:
+      run:
+        shell: bash
     permissions:
       packages: read
     outputs:
       bases-list: ${{ steps.choose-bases.outputs.list }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Check if torch-extras needs to be rebuilt from previous bases
