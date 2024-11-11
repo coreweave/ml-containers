@@ -4,6 +4,7 @@ pyyaml==6.0.2
 regex==2024.9.11
 tensorboard==2.18.0
 tensorboard-data-server==0.7.2
+tensorizer==2.9.0
 transformers==4.45.2
 triton==3.0.0
 wandb==0.18.3
