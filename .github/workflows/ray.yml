@@ -1,0 +1,22 @@
+on:
+  workflow_dispatch:
+    inputs:
+      base-image:
+        description: 'Base image to use'
+        required: true
+  push:
+    paths:
+      - "ray/**"
+      - ".github/workflows/ray.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: ray
+      folder: ray
+      build-args: |
+        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/torch-extras:f575d1b-nccl-cuda12.6.1-ubuntu22.04-nccl2.23.4-1-torch2.5.0-vision0.20.0-audio2.5.0'}}
