@@ -1,0 +1,5 @@
+ray[default]
+transformers[torch]
+accelerate
+datasets
+deepspeed
