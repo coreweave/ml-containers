@@ -209,7 +209,9 @@ RUN CODENAME="$(lsb_release -cs)" && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
-    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
+    if [ "$(uname -m)" != 'aarch64' ]; then \
+      update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1; \
+    fi
 
 # Install AOCL-BLAS and AOCL-LAPACK
 # See: https://www.amd.com/en/developer/aocl/dense.html
