@@ -47,7 +47,6 @@ RUN export \
       libcublas-dev-${CUDA_PACKAGE_VERSION} \
       libcusparse-dev-${CUDA_PACKAGE_VERSION} \
       libcusolver-dev-${CUDA_PACKAGE_VERSION} \
-      cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} && \
