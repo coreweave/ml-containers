@@ -371,7 +371,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     PYTORCH_BUILD_NUMBER=0 \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all -diag-suppress 191,186,177" \
     python3 setup.py bdist_wheel --dist-dir ../dist 2>&1 \
-    | grep -v --line-buffered '^ptxas /tmp/'
+    | grep -Ev --line-buffered '^(ptxas /tmp/|copying torch/|creating build/)'
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
 
 ENV NVCC_APPEND_FLAGS="-diag-suppress 191,186,177"
