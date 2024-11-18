@@ -165,6 +165,14 @@ RUN export \
     rm /tmp/install_cudnn.sh && \
     apt-get clean
 
+# Add Kitware's apt repository to get a newer version of CMake
+RUN apt-get -qq update && apt-get -qq install -y \
+      software-properties-common lsb-release && \
+    { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
+    | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
+    apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
+    apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
+
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
     CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2.tar.xz' && \
@@ -184,14 +192,6 @@ ENV CCACHE_DIR=/ccache \
     CMAKE_C_COMPILER_LAUNCHER=ccache \
     CMAKE_CXX_COMPILER_LAUNCHER=ccache \
     CMAKE_CUDA_COMPILER_LAUNCHER=ccache
-
-# Add Kitware's apt repository to get a newer version of CMake
-RUN apt-get -qq update && apt-get -qq install -y \
-      software-properties-common lsb-release && \
-    { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
-    | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
-    apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
-    apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
 
 # Update compiler (GCC) and linker (LLD) versions
 RUN CODENAME="$(lsb_release -cs)" && \
