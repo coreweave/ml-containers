@@ -300,10 +300,11 @@ ENV CMAKE_PREFIX_PATH=/usr/bin/ \
     CUDNN_LIB_DIR=/usr/local/cuda/lib64
 
 ARG BUILD_TRITON
+ARG BUILD_MAX_JOBS=""
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
     --mount=type=cache,target=/ccache \
     if [ "$BUILD_TRITON" = '1' ]; then \
-      export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
+      export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
       cd triton/python && \
       python3 -m pip wheel -w ../../dist/ --no-build-isolation --no-deps -vv . && \
       pip3 install ../../dist/*.whl; \
@@ -340,7 +341,6 @@ ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 # (See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Modules/FindBLAS.cmake#L259-L271).
 # Without WITH_BLAS, it would detect the BLAS implementation as
 # BLAS_INFO=blis instead of BLAS_INFO=FLAME and wouldn't include LAPACK either.
-ARG BUILD_MAX_JOBS=""
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
