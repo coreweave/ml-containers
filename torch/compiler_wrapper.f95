@@ -1,13 +1,25 @@
+#ifndef WRAPPER_NATIVE
+#define WRAPPER_NATIVE "skylake"
+#endif
+
+#ifndef WRAPPER_CC
+#define WRAPPER_CC "gcc"
+#endif
+
+#ifndef WRAPPER_AVX
+#define WRAPPER_AVX "AVX256"
+#endif
+
 PROGRAM compiler_wrapper
-    ! Wraps GCC invocations,
-    ! replacing -D__AVX512__ and -D__SCALAR__ preprocessor definitions
-    ! with -D__AVX256__, and -march=native with -march=skylake,
+    ! Wraps C compiler invocations,
+    ! replacing -D__AVX512__, -D__AVX256__, and -D__SCALAR__ preprocessor definitions
+    ! with -D__<WRAPPER_AVX>__, and -march=native with -march=<WRAPPER_NATIVE>,
     ! for better reproducibility and compatibility.
     IMPLICIT NONE
     INTEGER :: i, exitcode = 0, full_length = 0, truncated = 0
     CHARACTER(len=:), ALLOCATABLE :: arg, command
     ALLOCATE(CHARACTER(len=128) :: arg)
-    command = "gcc"
+    command = WRAPPER_CC
 
     DO i = 1, COMMAND_ARGUMENT_COUNT()
         DO
@@ -22,9 +34,15 @@ PROGRAM compiler_wrapper
             END IF
         END DO
         IF (arg == "-march=native") THEN
-            command = command // " '-march=skylake'"
-        ELSE IF (arg == "-D__AVX512__" .OR. arg == "-D__SCALAR__") THEN
-            command = command // " '-D__AVX256__'"
+            command = command // (" '-march=" // WRAPPER_NATIVE // "'")
+        ELSE IF ( &
+            arg == "-D__AVX512__" &
+            .OR. arg == "-D__AVX256__" &
+            .OR. arg == "-D__SCALAR__" &
+        ) THEN
+#ifndef WRAPPER_NO_AVX
+            command = command // (" '-D__" // WRAPPER_AVX // "__'")
+#endif
         ELSE
             command = command // shell_escaped(arg)
         END IF
