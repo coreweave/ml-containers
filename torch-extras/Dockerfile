@@ -4,6 +4,7 @@ ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.14.4"
 ARG APEX_COMMIT="23c1f86520e22b505e8fdfcf6298273dff2d93d8"
 ARG XFORMERS_VERSION="0.0.28.post1"
+ARG BUILD_MAX_JOBS=""
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -94,6 +95,10 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
 
+ARG BUILD_NVCC_APPEND_FLAGS=""
+ENV NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS:$BUILD_NVCC_APPEND_FLAGS }-diag-suppress 186,177"
+ARG BUILD_MAX_JOBS
+
 
 FROM builder-base as deepspeed-builder
 # DeepSpeed build flags
@@ -153,7 +158,7 @@ RUN python3 -m pip install -U --no-cache-dir \
       do if [[ -z ${!VAR} ]]; then unset ${VAR}; fi; done; \
     } && \
     CC=$(realpath -e ./compiler) \
-      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)" \
+      MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
       python3 -m pip wheel -w /wheels \
       --no-cache-dir --no-build-isolation --no-deps \
       deepspeed==${DEEPSPEED_VERSION} && \
@@ -187,8 +192,7 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       :; \
     )" && \
     export CC=$(realpath -e ./compiler) && \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)" && \
-    export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+    export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)}" && \
     printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
         --cpp_ext \
@@ -232,7 +236,6 @@ RUN python3 -m pip install -U --no-cache-dir \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS=1 \
       PYTHONUNBUFFERED=1 \
-      NVCC_APPEND_FLAGS='-diag-suppress 186,177' \
       XFORMERS_DISABLE_FLASH_ATTN=1 \
       python3 -m pip wheel -w /wheels -v \
       --no-cache-dir --no-build-isolation --no-deps \
