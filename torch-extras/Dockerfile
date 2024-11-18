@@ -4,6 +4,7 @@ ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.14.4"
 ARG APEX_COMMIT="23c1f86520e22b505e8fdfcf6298273dff2d93d8"
 ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
+ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
 ARG XFORMERS_VERSION="0.0.28.post1"
 ARG BUILD_MAX_JOBS=""
 
@@ -115,9 +116,10 @@ ARG BUILD_MAX_JOBS
 
 FROM builder-base as deepspeed-builder
 
+ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST
 RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=ds-kernels/,rw \
     cd ds-kernels && \
-    export CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
+    export CUDA_ARCH_LIST="${DEEPSPEED_KERNELS_CUDA_ARCH_LIST}" && \
     echo "CUDA_ARCH_LIST: ${CUDA_ARCH_LIST}" && \
     python3 -m pip wheel -w /wheels \
       --no-cache-dir --no-build-isolation --no-deps . && \
