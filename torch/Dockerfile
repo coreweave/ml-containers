@@ -315,6 +315,9 @@ ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
+ARG BUILD_NVCC_APPEND_FLAGS=""
+ENV NVCC_APPEND_FLAGS="-diag-suppress 191,186,177${BUILD_NVCC_APPEND_FLAGS:+ $BUILD_NVCC_APPEND_FLAGS}"
+
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
 # so it uses the system's special NCCL and UCC installations for the build.
@@ -371,12 +374,10 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     WITH_BLAS=FLAME \
     PYTORCH_BUILD_VERSION="$(../version-string.sh "$TORCH_VERSION")" \
     PYTORCH_BUILD_NUMBER=0 \
-    TORCH_NVCC_FLAGS="-Xfatbin -compress-all -diag-suppress 191,186,177" \
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist 2>&1 \
     | grep -Ev --line-buffered '^(ptxas /tmp/|copying .+/|creating build/)'
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
-
-ENV NVCC_APPEND_FLAGS="-diag-suppress 191,186,177"
 
 RUN python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip
