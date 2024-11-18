@@ -241,7 +241,7 @@ WORKDIR /build
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
 COPY compiler_wrapper.f95 .
-RUN gfortran -O3 ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
+RUN gfortran -cpp -O3 ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
 COPY <<-"EOT" /build/version-string.sh
     #!/bin/sh
