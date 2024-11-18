@@ -354,6 +354,9 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
     ln -s /usr/bin/c++ build/c++ && \
+    if [ "$(uname -m)" = 'aarch64' ]; then \
+      export USE_PRIORITIZED_TEXT_FOR_LD=1; \
+    fi && \
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
