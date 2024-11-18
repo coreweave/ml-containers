@@ -10,6 +10,7 @@ ARG BUILD_FLASH_ATTN_VERSION="2.6.3"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
+ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST="70;80;89;90"
 
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
 
@@ -459,6 +460,9 @@ FROM builder-base as transformerengine-builder
 RUN rm ./dist/*
 
 # Build TransformerEngine
+ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
+ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
+
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-MAX_JOBS}" && \
