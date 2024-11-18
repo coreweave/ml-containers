@@ -80,7 +80,16 @@ WORKDIR /build
 # The compiler wrapper normalizes -march=native to -march=skylake
 # along with a couple other transformations before invoking GCC.
 COPY compiler_wrapper.f95 .
-RUN gfortran -cpp -O3 ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
+ARG AMD64_NATIVE_ARCH="skylake"
+ARG ARM64_NATIVE_ARCH="armv8.5-a+nopredres"
+RUN if [ "$(uname -m)" = "aarch64" ]; then \
+      NATIVE="${ARM64_NATIVE_ARCH}" && \
+      AVX='WRAPPER_NO_AVX'; \
+    else \
+      NATIVE="${AMD64_NATIVE_ARCH}" && \
+      AVX='WRAPPER_AVX=AVX256'; \
+    fi && \
+    gfortran -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
