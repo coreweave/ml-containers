@@ -346,6 +346,7 @@ ENV NVCC_APPEND_FLAGS="-diag-suppress 191,186,177${BUILD_NVCC_APPEND_FLAGS:+ $BU
 # (See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Modules/FindBLAS.cmake#L259-L271).
 # Without WITH_BLAS, it would detect the BLAS implementation as
 # BLAS_INFO=blis instead of BLAS_INFO=FLAME and wouldn't include LAPACK either.
+SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
@@ -382,6 +383,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist 2>&1 \
     | grep -Ev --line-buffered '^(ptxas /tmp/|copying .+/|creating build/)'
+SHELL ["/bin/sh", "-c"]
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
 
 RUN python3 -m pip install -U --no-cache-dir \
