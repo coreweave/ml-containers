@@ -7,6 +7,7 @@ ARG BUILD_TORCH_VISION_VERSION="0.20.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.5.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="1.11"
 ARG BUILD_FLASH_ATTN_VERSION="2.6.3"
+ARG BUILD_FLASH_ATTN_3="1"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
@@ -477,6 +478,7 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
 FROM builder-base as flash-attn-builder
 RUN rm ./dist/*
 
+ARG BUILD_FLASH_ATTN_3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     export CC=$(realpath -e ./compiler) \
@@ -485,9 +487,15 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
       FLASH_ATTENTION_FORCE_BUILD='TRUE' && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     cd flash-attention && \
+    if [ "$BUILD_FLASH_ATTN_3" = 1 ]; then \
+      FA3_DIR="hopper"; \
+    else \
+      FA3_DIR=""; \
+    fi && \
     ( \
       for EXT_DIR in $(realpath -s -e \
         . \
+        $FA3_DIR \
         csrc/ft_attention \
         csrc/fused_dense_lib \
         csrc/fused_softmax \
