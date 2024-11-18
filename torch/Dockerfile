@@ -46,7 +46,12 @@ RUN chmod 755 /git/clone.sh
 
 FROM downloader-base as pytorch-downloader
 ARG BUILD_TORCH_VERSION
+# Includes a patch for a foreach bug in PyTorch v2.5.1
 RUN ./clone.sh pytorch/pytorch pytorch "${BUILD_TORCH_VERSION}" && \
+    if [ "${BUILD_TORCH_VERSION}" = '2.5.1' ]; then \
+      wget 'https://github.com/pytorch/pytorch/commit/1cdaf1d85f5e4b3f8952fd0737a1afeb16995d13.patch' -qO- \
+      | git -C pytorch apply; \
+    fi && \
     rm -rf pytorch/.git
 
 FROM downloader-base as torchvision-downloader
