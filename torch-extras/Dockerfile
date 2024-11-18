@@ -3,6 +3,7 @@
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.14.4"
 ARG APEX_COMMIT="23c1f86520e22b505e8fdfcf6298273dff2d93d8"
+ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
 ARG XFORMERS_VERSION="0.0.28.post1"
 ARG BUILD_MAX_JOBS=""
 
@@ -16,6 +17,18 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
+
+
+FROM alpine/git:2.36.3 as ds-kernels-downloader
+WORKDIR /git
+ARG DEEPSPEED_KERNELS_COMMIT
+RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
+      https://github.com/microsoft/DeepSpeed-Kernels ds-kernels && \
+    cd ds-kernels && \
+    git checkout "${DEEPSPEED_KERNELS_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=blob:none
+
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
@@ -101,6 +114,15 @@ ARG BUILD_MAX_JOBS
 
 
 FROM builder-base as deepspeed-builder
+
+RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=ds-kernels/,rw \
+    cd ds-kernels && \
+    export CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
+    echo "CUDA_ARCH_LIST: ${CUDA_ARCH_LIST}" && \
+    python3 -m pip wheel -w /wheels \
+      --no-cache-dir --no-build-isolation --no-deps . && \
+    python3 -m pip install /wheels/*.whl
+
 # DeepSpeed build flags
 # See: https://www.deepspeed.ai/tutorials/advanced-install
 ARG DS_BUILD_OPS="1"
