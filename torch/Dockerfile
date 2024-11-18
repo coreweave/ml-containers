@@ -338,9 +338,10 @@ ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 # (See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Modules/FindBLAS.cmake#L259-L271).
 # Without WITH_BLAS, it would detect the BLAS implementation as
 # BLAS_INFO=blis instead of BLAS_INFO=FLAME and wouldn't include LAPACK either.
+ARG BUILD_MAX_JOBS=""
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
+    export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     ./storage-info.sh . && \
     cd pytorch && \
@@ -388,7 +389,8 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
+    export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
+    echo "MAX_JOBS: ${MAX_JOBS}" && \
     cd vision && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -425,7 +427,8 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
     --mount=type=cache,target=/ccache \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)" && \
+    export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
+    echo "MAX_JOBS: ${MAX_JOBS}" && \
     cd audio && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -457,6 +460,8 @@ RUN rm ./dist/*
 # Build TransformerEngine
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+    export MAX_JOBS="${BUILD_MAX_JOBS:-MAX_JOBS}" && \
+    echo "MAX_JOBS: ${MAX_JOBS}" && \
     cd TransformerEngine && \
     if python3 -c "import sys; sys.exit(sys.version_info.minor > 8)"; then \
       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
@@ -470,9 +475,10 @@ RUN rm ./dist/*
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     export CC=$(realpath -e ./compiler) \
-      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" \
+      MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)}" \
       PYTHONUNBUFFERED=1 \
       FLASH_ATTENTION_FORCE_BUILD='TRUE' && \
+    echo "MAX_JOBS: ${MAX_JOBS}" && \
     cd flash-attention && \
     ( \
       for EXT_DIR in $(realpath -s -e \
