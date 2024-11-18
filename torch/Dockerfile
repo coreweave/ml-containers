@@ -147,7 +147,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
-    ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
+    ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
 
 COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
@@ -167,10 +167,14 @@ RUN export \
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
-    CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2-linux-x86_64.tar.xz' && \
-    wget -qO - $CCACHE_URL | tar --strip-components 1 -xJf - && \
+    CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2.tar.xz' && \
+    wget -qO - "$CCACHE_URL" | tar --strip-components 1 -xJf - && \
+    mkdir build && \
+    cd build && \
+    cmake -B. -S.. -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build . --config Release && \
     make install && \
-    cd .. && \
+    cd ../.. && \
     rm -rf /tmp/ccache-install && \
     ccache -M "${BUILD_CCACHE_SIZE}" && \
     ccache -F 0
@@ -501,7 +505,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
-    ln -s libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so && \
+    ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
 
 RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
