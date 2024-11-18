@@ -370,7 +370,8 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     PYTORCH_BUILD_VERSION="$(../version-string.sh "$TORCH_VERSION")" \
     PYTORCH_BUILD_NUMBER=0 \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all -diag-suppress 191,186,177" \
-    python3 setup.py bdist_wheel --dist-dir ../dist
+    python3 setup.py bdist_wheel --dist-dir ../dist 2>&1 \
+    | grep -v '^ptxas /tmp/'
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
 
 ENV NVCC_APPEND_FLAGS="-diag-suppress 191,186,177"
@@ -475,7 +476,7 @@ RUN rm ./dist/*
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     export CC=$(realpath -e ./compiler) \
-      MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)}" \
+      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" \
       PYTHONUNBUFFERED=1 \
       FLASH_ATTENTION_FORCE_BUILD='TRUE' && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
