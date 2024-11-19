@@ -466,6 +466,7 @@ ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
+    --mount=type=cache,target=/ccache \
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-MAX_JOBS}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
@@ -482,6 +483,7 @@ RUN rm ./dist/*
 ARG BUILD_FLASH_ATTN_3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
+    --mount=type=cache,target=/ccache \
     export CC=$(realpath -e ./compiler) \
       MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" \
       PYTHONUNBUFFERED=1 \
