@@ -537,6 +537,7 @@ COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
 COPY --link --from=torchvision-builder /build/dist/ /build/dist/
 COPY --link --from=transformerengine-builder /build/dist/ /build/dist/
 COPY --link --from=flash-attn-builder /build/dist/ /build/dist/
+COPY --link --from=flash-attn-3-builder /build/dist/ /build/dist/
 
 ## Build the final torch image.
 FROM ${FINAL_BASE_IMAGE}
