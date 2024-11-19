@@ -517,7 +517,7 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
       csrc/layer_norm \
       csrc/rotary \
       csrc/xentropy); \
-    do /build/fa-build.sh "$EXT_DIR" || exit -1; done
+    do /build/fa-build.sh "$EXT_DIR" || exit 1; done
 
 FROM flash-attn-builder-base as flash-attn-3-builder
 
