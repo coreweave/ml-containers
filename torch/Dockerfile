@@ -31,16 +31,16 @@ COPY <<-"EOT" /git/clone.sh
     DEST="$2";
     REF="$3";
 
-    CLONE() { git clone -j8 --depth=1 --filter=blob:none "$@"; };
+	CLONE() { git clone -j8 --depth=1 --filter=blob:none "$@"; };
 
-    # Try cloning REF as a tag prefixed with "v", otherwise fall back
-    # to git checkout for commit hashes
-    CLONE --recurse-submodules --shallow-submodules --also-filter-submodules --no-tags \
-      "$REPO" -b "v$REF" "$DEST" || { \
-        CLONE --no-single-branch --no-checkout "$REPO" "$DEST" && \
-        git -C "$DEST" checkout "$REF" && \
-        git -C "$DEST" submodule update --init --filter=blob:none --depth=1 --recursive --jobs 8; \
-    };
+	# Try cloning REF as a tag prefixed with "v", otherwise fall back
+	# to git checkout for commit hashes
+	CLONE --recurse-submodules --shallow-submodules --also-filter-submodules --no-tags \
+	  "$REPO" -b "v$REF" "$DEST" || { \
+	    CLONE --no-single-branch --no-checkout "$REPO" "$DEST" && \
+	    git -C "$DEST" checkout "$REF" && \
+	    git -C "$DEST" submodule update --init --filter=blob:none --depth=1 --recursive --jobs 8; \
+	};
 EOT
 
 RUN chmod 755 /git/clone.sh
@@ -492,11 +492,11 @@ ENV FLASH_ATTENTION_FORCE_BUILD=TRUE
 ARG BUILD_FLASH_ATTN_MAX_JOBS=""
 
 COPY <<-"EOT" /build/fa-build.sh
-    #!/bin/bash
-    set -eo pipefail;
-    if [ -n "$1" ]; then cd "$1"; fi;
-    python3 setup.py bdist_wheel --dist-dir /build/dist \
-    | grep -Ev --line-buffered '^ptxas /tmp/|ptxas info\s*:|bytes spill stores'
+	#!/bin/bash
+	set -eo pipefail;
+	if [ -n "$1" ]; then cd "$1"; fi;
+	python3 setup.py bdist_wheel --dist-dir /build/dist \
+	| grep -Ev --line-buffered '^ptxas /tmp/|ptxas info\s*:|bytes spill stores'
 EOT
 RUN chmod 755 /build/fa-build.sh
 
