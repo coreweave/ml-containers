@@ -26,10 +26,10 @@ WORKDIR /git
 RUN git config --global advice.detachedHead false
 
 COPY <<-"EOT" /git/clone.sh
-    #!/bin/sh
-    REPO="https://github.com/$1";
-    DEST="$2";
-    REF="$3";
+	#!/bin/sh
+	REPO="https://github.com/$1";
+	DEST="$2";
+	REF="$3";
 
 	CLONE() { git clone -j8 --depth=1 --filter=blob:none "$@"; };
 
@@ -262,31 +262,31 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
     gfortran -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
 COPY <<-"EOT" /build/version-string.sh
-    #!/bin/sh
-    set -e;
-    VERSION="$1";
+	#!/bin/sh
+	set -e;
+	VERSION="$1";
 
-    IS_HASH() {
-      echo "$1" | grep -qxiEe '[0-9a-f]{40}';
-    };
+	IS_HASH() {
+	  echo "$1" | grep -qxiEe '[0-9a-f]{40}';
+	};
 
-    if IS_HASH "$VERSION"; then
-      REAL_VERSION="$(cat ./version.txt)";
-      SHORT_HASH="$(echo "$VERSION" | cut -c1-7)";
-      echo "$REAL_VERSION+$SHORT_HASH";
-    else
-      echo "$VERSION";
-    fi;
+	if IS_HASH "$VERSION"; then
+	  REAL_VERSION="$(cat ./version.txt)";
+	  SHORT_HASH="$(echo "$VERSION" | cut -c1-7)";
+	  echo "$REAL_VERSION+$SHORT_HASH";
+	else
+	  echo "$VERSION";
+	fi;
 EOT
 RUN chmod 755 /build/version-string.sh
 
 COPY <<-"EOT" /build/storage-info.sh
-    #!/bin/sh
-    set -e;
-    TARGET="$(realpath "$1")";
+	#!/bin/sh
+	set -e;
+	TARGET="$(realpath "$1")";
 
-    STORAGE_INFO="$(df -h '--output=fstype,used,avail,pcent,target' "$TARGET")" || exit 0;
-    printf 'Storage info for %s:\n%s\n' "$TARGET" "$STORAGE_INFO";
+	STORAGE_INFO="$(df -h '--output=fstype,used,avail,pcent,target' "$TARGET")" || exit 0;
+	printf 'Storage info for %s:\n%s\n' "$TARGET" "$STORAGE_INFO";
 EOT
 RUN chmod 755 /build/storage-info.sh
 
