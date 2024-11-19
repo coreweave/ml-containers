@@ -521,6 +521,10 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
 
 FROM flash-attn-builder-base as flash-attn-3-builder
 
+# Artifically sequence this build stage after the previous one
+# to prevent parallelism, because these are both very resource-intensive
+RUN --mount=type=bind,from=flash-attn-builder,source-/build,target=/build :
+
 # Build flash-attn v3
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     --mount=type=cache,target=/ccache \
