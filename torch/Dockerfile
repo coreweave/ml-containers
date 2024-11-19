@@ -496,7 +496,7 @@ COPY <<-"EOT" /build/fa-build.sh
 	set -eo pipefail;
 	if [ -n "$1" ]; then cd "$1"; fi;
 	python3 setup.py bdist_wheel --dist-dir /build/dist \
-	| grep -Ev --line-buffered '^ptxas /tmp/|ptxas info\s*:|bytes spill stores'
+	| grep -Ev --line-buffered '^ptxas (/tmp/|(info|warning)\s*:)|bytes spill stores'
 EOT
 RUN chmod 755 /build/fa-build.sh
 
