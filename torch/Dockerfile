@@ -7,7 +7,7 @@ ARG BUILD_TORCH_VISION_VERSION="0.20.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.5.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="1.12"
 ARG BUILD_FLASH_ATTN_VERSION="2.6.3"
-ARG BUILD_FLASH_ATTN_3="1"
+ARG BUILD_FLASH_ATTN_3_VERSION="2.7.0.post2"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6 8.9 9.0+PTX"
@@ -84,6 +84,14 @@ RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMEREN
 FROM downloader-base as flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
 RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}"
+
+FROM downloader-base as flash-attn-3-downloader
+ARG BUILD_FLASH_ATTN_3_VERSION
+RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
+      ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}"; \
+    else \
+      mkdir flash-attention; \
+    fi
 
 FROM downloader-base as triton-version
 ENV TRITON_COMMIT_FILE='.ci/docker/ci_commit_pins/triton.txt'
@@ -477,43 +485,52 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     fi && \
     python3 setup.py bdist_wheel --dist-dir /build/dist
 
-FROM builder-base as flash-attn-builder
+FROM builder-base as flash-attn-builder-base
 RUN rm ./dist/*
+ENV PYTHONUNBUFFERED=1
+ENV FLASH_ATTENTION_FORCE_BUILD=TRUE
+ARG BUILD_FLASH_ATTN_MAX_JOBS=""
 
-ARG BUILD_FLASH_ATTN_3
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+COPY <<-"EOT" /build/fa-build.sh
+    #!/bin/bash
+    set -eo pipefail;
+    if [ -n "$1" ]; then cd "$1"; fi;
+    python3 setup.py bdist_wheel --dist-dir /build/dist \
+    | grep -Ev --line-buffered '^ptxas /tmp/|ptxas info\s*:|bytes spill stores'
+EOT
+RUN chmod 755 /build/fa-build.sh
+
+FROM flash-attn-builder-base as flash-attn-builder
+
+# Build flash-attn
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     --mount=type=cache,target=/ccache \
     export CC=$(realpath -e ./compiler) \
-      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)" \
-      PYTHONUNBUFFERED=1 \
-      FLASH_ATTENTION_FORCE_BUILD='TRUE' && \
+      MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     cd flash-attention && \
-    if [ "$BUILD_FLASH_ATTN_3" = 1 ]; then \
-      FA3_DIR="hopper"; \
-    else \
-      FA3_DIR=""; \
+    for EXT_DIR in $(realpath -s -e \
+      . \
+      csrc/ft_attention \
+      csrc/fused_dense_lib \
+      csrc/fused_softmax \
+      csrc/layer_norm \
+      csrc/rotary \
+      csrc/xentropy); \
+    do /build/fa-build.sh; done
+
+FROM flash-attn-builder-base as flash-attn-3-builder
+
+# Build flash-attn v3
+RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
+    --mount=type=cache,target=/ccache \
+    if [ ! -d flash-attention/hopper ]; then \
+      echo "Not compiling flash-attn v3" && exit 0; \
     fi && \
-    ( \
-      for EXT_DIR in $(realpath -s -e \
-        . \
-        $FA3_DIR \
-        csrc/ft_attention \
-        csrc/fused_dense_lib \
-        csrc/fused_softmax \
-        csrc/layer_norm \
-        csrc/rotary \
-        csrc/xentropy); \
-      do \
-          cd $EXT_DIR && \
-          python3 setup.py bdist_wheel --dist-dir /build/dist && \
-          cd - || \
-          exit 1; \
-      done; \
-    ) | \
-    grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores'
-SHELL ["/bin/sh", "-c"]
+    export CC=$(realpath -e ./compiler) \
+      MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
+    echo "MAX_JOBS: ${MAX_JOBS}" && \
+    /build/fa-build.sh flash-attention/hopper
 
 FROM builder-base as builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
