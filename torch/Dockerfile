@@ -477,7 +477,7 @@ ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
     --mount=type=cache,target=/ccache \
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
-    export MAX_JOBS="${BUILD_MAX_JOBS:-MAX_JOBS}" && \
+    export MAX_JOBS="${BUILD_MAX_JOBS:-$MAX_JOBS}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     cd TransformerEngine && \
     if python3 -c "import sys; sys.exit(sys.version_info.minor > 8)"; then \
