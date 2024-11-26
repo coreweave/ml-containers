@@ -108,7 +108,7 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
 
-ARG BUILD_NVCC_APPEND_FLAGS=""
+ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=compute_90a"
 ENV NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS:+$BUILD_NVCC_APPEND_FLAGS }-diag-suppress 186,177"
 ARG BUILD_MAX_JOBS
 
