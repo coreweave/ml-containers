@@ -627,3 +627,51 @@ WORKDIR /usr/src/app
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
     pip3 install --no-cache-dir -U numpy packaging && \
     pip3 install --no-cache-dir -U ./*.whl
+
+# Make a symlink to flash-attn v3 where TransformerEngine expects it,
+# and modify the installation record so that pip uninstall knows how to
+# fully remove it.
+RUN <<-"EOT"
+	#!/bin/env python3
+	from base64 import urlsafe_b64encode as b64
+	from hashlib import sha256
+	from importlib import metadata
+	from pathlib import Path
+	from py_compile import compile
+
+	dist = metadata.distribution("flashattn-hopper")
+	p = dist.locate_file("flash_attn_interface.py")
+	print("flash_attn_interface:", p)
+	root = p.parent
+
+	if not p.exists():
+	    raise SystemExit("flash_attn_interface not found")
+	if not p.is_file():
+	    raise SystemExit("flash_attn_interface path is not a file")
+
+	d = root / "flashattn_hopper"
+	if d.exists():
+	    raise SystemExit(f'"{d}" already exists')
+
+	d.mkdir(mode=0o755, parents=False, exist_ok=False)
+	new = d / p.name
+	new.symlink_to(p)
+	print(f"Created new symlink at {new}")
+
+	compiled = Path(compile(new))
+
+
+	def record_entry(path: Path) -> str:
+	    content = path.read_bytes()
+	    digest = b64(sha256(content).digest()).rstrip(b"=").decode()
+	    package_path = path.relative_to(root).as_posix()
+	    return f"{package_path},sha256={digest},{len(content):d}\r\n"
+
+
+	for f in dist.files:
+	    if f.match("flashattn?hopper-*.dist-info/RECORD"):
+	        with f.locate().open("a", encoding="utf-8", newline="") as record:
+	            for added in (new, compiled):
+	                record.write(record_entry(added))
+	        break
+EOT
