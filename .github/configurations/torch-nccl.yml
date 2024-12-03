@@ -5,4 +5,4 @@ include:
     vision: 0.20.0
     audio: 2.5.0
     nccl: 2.23.4-1
-    nccl-tests-hash: c58f522
+    nccl-tests-hash: 3ef8839
