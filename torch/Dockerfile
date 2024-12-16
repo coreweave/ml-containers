@@ -631,7 +631,7 @@ RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
 # Make a symlink to flash-attn v3 where TransformerEngine expects it,
 # and modify the installation record so that pip uninstall knows how to
 # fully remove it.
-RUN <<-"EOT"
+RUN <<-"EOT" python3
 	#!/bin/env python3
 	from base64 import urlsafe_b64encode as b64
 	from hashlib import sha256
