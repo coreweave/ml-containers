@@ -197,13 +197,16 @@ ENV CCACHE_DIR=/ccache \
     CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
 # Update compiler (GCC) and linker (LLD) versions
-RUN CODENAME="$(lsb_release -cs)" && \
+RUN LLVM_VERSION='18' && \
+    CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-    apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
+    apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
     SETUP_TOOLCHAIN() { \
         apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
         | sed -e '/connection timed out/{p; Q1}' && \
-        apt-get -qq install --no-install-recommends -y gcc-11 g++-11 gfortran-11 lld-17 && \
+        apt-get -qq install --no-install-recommends -y \
+          gcc-11 g++-11 gfortran-11 \
+          "lld-$LLVM_VERSION" "libomp-$LLVM_VERSION-dev" && \
         apt-get clean; \
     } && \
     { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
@@ -211,7 +214,7 @@ RUN CODENAME="$(lsb_release -cs)" && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
     if [ "$(uname -m)" != 'aarch64' ]; then \
-      update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1; \
+      update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1; \
     fi
 
 # Install AOCL-BLAS and AOCL-LAPACK
@@ -563,7 +566,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
     ldconfig
 
 RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
-        software-properties-common && \
+        software-properties-common lsb-release && \
     SETUP_LIBSTDCXX() { \
         apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
         | sed -e '/connection timed out/{p; Q1}' && \
@@ -571,6 +574,13 @@ RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         apt-get clean; \
     } && \
     { SETUP_LIBSTDCXX || { sleep "$(shuf -i10-20 -n1)" && SETUP_LIBSTDCXX; }; }
+
+RUN LLVM_VERSION='18' && \
+    CODENAME="$(lsb_release -cs)" && \
+    wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
+    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
+    apt-get -qq install -y --no-install-recommends "libomp5-$LLVM_VERSION" && \
+    apt-get clean
 
 # Install AOCL-BLAS and AOCL-LAPACK
 # See: https://www.amd.com/en/developer/aocl/dense.html

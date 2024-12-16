@@ -72,18 +72,15 @@ RUN apt-get -qq update && apt-get -qq install -y \
 
 # Update compiler (GCC) and linker (LLD) versions
 # gfortran-11 is just for compiler_wrapper.f95
-RUN CODENAME="$(lsb_release -cs)" && \
-    wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
-    apt-add-repository -y ppa:ubuntu-toolchain-r/test && \
+RUN LLVM_VERSION='18' && \
     apt-get -qq update && apt-get -qq install --no-install-recommends -y \
-      gcc-11 g++-11 gfortran-11 lld-17 && \
+      gcc-11 g++-11 gfortran-11 "lld-$LLVM_VERSION" && \
     apt-get clean && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install \
       /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
-    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
+    update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1
 
 RUN mkdir /wheels /build
 WORKDIR /build
