@@ -262,7 +262,7 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
       NATIVE="WRAPPER_NATIVE=\"${AMD64_NATIVE_ARCH}\"" && \
       AVX='WRAPPER_AVX="AVX256"'; \
     fi && \
-    gfortran -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
+    gfortran -ffree-line-length-512 -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
 COPY <<-"EOT" /build/version-string.sh
 	#!/bin/sh
