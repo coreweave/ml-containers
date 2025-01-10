@@ -1,5 +1,5 @@
 cuda: [ 12.6.3, 12.4.1 ]
-os: [ ubuntu22.04, ubuntu20.04 ]
+os: [ ubuntu22.04 ]
 include:
   - torch: 2.5.1
     vision: 0.20.0
