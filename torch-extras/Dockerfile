@@ -106,7 +106,11 @@ COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=compute_90a"
-ENV NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS:+$BUILD_NVCC_APPEND_FLAGS }-diag-suppress 186,177"
+RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
+    case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
+      FLAGS="${FLAGS} -gencode=arch=compute_100,code=[sm_100,compute_100]" ;; \
+    esac && \
+    echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 ARG BUILD_MAX_JOBS
 
 
@@ -114,6 +118,7 @@ FROM builder-base as deepspeed-builder
 
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST
 RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=ds-kernels/,rw \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     cd ds-kernels && \
     export CUDA_ARCH_LIST="${DEEPSPEED_KERNELS_CUDA_ARCH_LIST}" && \
     echo "CUDA_ARCH_LIST: ${CUDA_ARCH_LIST}" && \
@@ -146,8 +151,9 @@ ARG DS_BUILD_AIO=""
 ARG DEEPSPEED_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN python3 -m pip install -U --no-cache-dir \
-      setuptools wheel pip deepspeed-kernels py-cpuinfo && \
+RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    python3 -m pip install -U --no-cache-dir \
+      setuptools wheel pip py-cpuinfo && \
     if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
       # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
       # requirement for C++17 (as of DeepSpeed 0.10.1).
@@ -198,6 +204,7 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 # --distributed_adam, --distributed_lamb, and --group_norm aren't documented
 # in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
@@ -251,7 +258,8 @@ FROM builder-base as xformers-builder
 ARG XFORMERS_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN python3 -m pip install -U --no-cache-dir \
+RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS=1 \

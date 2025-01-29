@@ -332,12 +332,13 @@ ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
-ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a -gencode=arch=compute_100,code=[sm_100,compute_100]"
-# Remove compute_100 build if NV_CUDA_LIB_VERSION doesn't match 12.[89].*
-ARG BUILD_NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS}:::${NV_CUDA_LIB_VERSION}"
-ARG BUILD_NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS%:::12.[89].*}"
-ARG BUILD_NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS% -gencode=arch=compute_100,code=\[sm_100,compute_100\]:::*}"
-ENV NVCC_APPEND_FLAGS="-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${BUILD_NVCC_APPEND_FLAGS:+ $BUILD_NVCC_APPEND_FLAGS}"
+ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
+# Add compute_100 build if NV_CUDA_LIB_VERSION matches 12.[89].*
+RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
+    case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
+      FLAGS="${FLAGS} -gencode=arch=compute_100,code=[sm_100,compute_100]" ;; \
+    esac && \
+    echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
@@ -370,6 +371,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     ./storage-info.sh . && \
     cd pytorch && \
@@ -422,6 +424,8 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd vision && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -460,6 +464,8 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd audio && \
     mkdir build && \
     ln -s /usr/bin/cc build/cc && \
@@ -497,6 +503,8 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$MAX_JOBS}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd TransformerEngine && \
     if python3 -c "import sys; sys.exit(sys.version_info.minor > 8)"; then \
       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
@@ -527,6 +535,8 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     export CC=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd flash-attention && \
     for EXT_DIR in $(realpath -s -e \
       . \
@@ -553,6 +563,8 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     export CC=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     /build/fa-build.sh flash-attention/hopper
 
 FROM builder-base AS builder
