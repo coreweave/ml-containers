@@ -333,6 +333,10 @@ ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a -gencode=arch=compute_100,code=[sm_100,compute_100]"
+# Remove compute_100 build if NV_CUDA_LIB_VERSION doesn't match 12.[89].*
+ARG BUILD_NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS}:::${NV_CUDA_LIB_VERSION}"
+ARG BUILD_NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS%:::12.[89].*}"
+ARG BUILD_NVCC_APPEND_FLAGS="${BUILD_NVCC_APPEND_FLAGS% -gencode=arch=compute_100,code=\[sm_100,compute_100\]:::*}"
 ENV NVCC_APPEND_FLAGS="-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${BUILD_NVCC_APPEND_FLAGS:+ $BUILD_NVCC_APPEND_FLAGS}"
 
 # If the directory /opt/nccl-tests exists,
@@ -366,6 +370,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     --mount=type=cache,target=/ccache \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
+    echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     ./storage-info.sh . && \
     cd pytorch && \
     ../storage-info.sh . && \
