@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
-ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.4.1-devel-ubuntu22.04"
-ARG FINAL_BASE_IMAGE="nvidia/cuda:12.4.1-base-ubuntu22.04"
+ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.8.0-devel-ubuntu22.04"
+ARG FINAL_BASE_IMAGE="nvidia/cuda:12.8.0-base-ubuntu22.04"
 
 ARG BUILD_TORCH_VERSION="2.5.1"
 ARG BUILD_TORCH_VISION_VERSION="0.20.0"
@@ -21,7 +21,7 @@ ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-a
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
-FROM alpine/git:2.40.1 as downloader-base
+FROM alpine/git:2.40.1 AS downloader-base
 WORKDIR /git
 RUN git config --global advice.detachedHead false
 
@@ -46,7 +46,7 @@ EOT
 RUN chmod 755 /git/clone.sh
 
 
-FROM downloader-base as pytorch-downloader
+FROM downloader-base AS pytorch-downloader
 ARG BUILD_TORCH_VERSION
 # Includes a patch for a foreach bug in PyTorch v2.5.1
 RUN ./clone.sh pytorch/pytorch pytorch "${BUILD_TORCH_VERSION}" && \
@@ -56,12 +56,12 @@ RUN ./clone.sh pytorch/pytorch pytorch "${BUILD_TORCH_VERSION}" && \
     fi && \
     rm -rf pytorch/.git
 
-FROM downloader-base as torchvision-downloader
+FROM downloader-base AS torchvision-downloader
 ARG BUILD_TORCH_VISION_VERSION
 RUN ./clone.sh pytorch/vision vision "${BUILD_TORCH_VISION_VERSION}" && \
     rm -rf vision/.git
 
-FROM downloader-base as torchaudio-downloader
+FROM downloader-base AS torchaudio-downloader
 ARG BUILD_TORCH_AUDIO_VERSION
 RUN ./clone.sh pytorch/audio audio "${BUILD_TORCH_AUDIO_VERSION}"
 # The torchaudio build requires that this directory remain a full git repository,
@@ -77,15 +77,15 @@ RUN if grep -qF '#include <float.h>' \
     fi && \
     rm /git/patch
 
-FROM downloader-base as transformerengine-downloader
+FROM downloader-base AS transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
 RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
 
-FROM downloader-base as flash-attn-downloader
+FROM downloader-base AS flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
 RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}"
 
-FROM downloader-base as flash-attn-3-downloader
+FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}"; \
@@ -93,7 +93,7 @@ RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       mkdir flash-attention; \
     fi
 
-FROM downloader-base as triton-version
+FROM downloader-base AS triton-version
 ENV TRITON_COMMIT_FILE='.ci/docker/ci_commit_pins/triton.txt'
 COPY --link --from=pytorch-downloader "/git/pytorch/${TRITON_COMMIT_FILE}" /git/version.txt
 ARG BUILD_TRITON_VERSION
@@ -101,7 +101,7 @@ RUN if [ -n "${BUILD_TRITON_VERSION}" ]; then \
       echo "${BUILD_TRITON_VERSION}" > /git/version.txt; \
     fi
 
-FROM downloader-base as triton-downloader
+FROM downloader-base AS triton-downloader
 COPY --link --from=triton-version /git/version.txt /git/version.txt
 ARG BUILD_TRITON
 RUN if [ "${BUILD_TRITON}" = '1' ]; then \
@@ -110,7 +110,7 @@ RUN if [ "${BUILD_TRITON}" = '1' ]; then \
       mkdir triton; \
     fi
 
-FROM alpine/curl:8.7.1 as aocl-downloader
+FROM alpine/curl:8.7.1 AS aocl-downloader
 WORKDIR /tmp/install
 
 RUN apk add --no-cache bash
@@ -136,7 +136,7 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
 
 
 ## Build PyTorch on a builder image.
-FROM ${BUILDER_BASE_IMAGE} as builder-base
+FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG BUILD_CCACHE_SIZE="1Gi"
@@ -215,8 +215,16 @@ RUN LLVM_VERSION='18' && \
     update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
     if [ "$(uname -m)" != 'aarch64' ]; then \
       update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1; \
-    fi
+    fi && \
+    ldconfig
 
+
+FROM builder-base-shared AS builder-base-arm64
+# There is currently no CPU BLAS used for ARM builds,
+# so this stage is just an alias
+
+
+FROM builder-base-shared AS builder-base-amd64
 # Install AOCL-BLAS and AOCL-LAPACK
 # See: https://www.amd.com/en/developer/aocl/dense.html
 ARG AOCL_BASE
@@ -248,6 +256,8 @@ ENV C_INCLUDE_PATH="${AOCL_BASE}/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}" \
     LD_LIBRARY_PATH="${AOCL_BASE}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     LIBRARY_PATH="${AOCL_BASE}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 
+
+FROM builder-base-${TARGETARCH} AS builder-base
 RUN mkdir /build /build/dist
 WORKDIR /build
 COPY --chmod=755 effective_cpu_count.sh .
@@ -322,8 +332,8 @@ ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
 
-ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=compute_90a"
-ENV NVCC_APPEND_FLAGS="-diag-suppress 191,186,177${BUILD_NVCC_APPEND_FLAGS:+ $BUILD_NVCC_APPEND_FLAGS}"
+ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a -gencode=arch=compute_100,code=[sm_100,compute_100]"
+ENV NVCC_APPEND_FLAGS="-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${BUILD_NVCC_APPEND_FLAGS:+ $BUILD_NVCC_APPEND_FLAGS}"
 
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
@@ -394,7 +404,7 @@ RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
 RUN python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip
 
-FROM builder-base as torchvision-builder
+FROM builder-base AS torchvision-builder
 RUN rm ./dist/*
 
 ## Build torchvision
@@ -432,7 +442,7 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
-FROM builder-base as torchaudio-builder
+FROM builder-base AS torchaudio-builder
 RUN rm ./dist/*
 
 ## Build torchaudio
@@ -470,7 +480,7 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     python3 setup.py bdist_wheel --dist-dir ../dist
 
-FROM builder-base as transformerengine-builder
+FROM builder-base AS transformerengine-builder
 RUN rm ./dist/*
 
 # Build TransformerEngine
@@ -489,7 +499,7 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     fi && \
     python3 setup.py bdist_wheel --dist-dir /build/dist
 
-FROM builder-base as flash-attn-builder-base
+FROM builder-base AS flash-attn-builder-base
 RUN rm ./dist/*
 ENV PYTHONUNBUFFERED=1
 ENV FLASH_ATTENTION_FORCE_BUILD=TRUE
@@ -504,7 +514,7 @@ COPY <<-"EOT" /build/fa-build.sh
 EOT
 RUN chmod 755 /build/fa-build.sh
 
-FROM flash-attn-builder-base as flash-attn-builder
+FROM flash-attn-builder-base AS flash-attn-builder
 
 # Build flash-attn
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
@@ -523,7 +533,7 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
       csrc/xentropy); \
     do /build/fa-build.sh "$EXT_DIR" || exit 1; done
 
-FROM flash-attn-builder-base as flash-attn-3-builder
+FROM flash-attn-builder-base AS flash-attn-3-builder
 
 # Artifically sequence this build stage after the previous one
 # to prevent parallelism, because these are both very resource-intensive
@@ -540,7 +550,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     /build/fa-build.sh flash-attention/hopper
 
-FROM builder-base as builder
+FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
 COPY --link --from=torchvision-builder /build/dist/ /build/dist/
 COPY --link --from=transformerengine-builder /build/dist/ /build/dist/
