@@ -109,7 +109,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }}
           cache-to: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }},mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
       - name: Clear registry credentials
         if: always()
         run: |
