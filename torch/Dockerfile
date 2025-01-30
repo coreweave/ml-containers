@@ -366,6 +366,7 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
 # (See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Modules/FindBLAS.cmake#L259-L271).
 # Without WITH_BLAS, it would detect the BLAS implementation as
 # BLAS_INFO=blis instead of BLAS_INFO=FLAME and wouldn't include LAPACK either.
+ARG BUILD_CXX11_ABI=""
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
     --mount=type=cache,target=/ccache \
@@ -373,6 +374,9 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
+    if [ -n "${BUILD_CXX11_ABI}" ]; then \
+      export _GLIBCXX_USE_CXX11_ABI="${BUILD_CXX11_ABI}"; \
+    fi && \
     ./storage-info.sh . && \
     cd pytorch && \
     ../storage-info.sh . && \
