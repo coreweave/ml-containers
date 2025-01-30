@@ -25,10 +25,6 @@ on:
       cxx11-abi:
         required: false
         type: string
-      cuda-arch-support:
-        required: false
-        type: string
-        default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
       image-name:
         required: false
         type: string
@@ -74,11 +70,6 @@ on:
         required: false
         description: "Build with the CXX11 ABI (1 = enable, 0 = disable)"
         type: string
-      cuda-arch-support:
-        required: false
-        description: "Space-separated list of CUDA architectures to support"
-        type: string
-        default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
       image-name:
         required: false
         description: "Custom name under which to publish the resulting container"
@@ -106,8 +97,8 @@ jobs:
         BUILD_TORCH_VERSION=${{ inputs.torch-version }}
         BUILD_TORCH_VISION_VERSION=${{ inputs.torchvision-version }}
         BUILD_TORCH_AUDIO_VERSION=${{ inputs.torchaudio-version }}
+        BUILD_TORCH_CUDA_ARCH_LIST=7.0 7.5 8.0 8.6 8.9 9.0+PTX
         ${{ inputs.cxx11-abi && format('BUILD_CXX11_ABI={0}', inputs.cxx11-abi) || '' }}
-        ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST={0}', inputs.cuda-arch-support) || '' }}
         ${{ inputs.triton-version && format('BUILD_TRITON_VERSION={0}', inputs.triton-version) || '' }}
   build-extras:
     name: Build torch-extras
