@@ -35,6 +35,7 @@ jobs:
     name: Build Images
     runs-on: [ cw ]
     container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.9.0'
+    timeout-minutes: 960
     defaults:
       run:
         shell: bash
