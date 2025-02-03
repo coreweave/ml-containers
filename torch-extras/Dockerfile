@@ -128,25 +128,25 @@ RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=d
 
 # DeepSpeed build flags
 # See: https://www.deepspeed.ai/tutorials/advanced-install
-ARG DS_BUILD_OPS="1"
+ARG DS_BUILD_OPS="0"
 ARG DS_BUILD_CCL_COMM="0"
-ARG DS_BUILD_CPU_ADAM=""
-ARG DS_BUILD_CPU_LION=""
+ARG DS_BUILD_CPU_ADAM="1"
+ARG DS_BUILD_CPU_LION="1"
 # Requires CUTLASS
 ARG DS_BUILD_EVOFORMER_ATTN="0"
-ARG DS_BUILD_FUSED_ADAM=""
-ARG DS_BUILD_FUSED_LION=""
-ARG DS_BUILD_CPU_ADAGRAD=""
-ARG DS_BUILD_FUSED_LAMB=""
-ARG DS_BUILD_QUANTIZER=""
-ARG DS_BUILD_RANDOM_LTD=""
+ARG DS_BUILD_FUSED_ADAM="1"
+ARG DS_BUILD_FUSED_LION="1"
+ARG DS_BUILD_CPU_ADAGRAD="1"
+ARG DS_BUILD_FUSED_LAMB="1"
+ARG DS_BUILD_QUANTIZER="1"
+ARG DS_BUILD_RANDOM_LTD="1"
 # sparse_attn has issues with PyTorch >= 2.0.0 as of DeepSpeed 0.9.4
 ARG DS_BUILD_SPARSE_ATTN="0"
-ARG DS_BUILD_TRANSFORMER=""
-ARG DS_BUILD_TRANSFORMER_INFERENCE=""
-ARG DS_BUILD_STOCHASTIC_TRANSFORMER=""
-ARG DS_BUILD_UTILS=""
-ARG DS_BUILD_AIO=""
+ARG DS_BUILD_TRANSFORMER="1"
+ARG DS_BUILD_TRANSFORMER_INFERENCE="1"
+ARG DS_BUILD_STOCHASTIC_TRANSFORMER="1"
+ARG DS_BUILD_UTILS="1"
+ARG DS_BUILD_AIO="1"
 
 ARG DEEPSPEED_VERSION
 
@@ -185,8 +185,9 @@ RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     } && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
+      DS_ACCELERATOR='cuda' \
       python3 -m pip wheel -w /wheels \
-      --no-cache-dir --no-build-isolation --no-deps \
+      --no-cache-dir --no-build-isolation --no-deps -v \
       deepspeed==${DEEPSPEED_VERSION} && \
     rm ./*
 SHELL ["/bin/sh", "-c"]
