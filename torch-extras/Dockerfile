@@ -185,7 +185,6 @@ RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     } && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
-      DS_ACCELERATOR='cuda' \
       python3 -m pip wheel -w /wheels \
       --no-cache-dir --no-build-isolation --no-deps -v \
       deepspeed==${DEEPSPEED_VERSION} && \
