@@ -26,4 +26,3 @@ FROM ${BASE_IMAGE}
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     cd /wheels && \
     bash install.bash
-RUN rmdir /wheels
