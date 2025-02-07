@@ -72,7 +72,7 @@ git checkout "${VLLM_COMMIT}"
 apt-get -qq update && apt-get -qq install kmod
 python3 use_existing_torch.py
 _PIP_INSTALL -r requirements-build.txt
-_BUILD . |& _LOG vllm.log
+USE_CUDNN=1 USE_CUSPARSELT=1 _BUILD . |& _LOG vllm.log
 )
 
 # sglang
