@@ -1,5 +1,6 @@
 #!/bin/bash
 set -xeo pipefail
+export DEBIAN_FRONTEND=noninteractive
 
 TORCH_CUDA_ARCH_LIST=''
 FILTER_ARCHES=''
@@ -69,7 +70,7 @@ git clone --recursive --filter=blob:none https://github.com/vllm-project/vllm
 cd vllm
 git checkout "${VLLM_COMMIT}"
 # For lsmod
-apt-get -qq update && apt-get -qq install kmod
+apt-get -qq update && apt-get -qq install --no-install-recommends -y kmod
 python3 use_existing_torch.py
 _PIP_INSTALL -r requirements-build.txt
 USE_CUDNN=1 USE_CUSPARSELT=1 _BUILD . |& _LOG vllm.log
@@ -128,7 +129,7 @@ if [ ! "$(uname -m)" = 'x86_64' ]; then
   # decord (for sglang)
   : "${DECORD_COMMIT:?}"
   (
-  apt-get -qq update && apt-get -q install --no-install-recommends \
+  apt-get -qq update && apt-get -q install --no-install-recommends -y \
     build-essential python3-dev python3-setuptools \
     make cmake ffmpeg \
     libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev
