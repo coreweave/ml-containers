@@ -1,5 +1,4 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-actions-8e29075-base-cuda12.6.3-ubuntu22.04-torch2.5.1-vision0.20.0-audio2.5.0"
-
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-actions-386fabe-nccl-cuda12.6.3-ubuntu22.04-nccl2.25.1-1-torch2.6.0-vision0.21.0-audio2.6.0-abi1"
 
 FROM scratch as freezer
 WORKDIR /
