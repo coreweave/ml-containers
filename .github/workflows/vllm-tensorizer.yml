@@ -21,7 +21,7 @@ jobs:
     with:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
-      tag-suffix: ${{ inputs.commit || '51602eefd38250325e541abd28f051ffd7676c3f'}}
+      tag-suffix: ${{ inputs.commit || '0408efc6d0c17fba17b2be38d0d0f02e96d2bf9d'}}
       build-args: |
-        COMMIT_HASH=${{ inputs.commit || '51602eefd38250325e541abd28f051ffd7676c3f'}}
-        VLLM_FLASH_ATTN_VERSION=${{ inputs.vllm-flash-attn-version || '2.5.9'}}
+        COMMIT_HASH=${{ inputs.commit || '0408efc6d0c17fba17b2be38d0d0f02e96d2bf9d'}}
+        VLLM_FLASH_ATTN_VERSION=${{ inputs.vllm-flash-attn-version || '720c94869cf2e0ff5a706e9c7f1dce0939686ade'}}

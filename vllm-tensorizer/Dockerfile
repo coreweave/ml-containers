@@ -1,4 +1,4 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:696032c-base-cuda12.2.2-ubuntu22.04-torch2.3.0-vision0.18.0-audio2.3.0"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-actions-8e29075-base-cuda12.6.3-ubuntu22.04-torch2.5.1-vision0.20.0-audio2.5.0"
 
 FROM scratch as freezer
 WORKDIR /
@@ -53,7 +53,7 @@ ARG VLLM_FLASH_ATTN_VERSION
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       https://github.com/vllm-project/flash-attention.git && \
     cd flash-attention && \
-    git checkout "v${VLLM_FLASH_ATTN_VERSION}" && \
+    git checkout "${VLLM_FLASH_ATTN_VERSION}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
 
@@ -98,5 +98,7 @@ RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
+# Make sure xformers imports properly (for vLLM)
+RUN python3 -c "from xformers import ops as xops"
 
 EXPOSE 8080
