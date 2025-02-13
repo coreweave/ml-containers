@@ -48,7 +48,12 @@ git checkout "${VLLM_COMMIT}"
 apt-get -qq update && apt-get -qq install --no-install-recommends -y kmod
 python3 use_existing_torch.py
 _PIP_INSTALL -r requirements-build.txt
-USE_CUDNN=1 USE_CUSPARSELT=1 _BUILD . |& _LOG vllm.log
+# Capture detailed cmake output
+USE_CUDNN=1 USE_CUSPARSELT=1 _BUILD . |& _LOG vllm.log || {
+  echo "Error during build process. See /wheels/logs/vllm.log for details."
+  cat /wheels/logs/vllm.log
+  exit 1
+}
 )
 
 apt-get clean
