@@ -28,7 +28,11 @@ RUN export \
       libcusolver-dev-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
-      ninja-build && \
+      ninja-build \
+      curl \
+      git \
+      ninja-build \
+      cmake && \
     apt-get clean
 
 RUN ldconfig
