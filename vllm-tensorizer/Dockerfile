@@ -30,8 +30,7 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
 FROM alpine/git:2.36.3 as vllm-flash-attn-downloader
 WORKDIR /git
 ARG VLLM_FLASH_ATTN_VERSION
-RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends python3.10
+RUN apk add --no-cache python3.10
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       https://github.com/vllm-project/flash-attention.git && \
     cd flash-attention && \
