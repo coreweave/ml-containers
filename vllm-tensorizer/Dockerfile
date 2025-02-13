@@ -8,12 +8,11 @@ COPY --chmod=755 freeze.sh /
 FROM ${BASE_IMAGE} as builder-base
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends python3.10 && \
+    curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && \
+    python3.10 get-pip.py && \
     ln -s /usr/bin/python3.10 /usr/bin/python3
 
-RUN python3 -m ensurepip --upgrade
-
 RUN python3 -m pip list
-RUN python3 --version
 
 FROM builder-base as vllm-downloader
 ARG COMMIT_HASH
