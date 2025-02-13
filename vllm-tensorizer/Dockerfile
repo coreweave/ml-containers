@@ -89,10 +89,6 @@ RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
 
-RUN python3 -m pip install --no-cache-dir \
-      "fschat[model_worker] == 0.2.30" "triton == 2.1.0" \
-      -c /tmp/constraints.txt
-
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
