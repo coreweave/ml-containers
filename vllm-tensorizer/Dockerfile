@@ -15,6 +15,8 @@ ARG VLLM_COMMIT='5095e966069b9e65b7c4c63427e06cebacaad0a0'
 WORKDIR /build
 COPY build.bash /build/
 RUN mkdir /wheels && \
+    apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends python3.10 python3-pip && \
     bash build.bash -a "${BUILD_TORCH_CUDA_ARCH_LIST}" && \
     rm -rf /build/*
 COPY install.bash /wheels/
