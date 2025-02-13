@@ -17,12 +17,16 @@ on:
 jobs:
   read-file:
     name: Read Configuration File
-    runs-on: ["self-hosted", "Linux"]
+    runs-on: [ cw ]
+    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.4.0'
+    defaults:
+      run:
+        shell: bash
     permissions: {}
     outputs:
       config: ${{ steps.read.outputs.contents }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Read configuration
         id: read
         env:
