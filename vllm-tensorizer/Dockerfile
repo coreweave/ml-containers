@@ -7,7 +7,7 @@ COPY --chmod=755 freeze.sh /
 
 FROM ${BASE_IMAGE} as builder-base
 RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends python3.10 python3-pip \
+    apt-get -qq install -y --no-install-recommends python3.10 python3-pip
 
 RUN python3 -m pip list
 
