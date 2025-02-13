@@ -24,4 +24,3 @@ jobs:
       tag-suffix: ${{ inputs.commit || '5095e966069b9e65b7c4c63427e06cebacaad0a0'}}
       build-args: |
         COMMIT_HASH=${{ inputs.commit || '5095e966069b9e65b7c4c63427e06cebacaad0a0'}}
-        VLLM_FLASH_ATTN_VERSION=${{ inputs.vllm-flash-attn-version || '720c94869cf2e0ff5a706e9c7f1dce0939686ade'}}
