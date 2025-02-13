@@ -46,16 +46,6 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
 
-FROM alpine/git:2.36.3 as vllm-flash-attn-downloader
-WORKDIR /git
-ARG VLLM_FLASH_ATTN_VERSION
-RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
-      https://github.com/vllm-project/flash-attention.git && \
-    cd flash-attention && \
-    git checkout "${VLLM_FLASH_ATTN_VERSION}" && \
-    git submodule update --init --recursive --jobs 8 \
-      --depth 1 --filter=blob:none
-
 FROM builder-base as vllm-builder
 WORKDIR /workspace
 
@@ -64,20 +54,14 @@ ENV LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}"
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
 
-RUN --mount=type=bind,from=vllm-flash-attn-downloader,source=/git/flash-attention,target=/workspace,rw \
-    python3 -m pip wheel -w /wheels \
+RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    python3 -m pip install --no-cache-dir py-cpuinfo && \
+    python3 use_existing_torch.py && \
+    USE_CUDNN=1 USE_CUSPARSELT=1 VLLM_TARGET_DEVICE=cuda \
+      python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /tmp/constraints.txt \
       ./
-
-RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
-    pip3 install --no-cache-dir /wheels/*.whl py-cpuinfo && \
-    python3 use_existing_torch.py && \
-    USE_CUDNN=1 USE_CUSPARSELT=1 VLLM_TARGET_DEVICE=cuda python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /tmp/constraints.txt \
-      ./ && \
-    pip3 uninstall -y vllm-flash-attn
 
 WORKDIR /wheels
 
