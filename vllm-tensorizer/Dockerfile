@@ -3,7 +3,7 @@
 # Scripts for building and installing vLLM for arm64 and amd64
 # are adapted from code here: https://github.com/coreweave/ml-containers/tree/es/actions/sglang
 ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:es-actions-7095c59-base-cuda12.4.1-ubuntu22.04-torch2.5.1-vision0.20.0-audio2.5.0"
-ARG BUILDER_IMAGE="${BASE_IMAGE}"
+ARG BUILDER_IMAGE="nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04"
 
 FROM ${BUILDER_IMAGE} AS builder
 
