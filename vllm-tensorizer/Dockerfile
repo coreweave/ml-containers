@@ -81,4 +81,6 @@ RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
 # Make sure xformers imports properly (for vLLM)
 RUN python3 -c "from xformers import ops as xops"
 
+RUN python3 -m pip install --no-cache-dir tensorizer
+
 EXPOSE 8080
