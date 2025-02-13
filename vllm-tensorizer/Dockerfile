@@ -56,7 +56,13 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
 
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     python3 -m pip install --no-cache-dir py-cpuinfo && \
-    python3 use_existing_torch.py && \
+    if [ -f 'use_existing_torch.py' ]; then \
+      python3 use_existing_torch.py; \
+    else \
+      git cat-file blob \
+        e489ad7a210f4234db696d1f2749d5f3662fa65b:use_existing_torch.py \
+        | python3 -; \
+    fi && \
     MAX_JOBS=24 USE_CUDNN=1 USE_CUSPARSELT=1 VLLM_TARGET_DEVICE=cuda \
       python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
