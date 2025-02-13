@@ -5,7 +5,11 @@ FROM scratch as freezer
 WORKDIR /
 COPY --chmod=755 freeze.sh /
 
-FROM ${BASE_IMAGE} as vllm-downloader
+FROM ${BASE_IMAGE} as builder-base
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends python3.10
+
+FROM builder-base as vllm-downloader
 ARG COMMIT_HASH
 
 RUN ldconfig
@@ -33,7 +37,7 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
 
-FROM ${BASE_IMAGE} as vllm-builder
+FROM builder-base as vllm-builder
 WORKDIR /workspace
 
 ENV LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}"
