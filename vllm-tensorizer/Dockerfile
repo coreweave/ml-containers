@@ -16,7 +16,7 @@ WORKDIR /build
 COPY build.bash /build/
 RUN mkdir /wheels && \
     apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends python3.10 python3-pip && \
+    apt-get -qq install -y --no-install-recommends git python3.10 python3-pip && \
     bash build.bash -a "${BUILD_TORCH_CUDA_ARCH_LIST}" && \
     rm -rf /build/*
 COPY install.bash /wheels/
