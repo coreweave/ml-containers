@@ -43,7 +43,8 @@ FROM base
 
 # Install the repackaged TensorFlow wheel
 RUN --mount=type=bind,from=tf2,source=/wheels,target=/wheels \
-    python3 -m pip install --no-cache-dir /wheels/*.whl
+    python3 -m pip install --no-cache-dir /wheels/*.whl && \
+    python3 -m pip install --no-cache-dir 'ml_dtypes>=0.5.0'
 
 # Install the freshly-built Triton wheel
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \

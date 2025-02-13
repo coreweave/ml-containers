@@ -38,8 +38,8 @@ uvicorn>=0.20.0,<0.21
 wandb>=0.17,<0.18
 
 # Should already be installed
-triton~=3.2.0
-tensorflow~=2.7.0
-jax==0.4.38
-pandas
-numpy
+#triton~=3.2.0
+#tensorflow~=2.17.0
+#jax==0.4.38
+#pandas
+#numpy
