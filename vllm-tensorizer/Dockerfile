@@ -1,100 +1,25 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-actions-386fabe-nccl-cuda12.6.3-ubuntu22.04-nccl2.25.1-1-torch2.6.0-vision0.21.0-audio2.6.0-abi1"
+# syntax=docker/dockerfile:1.2
 
-FROM scratch as freezer
-WORKDIR /
-COPY --chmod=755 freeze.sh /
+# Scripts for building and installing vLLM for arm64 and amd64
+# are adapted from code here: https://github.com/coreweave/ml-containers/tree/es/actions/sglang
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:es-actions-7095c59-base-cuda12.4.1-ubuntu22.04-torch2.5.1-vision0.20.0-audio2.5.0"
+ARG BUILDER_IMAGE="${BASE_IMAGE}"
 
-FROM ${BASE_IMAGE} as builder-base
+FROM ${BUILDER_IMAGE} AS builder
+
+ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
+ARG CUTLASS_COMMIT='b78588d1630aa6643bf021613717bafb705df4ef'
+ARG VLLM_COMMIT='5095e966069b9e65b7c4c63427e06cebacaad0a0'
 
 
-# Dependencies requiring NVCC are built ahead of time in a separate stage
-# so that the ~2 GiB dev library installations don't have to be included
-# in the final image.
-RUN export \
-      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
-      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
-    export \
-      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
-    apt-get -qq update && apt-get install -y --no-install-recommends \
-      cuda-nvcc-${CUDA_PACKAGE_VERSION} \
-      cuda-nvml-dev-${CUDA_PACKAGE_VERSION} \
-      libcurand-dev-${CUDA_PACKAGE_VERSION} \
-      libcublas-dev-${CUDA_PACKAGE_VERSION} \
-      libcusparse-dev-${CUDA_PACKAGE_VERSION} \
-      libcusolver-dev-${CUDA_PACKAGE_VERSION} \
-      cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
-      cuda-nvtx-${CUDA_PACKAGE_VERSION} \
-      libaio-dev \
-      ninja-build && \
-    apt-get clean
+WORKDIR /build
+COPY build.bash /build/
+RUN mkdir /wheels && \
+    bash build.bash -a "${BUILD_TORCH_CUDA_ARCH_LIST}" && \
+    rm -rf /build/*
+COPY install.bash /wheels/
 
-RUN ldconfig
-
-RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends \
-      python3-pip git ninja-build && \
-    apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging 'setuptools<70.0.0' wheel cmake setuptools_scm
-
-FROM alpine/git:2.36.3 as vllm-downloader
-WORKDIR /git
-ARG COMMIT_HASH
-RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
-      https://github.com/vllm-project/vllm.git && \
-    cd vllm && \
-    git checkout "${COMMIT_HASH}" && \
-    git submodule update --init --recursive --jobs 8 \
-      --depth 1 --filter=blob:none
-
-FROM alpine/git:2.36.3 as vllm-flash-attn-downloader
-WORKDIR /git
-ARG VLLM_FLASH_ATTN_VERSION
-RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
-      https://github.com/vllm-project/flash-attention.git && \
-    cd flash-attention && \
-    git checkout "${VLLM_FLASH_ATTN_VERSION}" && \
-    git submodule update --init --recursive --jobs 8 \
-      --depth 1 --filter=blob:none
-
-FROM builder-base as vllm-builder
-WORKDIR /workspace
-
-ENV LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}"
-
-RUN --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
-    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
-
-RUN --mount=type=bind,from=vllm-flash-attn-downloader,source=/git/flash-attention,target=/workspace,rw \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /tmp/constraints.txt \
-      ./
-
-RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
-    pip3 install /wheels/*.whl && \
-    python3 use_existing_torch.py && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /tmp/constraints.txt \
-      ./ && \
-    pip3 uninstall -y vllm-flash-attn
-
-WORKDIR /wheels
-
-FROM ${BASE_IMAGE} as base
-
-WORKDIR /workspace
-
-RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt-get clean
-
-RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
-    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
-
-RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
-    rm /tmp/constraints.txt
-
-# Make sure xformers imports properly (for vLLM)
-RUN python3 -c "from xformers import ops as xops"
-
-EXPOSE 8080
+FROM ${BASE_IMAGE}
+RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
+    cd /wheels && \
+    bash install.bash
