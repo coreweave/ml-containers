@@ -1,0 +1,21 @@
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag for the build'
+        required: true
+  push:
+    paths:
+      - "jax/**"
+      - ".github/workflows/jax.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: jax
+      folder: jax
+      tag-suffix: ${{ inputs.tag }}
