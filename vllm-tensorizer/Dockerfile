@@ -1,26 +1,45 @@
-ARG BASE_IMAGE="nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:es-actions-7095c59-base-cuda12.4.1-ubuntu22.04-torch2.5.1-vision0.20.0-audio2.5.0"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-actions-386fabe-nccl-cuda12.6.3-ubuntu22.04-nccl2.25.1-1-torch2.6.0-vision0.21.0-audio2.6.0-abi1"
 
 FROM scratch as freezer
 WORKDIR /
 COPY --chmod=755 freeze.sh /
 
 FROM ${BASE_IMAGE} as builder-base
-RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends python3.10 python3-pip
 
-RUN python3 -m pip list
 
-FROM builder-base as vllm-downloader
-ARG COMMIT_HASH
+# Dependencies requiring NVCC are built ahead of time in a separate stage
+# so that the ~2 GiB dev library installations don't have to be included
+# in the final image.
+RUN export \
+      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
+      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
+    export \
+      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    apt-get -qq update && apt-get install -y --no-install-recommends \
+      cuda-nvcc-${CUDA_PACKAGE_VERSION} \
+      cuda-nvml-dev-${CUDA_PACKAGE_VERSION} \
+      libcurand-dev-${CUDA_PACKAGE_VERSION} \
+      libcublas-dev-${CUDA_PACKAGE_VERSION} \
+      libcusparse-dev-${CUDA_PACKAGE_VERSION} \
+      libcusolver-dev-${CUDA_PACKAGE_VERSION} \
+      cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
+      cuda-nvtx-${CUDA_PACKAGE_VERSION} \
+      libaio-dev \
+      ninja-build && \
+    apt-get clean
 
 RUN ldconfig
 
 RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends git ninja-build && \
+    apt-get -qq install -y --no-install-recommends \
+      python3-pip git ninja-build && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging 'setuptools<70.0.0' wheel cmake setuptools setuptools_scm
+    pip3 install -U --no-cache-dir pip packaging 'setuptools<70.0.0' wheel cmake setuptools_scm
 
+FROM alpine/git:2.36.3 as vllm-downloader
+WORKDIR /git
+ARG COMMIT_HASH
+RUN apk add --update --no-cache python3
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       https://github.com/vllm-project/vllm.git && \
     cd vllm && \
@@ -63,7 +82,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 
 WORKDIR /wheels
 
-FROM ${FINAL_BASE_IMAGE}
+FROM ${BASE_IMAGE} as base
 
 WORKDIR /workspace
 
