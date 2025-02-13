@@ -71,9 +71,9 @@ RUN --mount=type=bind,from=vllm-flash-attn-downloader,source=/git/flash-attentio
       ./
 
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
-    pip3 install /wheels/*.whl && \
+    pip3 install --no-cache-dir /wheels/*.whl py-cpuinfo && \
     python3 use_existing_torch.py && \
-    USE_CUDNN=1 USE_CUSPARSELT=1 python3 -m pip wheel -w /wheels \
+    USE_CUDNN=1 USE_CUSPARSELT=1 VLLM_TARGET_DEVICE=cuda python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /tmp/constraints.txt \
       ./ && \
