@@ -8,7 +8,7 @@ COPY --chmod=755 freeze.sh /
 FROM ${BASE_IMAGE} as builder-base
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends python3.10 && \
-    ln -s /usr/bin/python3.10 /usr/bin/python3 && \
+    ln -s /usr/bin/python3.10 /usr/bin/python3
 
 RUN python3 -m ensurepip --upgrade
 
