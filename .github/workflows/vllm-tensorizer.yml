@@ -4,9 +4,6 @@ on:
       commit:
         description: 'Commit to build'
         required: true
-      vllm-flash-attn-version:
-        description: 'vllm-flash-attn version to build'
-        required: true
   push:
     paths:
       - "vllm-tensorizer/**"
