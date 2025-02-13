@@ -39,11 +39,9 @@ RUN apt-get -qq update && \
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
 ARG COMMIT_HASH
-RUN apk add --update --no-cache python3
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       https://github.com/vllm-project/vllm.git && \
     cd vllm && \
-    python3 use_existing_torch.py && \
     git checkout "${COMMIT_HASH}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
@@ -74,6 +72,7 @@ RUN --mount=type=bind,from=vllm-flash-attn-downloader,source=/git/flash-attentio
 
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     pip3 install /wheels/*.whl && \
+    python3 use_existing_torch.py && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /tmp/constraints.txt \
