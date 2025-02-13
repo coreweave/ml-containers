@@ -25,10 +25,10 @@ RUN export \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       libaio-dev \
-      ninja-build && \
-    apt-get clean
-
-RUN ldconfig
+      ninja-build \
+      kmod && \
+    apt-get clean && \
+    ldconfig
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
