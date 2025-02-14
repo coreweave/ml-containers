@@ -513,6 +513,9 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
+    case "${CUDA_VERSION}" in 12.[0123456].*) \
+      export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
+    esac && \
     cd TransformerEngine && \
     if python3 -c "import sys; sys.exit(sys.version_info.minor > 8)"; then \
       sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
