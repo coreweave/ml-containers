@@ -108,7 +108,7 @@ COPY --chmod=755 scale.sh .
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=compute_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
-      FLAGS="${FLAGS} -gencode=arch=compute_100,code=[sm_100,compute_100]" ;; \
+      FLAGS="${FLAGS} -gencode=arch=compute_100a,code=sm_100a" ;; \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 ARG BUILD_MAX_JOBS

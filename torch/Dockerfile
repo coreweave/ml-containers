@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1.7
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.8.0-devel-ubuntu22.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:12.8.0-base-ubuntu22.04"
 
@@ -330,13 +330,17 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
-ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
+# Filter out the 10.0 arch on CUDA versions != 12.8
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${BUILD_TORCH_CUDA_ARCH_LIST/ 10.0/}||${BUILD_TORCH_CUDA_ARCH_LIST}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
-# Add compute_100 build if NV_CUDA_LIB_VERSION matches 12.[89].*
+# Add sm_100a build if NV_CUDA_LIB_VERSION matches 12.[89].*
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
-      FLAGS="${FLAGS} -gencode=arch=compute_100,code=[sm_100,compute_100]" ;; \
+      FLAGS="${FLAGS} -gencode=arch=compute_100a,code=sm_100a" ;; \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 
@@ -629,7 +633,11 @@ ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
-ENV TORCH_CUDA_ARCH_LIST=$BUILD_TORCH_CUDA_ARCH_LIST
+# Filter out the 10.0 arch on CUDA versions != 12.8
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${BUILD_TORCH_CUDA_ARCH_LIST/ 10.0/}||${BUILD_TORCH_CUDA_ARCH_LIST}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 
 COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
