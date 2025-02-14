@@ -19,10 +19,7 @@ on:
       torchaudio-version:
         required: true
         type: string
-      triton-version:
-        required: false
-        type: string
-      cxx11-abi:
+      additional-build-args:
         required: false
         type: string
       image-name:
@@ -62,13 +59,9 @@ on:
         required: true
         description: "Tagged version number from pytorch/audio to build"
         type: string
-      triton-version:
+      additional-build-args:
         required: false
-        description: "Tagged version number from openai/triton to build"
-        type: string
-      cxx11-abi:
-        required: false
-        description: "Build with the CXX11 ABI (1 = enable, 0 = disable)"
+        description: "Further --build-arg parameters for the build"
         type: string
       image-name:
         required: false
@@ -97,9 +90,7 @@ jobs:
         BUILD_TORCH_VERSION=${{ inputs.torch-version }}
         BUILD_TORCH_VISION_VERSION=${{ inputs.torchvision-version }}
         BUILD_TORCH_AUDIO_VERSION=${{ inputs.torchaudio-version }}
-        BUILD_TORCH_CUDA_ARCH_LIST=7.0 7.5 8.0 8.6 8.9 9.0+PTX
-        ${{ inputs.cxx11-abi && format('BUILD_CXX11_ABI={0}', inputs.cxx11-abi) || '' }}
-        ${{ inputs.triton-version && format('BUILD_TRITON_VERSION={0}', inputs.triton-version) || '' }}
+        ${{ inputs.additional-build-args }}
   build-extras:
     name: Build torch-extras
     if: inputs.build-extras

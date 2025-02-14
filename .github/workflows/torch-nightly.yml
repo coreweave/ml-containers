@@ -93,13 +93,13 @@ jobs:
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-base.yml
-      filter: 'del(.include) | .exclude |= . + [{"os": "ubuntu20.04"}]'
+      filter: 'del(.include) | .exclude |= . + [{"abi": "0"}]'
   get-nccl-config:
     name: Get torch:nccl Config
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-nccl.yml
-      filter: 'del( .include[] | ( .torch, .vision, .audio ) ) | .exclude |= . + [{"os": "ubuntu20.04"}]'
+      filter: 'del( .include[] | ( .torch, .vision, .audio ) ) | .exclude |= . + [{"abi": "0"}]'
 
   build-base:
     name: Build Nightly torch:base
@@ -119,7 +119,7 @@ jobs:
       torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
-      triton-version: ${{ needs.get-nightly-info.outputs.triton-commit }}
+      additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
       cache-key: base-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
   build-nccl:
@@ -140,6 +140,6 @@ jobs:
       torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
-      triton-version: ${{ needs.get-nightly-info.outputs.triton-commit }}
+      additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
       cache-key: nccl-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
