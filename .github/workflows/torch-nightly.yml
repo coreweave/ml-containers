@@ -20,7 +20,7 @@ jobs:
     name:
       Get Nightly Info
     runs-on: [ cw ]
-    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.4.0'
+    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.9.0'
     defaults:
       run:
         shell: bash
