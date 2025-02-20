@@ -7,7 +7,7 @@ ARG BUILD_TORCH_VISION_VERSION="0.20.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.5.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="1.13"
 ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
-ARG BUILD_FLASH_ATTN_3_VERSION="2.7.2.post1"
+ARG BUILD_FLASH_ATTN_3_VERSION="2.7.4.post1"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0 10.0+PTX"
@@ -87,8 +87,12 @@ RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VER
 
 FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
+# This cherry-picks a patch for versions >= 2.7.3 to prevent package name collisions
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
-      ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}"; \
+      ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
+      if printf '2.7.3\n%s' "${BUILD_FLASH_ATTN_3_VERSION}" | sort -Vc 2>/dev/null; then \
+        git -C flash-attention cherry-pick -n 40cbd529e4ef4c09abc923ab6166b30cda841550; \
+      fi; \
     else \
       mkdir flash-attention; \
     fi
