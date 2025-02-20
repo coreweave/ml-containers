@@ -91,7 +91,9 @@ ARG BUILD_FLASH_ATTN_3_VERSION
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
       if printf '2.7.3\n%s' "${BUILD_FLASH_ATTN_3_VERSION}" | sort -Vc 2>/dev/null; then \
-        git -C flash-attention cherry-pick -n 40cbd529e4ef4c09abc923ab6166b30cda841550; \
+        cd flash-attention && \
+        git cherry-pick -n 40cbd529e4ef4c09abc923ab6166b30cda841550 && \
+        sed -i 's@if bare_metal_version != Version("12\.3"):@if False:@' hopper/setup.py; \
       fi; \
     else \
       mkdir flash-attention; \
