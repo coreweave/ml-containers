@@ -582,7 +582,10 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
-    /build/fa-build.sh flash-attention/hopper
+    if [ "$(uname -m)" = 'aarch64' ]; then \
+      export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
+    fi && \
+    NVCC_THREADS=1 /build/fa-build.sh flash-attention/hopper
 
 FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
