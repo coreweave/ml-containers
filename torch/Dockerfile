@@ -700,7 +700,12 @@ RUN <<-"EOT" python3
 	from pathlib import Path
 	from py_compile import compile
 
-	dist = metadata.distribution("flashattn-hopper")
+	try:
+	    dist = metadata.distribution("flash-attn-3")
+	    record_pattern = "flash?attn?3-*.dist-info/RECORD"
+	except metadata.PackageNotFoundError:
+	    dist = metadata.distribution("flashattn-hopper")
+	    record_pattern = "flashattn?hopper-*.dist-info/RECORD"
 	p = dist.locate_file("flash_attn_interface.py")
 	print("flash_attn_interface:", p)
 	root = p.parent
@@ -730,7 +735,7 @@ RUN <<-"EOT" python3
 
 
 	for f in dist.files:
-	    if f.match("flashattn?hopper-*.dist-info/RECORD"):
+	    if f.match(record_pattern):
 	        with f.locate().open("a", encoding="utf-8", newline="") as record:
 	            for added in (new, compiled):
 	                record.write(record_entry(added))
