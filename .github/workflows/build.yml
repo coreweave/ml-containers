@@ -19,6 +19,11 @@ on:
         required: false
         description: "Optional sub-key to append to the image name for build layer caching"
         type: string
+      platforms:
+        required: false
+        description: "Platforms for which to build (default: linux/amd64,linux/arm64)"
+        type: string
+        default: linux/amd64,linux/arm64
     outputs:
       outcome:
         description: "The outcome of the build"
@@ -33,26 +38,42 @@ on:
 jobs:
   build:
     name: Build Images
-    runs-on: [ self-hosted, Linux ]
+    runs-on: [ cw ]
+    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.9.0'
+    timeout-minutes: 960
+    defaults:
+      run:
+        shell: bash
     outputs:
       outcome: ${{ steps.docker-build.outcome }}
       tags: ${{ steps.meta.outputs.tags }}
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - name: Fetch BuildKit Client Certs
+        uses: dopplerhq/secrets-fetch-action@v1.2.0
+        id: client-certs
+        with:
+          doppler-token: ${{ secrets.ORG_BUILDKIT_CLIENT_TOKEN }}
+          doppler-project: ${{ secrets.BUILDKIT_CONSUMER_DOPPLER_PROJECT }}
+          doppler-config: prod
+          inject-env-vars: false
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2.2.1
-      - name: Login to GitHub container registry
-        uses: docker/login-action@v2.2.0
+        uses: docker/setup-buildx-action@v3.7.1
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Login to DockerHub container registry
-        uses: docker/login-action@v2.2.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          driver: remote
+          endpoint: ${{ secrets.BUILDKIT_CONSUMER_AMD64_ENDPOINT }}
+          platforms: linux/amd64
+          append: |
+            - endpoint: ${{ secrets.BUILDKIT_CONSUMER_ARM64_ENDPOINT }}
+              platforms: linux/arm64
+        env:
+          BUILDER_NODE_0_AUTH_TLS_CACERT: ${{ steps.client-certs.outputs.TLS_CACERT }}
+          BUILDER_NODE_0_AUTH_TLS_CERT: ${{ steps.client-certs.outputs.TLS_CERT }}
+          BUILDER_NODE_0_AUTH_TLS_KEY: ${{ steps.client-certs.outputs.TLS_KEY }}
+          BUILDER_NODE_1_AUTH_TLS_CACERT: ${{ steps.client-certs.outputs.TLS_CACERT }}
+          BUILDER_NODE_1_AUTH_TLS_CERT: ${{ steps.client-certs.outputs.TLS_CERT }}
+          BUILDER_NODE_1_AUTH_TLS_KEY: ${{ steps.client-certs.outputs.TLS_KEY }}
       - name: Get base registry
         run: |
           echo "REGISTRY=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
@@ -70,14 +91,21 @@ jobs:
           echo "CACHE_KEY=${{ inputs.image-name }}-${{ inputs.cache-key }}" >> $GITHUB_ENV
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v4.1.1
+        uses: docker/metadata-action@v5.5.1
         with:
           images: ${{ env.REGISTRY }}/${{ inputs.image-name }}
           tags: |
             type=sha,prefix=${{ env.TAG_PREFIX }},suffix=${{ env.TAG_SUFFIX }},format=short
+      - name: Initialize registry credentials file
+        env:
+          USER: ${{ github.actor }}
+          PASS: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          jq -n '.auths."ghcr.io" = { username: env.USER, password: env.PASS }' \
+          | install -m400 /dev/stdin ~/.docker/config.json
       - name: Build and push Docker image
         id: docker-build
-        uses: docker/build-push-action@v3.2.0
+        uses: docker/build-push-action@v6.9.0
         with:
           context: ${{ inputs.folder }}
           build-args: |-
@@ -87,6 +115,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }}
           cache-to: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }},mode=max
+          platforms: ${{ inputs.platforms }}
+      - name: Clear registry credentials
+        if: always()
+        run: |
+          rm -f ~/.docker/config.json && [ ! -e ~/.docker/config.json ]
       - uses: 8BitJonny/gh-get-current-pr@2.1.3
         id: PR
         with:

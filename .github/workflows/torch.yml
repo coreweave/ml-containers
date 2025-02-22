@@ -19,13 +19,9 @@ on:
       torchaudio-version:
         required: true
         type: string
-      triton-version:
+      additional-build-args:
         required: false
         type: string
-      cuda-arch-support:
-        required: false
-        type: string
-        default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
       image-name:
         required: false
         type: string
@@ -63,15 +59,10 @@ on:
         required: true
         description: "Tagged version number from pytorch/audio to build"
         type: string
-      triton-version:
+      additional-build-args:
         required: false
-        description: "Tagged version number from openai/triton to build"
+        description: "Further --build-arg parameters for the build"
         type: string
-      cuda-arch-support:
-        required: false
-        description: "Space-separated list of CUDA architectures to support"
-        type: string
-        default: "7.0 7.5 8.0 8.6 8.9 9.0+PTX"
       image-name:
         required: false
         description: "Custom name under which to publish the resulting container"
@@ -99,8 +90,7 @@ jobs:
         BUILD_TORCH_VERSION=${{ inputs.torch-version }}
         BUILD_TORCH_VISION_VERSION=${{ inputs.torchvision-version }}
         BUILD_TORCH_AUDIO_VERSION=${{ inputs.torchaudio-version }}
-        ${{ inputs.cuda-arch-support && format('BUILD_TORCH_CUDA_ARCH_LIST={0}', inputs.cuda-arch-support) || '' }}
-        ${{ inputs.triton-version && format('BUILD_TRITON_VERSION={0}', inputs.triton-version) || '' }}
+        ${{ inputs.additional-build-args }}
   build-extras:
     name: Build torch-extras
     if: inputs.build-extras

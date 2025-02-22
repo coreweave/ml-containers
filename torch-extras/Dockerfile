@@ -2,8 +2,11 @@
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.14.4"
-ARG APEX_COMMIT="23c1f86520e22b505e8fdfcf6298273dff2d93d8"
+ARG APEX_COMMIT="a1df80457ba67d60cbdb0d3ddfb08a2702c821a8"
+ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
+ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
 ARG XFORMERS_VERSION="0.0.28.post1"
+ARG BUILD_MAX_JOBS=""
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -15,6 +18,18 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
+
+
+FROM alpine/git:2.36.3 as ds-kernels-downloader
+WORKDIR /git
+ARG DEEPSPEED_KERNELS_COMMIT
+RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
+      https://github.com/microsoft/DeepSpeed-Kernels ds-kernels && \
+    cd ds-kernels && \
+    git checkout "${DEEPSPEED_KERNELS_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=blob:none
+
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
@@ -32,7 +47,6 @@ RUN export \
       libcublas-dev-${CUDA_PACKAGE_VERSION} \
       libcusparse-dev-${CUDA_PACKAGE_VERSION} \
       libcusolver-dev-${CUDA_PACKAGE_VERSION} \
-      cuda-nvprof-${CUDA_PACKAGE_VERSION} \
       cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} && \
@@ -58,18 +72,15 @@ RUN apt-get -qq update && apt-get -qq install -y \
 
 # Update compiler (GCC) and linker (LLD) versions
 # gfortran-11 is just for compiler_wrapper.f95
-RUN CODENAME="$(lsb_release -cs)" && \
-    wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-17 main" && \
-    apt-add-repository -y ppa:ubuntu-toolchain-r/test && \
+RUN LLVM_VERSION='18' && \
     apt-get -qq update && apt-get -qq install --no-install-recommends -y \
-      gcc-11 g++-11 gfortran-11 lld-17 && \
+      gcc-11 g++-11 gfortran-11 "lld-$LLVM_VERSION" && \
     apt-get clean && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
     update-alternatives --install \
       /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
-    update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-17 1
+    update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1
 
 RUN mkdir /wheels /build
 WORKDIR /build
@@ -80,40 +91,69 @@ WORKDIR /build
 # The compiler wrapper normalizes -march=native to -march=skylake
 # along with a couple other transformations before invoking GCC.
 COPY compiler_wrapper.f95 .
-RUN gfortran -O3 ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
+ARG AMD64_NATIVE_ARCH="skylake"
+ARG ARM64_NATIVE_ARCH="armv8.5-a+nopredres"
+RUN if [ "$(uname -m)" = "aarch64" ]; then \
+      NATIVE="WRAPPER_NATIVE=\"${ARM64_NATIVE_ARCH}\"" && \
+      AVX='WRAPPER_NO_AVX'; \
+    else \
+      NATIVE="WRAPPER_NATIVE=\"${AMD64_NATIVE_ARCH}\"" && \
+      AVX='WRAPPER_AVX="AVX256"'; \
+    fi && \
+    gfortran -ffree-line-length-512 -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
 
+ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=compute_90a"
+RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
+    case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
+      FLAGS="${FLAGS} -gencode=arch=compute_100a,code=sm_100a" ;; \
+    esac && \
+    echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
+ARG BUILD_MAX_JOBS
+
 
 FROM builder-base as deepspeed-builder
+
+ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST
+RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=ds-kernels/,rw \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    cd ds-kernels && \
+    export CUDA_ARCH_LIST="${DEEPSPEED_KERNELS_CUDA_ARCH_LIST}" && \
+    echo "CUDA_ARCH_LIST: ${CUDA_ARCH_LIST}" && \
+    python3 -m pip wheel -w /wheels \
+      --no-cache-dir --no-build-isolation --no-deps . && \
+    python3 -m pip install /wheels/*.whl
+
 # DeepSpeed build flags
 # See: https://www.deepspeed.ai/tutorials/advanced-install
-ARG DS_BUILD_OPS="1"
+ARG DS_BUILD_OPS="0"
 ARG DS_BUILD_CCL_COMM="0"
-ARG DS_BUILD_CPU_ADAM=""
-ARG DS_BUILD_CPU_LION=""
+ARG DS_BUILD_CPU_ADAM="1"
+ARG DS_BUILD_CPU_LION="1"
 # Requires CUTLASS
 ARG DS_BUILD_EVOFORMER_ATTN="0"
-ARG DS_BUILD_FUSED_ADAM=""
-ARG DS_BUILD_FUSED_LION=""
-ARG DS_BUILD_CPU_ADAGRAD=""
-ARG DS_BUILD_FUSED_LAMB=""
-ARG DS_BUILD_QUANTIZER=""
-ARG DS_BUILD_RANDOM_LTD=""
+ARG DS_BUILD_FUSED_ADAM="1"
+ARG DS_BUILD_FUSED_LION="1"
+ARG DS_BUILD_CPU_ADAGRAD="1"
+ARG DS_BUILD_FUSED_LAMB="1"
+ARG DS_BUILD_QUANTIZER="1"
+ARG DS_BUILD_RANDOM_LTD="1"
 # sparse_attn has issues with PyTorch >= 2.0.0 as of DeepSpeed 0.9.4
 ARG DS_BUILD_SPARSE_ATTN="0"
-ARG DS_BUILD_TRANSFORMER=""
-ARG DS_BUILD_TRANSFORMER_INFERENCE=""
-ARG DS_BUILD_STOCHASTIC_TRANSFORMER=""
-ARG DS_BUILD_UTILS=""
-ARG DS_BUILD_AIO=""
+ARG DS_BUILD_TRANSFORMER="1"
+ARG DS_BUILD_TRANSFORMER_INFERENCE="1"
+ARG DS_BUILD_STOCHASTIC_TRANSFORMER="1"
+ARG DS_BUILD_UTILS="1"
+ARG DS_BUILD_AIO="1"
 
 ARG DEEPSPEED_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN python3 -m pip install -U --no-cache-dir \
-      setuptools wheel pip deepspeed-kernels && \
+RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    python3 -m pip install -U --no-cache-dir \
+      setuptools wheel pip py-cpuinfo && \
     if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
       # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
       # requirement for C++17 (as of DeepSpeed 0.10.1).
@@ -144,9 +184,9 @@ RUN python3 -m pip install -U --no-cache-dir \
       do if [[ -z ${!VAR} ]]; then unset ${VAR}; fi; done; \
     } && \
     CC=$(realpath -e ./compiler) \
-      MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)" \
+      MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
       python3 -m pip wheel -w /wheels \
-      --no-cache-dir --no-build-isolation --no-deps \
+      --no-cache-dir --no-build-isolation --no-deps -v \
       deepspeed==${DEEPSPEED_VERSION} && \
     rm ./*
 SHELL ["/bin/sh", "-c"]
@@ -164,6 +204,7 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 # --distributed_adam, --distributed_lamb, and --group_norm aren't documented
 # in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     python3 -m pip install -U --no-cache-dir \
       packaging setuptools wheel pip && \
     CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
@@ -178,8 +219,7 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       :; \
     )" && \
     export CC=$(realpath -e ./compiler) && \
-    export MAX_JOBS="$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)" && \
-    export NVCC_APPEND_FLAGS='-diag-suppress 186,177' && \
+    export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)}" && \
     printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
         --cpp_ext \
@@ -218,12 +258,12 @@ FROM builder-base as xformers-builder
 ARG XFORMERS_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN python3 -m pip install -U --no-cache-dir \
+RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    python3 -m pip install -U --no-cache-dir \
       setuptools wheel pip && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS=1 \
       PYTHONUNBUFFERED=1 \
-      NVCC_APPEND_FLAGS='-diag-suppress 186,177' \
       XFORMERS_DISABLE_FLASH_ATTN=1 \
       python3 -m pip wheel -w /wheels -v \
       --no-cache-dir --no-build-isolation --no-deps \
