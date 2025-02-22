@@ -7,7 +7,7 @@ ARG BUILD_TORCH_VISION_VERSION="0.20.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.5.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="1.13"
 ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
-ARG BUILD_FLASH_ATTN_3_VERSION="2.7.4.post1"
+ARG BUILD_FLASH_ATTN_3_VERSION="b36ad4ef767d2d5536ff8af2e3f720ae4eba731c"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0 10.0+PTX"
@@ -90,11 +90,8 @@ ARG BUILD_FLASH_ATTN_3_VERSION
 # This cherry-picks a patch for versions >= 2.7.3 to prevent package name collisions
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
-      if printf '2.7.3\n%s' "${BUILD_FLASH_ATTN_3_VERSION}" | sort -Vc 2>/dev/null; then \
-        cd flash-attention && \
-        git cherry-pick -n 40cbd529e4ef4c09abc923ab6166b30cda841550 && \
-        sed -i 's@if bare_metal_version != Version("12\.3"):@if False:@' hopper/setup.py; \
-      fi; \
+      cd flash-attention && \
+      sed -i 's@if bare_metal_version != Version("12\.8"):@if False:@' hopper/setup.py; \
     else \
       mkdir flash-attention; \
     fi
