@@ -578,7 +578,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       echo "Not compiling flash-attn v3" && exit 0; \
     fi && \
     export CC=$(realpath -e ./compiler) \
-      MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
+      MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-1}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
