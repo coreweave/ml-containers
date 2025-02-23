@@ -90,8 +90,7 @@ ARG BUILD_FLASH_ATTN_3_VERSION
 # This cherry-picks a patch for versions >= 2.7.3 to prevent package name collisions
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
-      cd flash-attention && \
-      sed -i 's@if bare_metal_version != Version("12\.8"):@if False:@' hopper/setup.py; \
+      cd flash-attention; \
     else \
       mkdir flash-attention; \
     fi
