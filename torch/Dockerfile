@@ -10,8 +10,8 @@ ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
 ARG BUILD_FLASH_ATTN_3_VERSION="b36ad4ef767d2d5536ff8af2e3f720ae4eba731c"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
-ARG BUILD_TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0+PTX"
-ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST="70;80;89;90;100"
+ARG BUILD_TORCH_CUDA_ARCH_LIST="9.0+PTX"
+ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST="90"
 
 # 8.7 is supported in the PyTorch main branch, but not 2.0.0
 
@@ -341,9 +341,6 @@ ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 # Add sm_100a build if NV_CUDA_LIB_VERSION matches 12.[89].*
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
-    case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
-      FLAGS="${FLAGS} -gencode=arch=compute_100a,code=sm_100a -gencode=arch=compute_100,code=[sm_100,compute_100]" ;; \
-    esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 
 # If the directory /opt/nccl-tests exists,
@@ -530,6 +527,7 @@ RUN rm ./dist/*
 ENV PYTHONUNBUFFERED=1
 ENV FLASH_ATTENTION_FORCE_BUILD=TRUE
 ARG BUILD_FLASH_ATTN_MAX_JOBS=""
+ENV FLASH_ATTN_CUDA_ARCHS=90
 
 COPY <<-"EOT" /build/fa-build.sh
 	#!/bin/bash
@@ -574,7 +572,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       echo "Not compiling flash-attn v3" && exit 0; \
     fi && \
     export CC=$(realpath -e ./compiler) \
-      MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-1}" && \
+      MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-4}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \

@@ -4,7 +4,7 @@ ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.14.4"
 ARG APEX_COMMIT="a1df80457ba67d60cbdb0d3ddfb08a2702c821a8"
 ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
-ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
+ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="90"
 ARG XFORMERS_VERSION="0.0.28.post1"
 ARG BUILD_MAX_JOBS=""
 
@@ -107,9 +107,6 @@ COPY --chmod=755 scale.sh .
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=compute_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
-    case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
-      FLAGS="${FLAGS} -gencode=arch=compute_100a,code=sm_100a -gencode=arch=compute_100,code=[sm_100,compute_100]" ;; \
-    esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 ARG BUILD_MAX_JOBS
 
