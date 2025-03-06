@@ -28,6 +28,8 @@ func main() {
 	objectCount := os.Getenv("MAX_OBJECTS")
 	testDuration := os.Getenv("TEST_DURATION")
 	useSSL := os.Getenv("USE_SSL")
+	readSizeKB := os.Getenv("READ_SIZE_KB")
+	readBufferSizeKB := os.Getenv("READ_BUFFER_SIZE_KB")
 
 	if accessKeyID == "" || secretKey == "" {
 		slog.Error("S3_ACCESS_KEY_ID and S3_ACCESS_KEY_SECRET_KEY are required to run")
@@ -90,8 +92,42 @@ func main() {
 		}
 	}
 
+	// 16KiB by default
+	readSize := int64(16 * 1024)
+	if readSizeKB != "" {
+		val, err := strconv.Atoi(readSizeKB)
+		if err != nil {
+			slog.Error("failed to parse READ_SIZE_KB", "error", err)
+
+			os.Exit(1)
+		}
+
+		readSize = int64(val * 1024)
+	}
+
+	// 32KiB by default
+	readBufferSize := 32 * 1024
+	if readBufferSizeKB != "" {
+		val, err := strconv.Atoi(readBufferSizeKB)
+		if err != nil {
+			slog.Error("failed to parse READ_BUFFER_SIZE_KB", "error", err)
+
+			os.Exit(1)
+		}
+
+		readBufferSize = val * 1024
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	transport := cleanhttp.DefaultPooledTransport()
+
+	// Modify some defaults to be more performant
+	transport.MaxConnsPerHost = threads
+	transport.DisableCompression = true
+
+	// Our test only reads so just bump both buffers
+	transport.ReadBufferSize = readBufferSize
+	transport.WriteBufferSize = readBufferSize
 
 	s3Client, err := minio.New(endpoint, &minio.Options{
 		Creds:        credentials.NewStaticV4(accessKeyID, secretKey, ""),
@@ -137,9 +173,12 @@ func main() {
 		Objects:     objects,
 		ObjectSizes: sizes,
 		S3Client:    s3Client,
+		BlockSize:   readSize,
 	}
 
 	start := time.Now().UTC()
+
+	slog.Info("starting test")
 
 	for i := range threads {
 		wg.Add(1)
@@ -160,7 +199,10 @@ func main() {
 
 	aggregatedBytesRead := 0
 	aggregatedRequestsSent := 0
-	var averageTTLB int64
+	var (
+		averageTTLB     int64
+		averageTestTime int64
+	)
 
 	for range threads {
 		result := <-resultChan
@@ -168,9 +210,11 @@ func main() {
 		aggregatedBytesRead += int(result.TotalBytesRead)
 		aggregatedRequestsSent += int(result.TotalRequestsSent)
 		averageTTLB += result.TotalTTLBMS
+		averageTestTime += result.TotalTestTimeMS
 	}
 
 	averageTTLB = averageTTLB / int64(aggregatedRequestsSent)
+	averageTestTime = averageTestTime / int64(aggregatedRequestsSent)
 
 	timeSpent := time.Since(start)
 
@@ -181,12 +225,14 @@ func main() {
 	t.AppendRow(table.Row{"Total Bytes Read", fmt.Sprintf("%d", aggregatedBytesRead)})
 	t.AppendRow(table.Row{"Total Requests Sent", fmt.Sprintf("%d", aggregatedRequestsSent)})
 	t.AppendRow(table.Row{"Average TTLB", fmt.Sprintf("%d", averageTTLB)})
+	t.AppendRow(table.Row{"Average Test Time", fmt.Sprintf("%d", averageTestTime)})
 
 	t.Render()
 }
 
 type testParams struct {
 	Bucket      string
+	BlockSize   int64
 	RNG         *rand.Rand
 	Objects     []string
 	ObjectSizes []int64
@@ -196,13 +242,12 @@ type testParams struct {
 type testResult struct {
 	TotalBytesRead    int64
 	TotalRequestsSent int64
+	TotalTestTimeMS   int64
 	TotalTTLBMS       int64
 }
 
 func runTest(ctx context.Context, params *testParams, id int) *testResult {
 	ll := slog.With("ID", id)
-
-	ll.Info("starting test")
 
 	result := &testResult{}
 
@@ -211,25 +256,24 @@ func runTest(ctx context.Context, params *testParams, id int) *testResult {
 	for {
 		select {
 		case <-ctx.Done():
-			ll.Info("context cancelled, stopping test")
-
 			return result
 		default:
+			testStart := time.Now().UTC()
 			// Get our random object
 			randObjIndex := params.RNG.Int() % len(params.Objects)
 			obj := params.Objects[randObjIndex]
 			size := params.ObjectSizes[randObjIndex]
 
 			// Get a random 16KiB offset to read
-			maxOffset := size / (16 * 1024)
+			maxOffset := size / params.BlockSize
 			randObjOffset := params.RNG.Int() % int(maxOffset)
 
-			rangeStart := int64(randObjOffset * (16 * 1024))
-			rangeEnd := min(int64((rangeStart + (16 * 1024))), size)
+			rangeStart := int64(randObjOffset) * params.BlockSize
+			rangeEnd := min((rangeStart + params.BlockSize), size)
 
 			result.TotalRequestsSent++
 
-			start := time.Now().UTC()
+			reqStart := time.Now().UTC()
 
 			reqOpts := minio.GetObjectOptions{}
 			reqOpts.SetRange(rangeStart, rangeEnd)
@@ -246,7 +290,9 @@ func runTest(ctx context.Context, params *testParams, id int) *testResult {
 			resp.Close()
 
 			result.TotalBytesRead += amount
-			result.TotalTTLBMS += time.Since(start).Milliseconds()
+			result.TotalTTLBMS += time.Since(reqStart).Milliseconds()
+
+			result.TotalTestTimeMS += time.Since(testStart).Milliseconds()
 
 			if err != nil {
 				ll.Error("failed to discard response body", "error", err)
