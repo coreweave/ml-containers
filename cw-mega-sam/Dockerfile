@@ -10,10 +10,9 @@ RUN rm /tmp/requirements.txt
 ARG COMMIT
 RUN git clone https://github.com/mega-sam/mega-sam && \
     cd mega-sam && \
-    git checkout ${COMMIT} && \
-    rm -rf .git
+    git checkout ${COMMIT}
 
-RUN patch -p2 < /tmp/cuda124.patch
+# RUN patch -p2 < /tmp/cuda124.patch
 
 
 
