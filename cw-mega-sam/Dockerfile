@@ -2,7 +2,6 @@ ARG BASE_IMAGE
 FROM $BASE_IMAGE
 
 RUN mkdir -p /work
-WORKDIR /work
 COPY ./cuda124.patch /work/cuda124.patch
 COPY ./requirements.txt /work/requirements.txt
 
@@ -19,6 +18,6 @@ RUN cd /work/mega-sam && patch -p2 < /work/cuda124.patch
 
 
 ENTRYPOINT /work
-CMD echo "Hello! You should only need to run python setup.py install from the /tmp/mega-sam/base directory."
+CMD echo "Hello! You should only need to run python setup.py install from the /work/mega-sam/base directory."
 
 
