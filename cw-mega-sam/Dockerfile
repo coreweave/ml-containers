@@ -8,11 +8,11 @@ RUN pip install -r /tmp/requirements.txt
 RUN rm /tmp/requirements.txt
 
 ARG COMMIT
-RUN git clone https://github.com/mega-sam/mega-sam && \
+RUN git clone --recursive https://github.com/mega-sam/mega-sam && \
     cd mega-sam && \
     git checkout ${COMMIT}
 
-# RUN patch -p2 < /tmp/cuda124.patch
+RUN patch -p2 < /tmp/cuda124.patch
 
 
 
