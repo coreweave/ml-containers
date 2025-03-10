@@ -5,13 +5,6 @@ Brotli
 certifi
 cffi
 charset-normalizer
-conda
-conda-anaconda-telemetry
-conda-anaconda-tos
-conda-content-trust
-conda-libmamba-solver
-conda-package-handling
-conda_package_streaming
 cryptography
 distro
 droid_backends==0.0.0

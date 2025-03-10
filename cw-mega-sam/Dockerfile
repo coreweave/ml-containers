@@ -3,9 +3,9 @@ FROM $BASE_IMAGE
 
 COPY ./cuda124.patch /tmp/cuda124.patch
 COPY ./requirements.txt /tmp/requirements.txt
-RUN pip install -U --no-cache-dir \
-    -r /tmp/requirements.txt \
-    && rm /tmp/requirements.txt
+
+RUN cat /tmp/requirements.txt | sed -e '/^\s*#.*$/d' -e '/^\s*$/d' | xargs -n 1 pip install
+RUN rm /tmp/requirements.txt
 
 ARG COMMIT
 RUN git clone https://github.com/mega-sam/mega-sam && \
