@@ -4,7 +4,7 @@ FROM $BASE_IMAGE
 COPY ./cuda124.patch /tmp/cuda124.patch
 COPY ./requirements.txt /tmp/requirements.txt
 
-RUN cat /tmp/requirements.txt | sed -e '/^\s*#.*$/d' -e '/^\s*$/d' | xargs -n 1 pip install
+RUN pip install -r /tmp/requirements.txt
 RUN rm /tmp/requirements.txt
 
 ARG COMMIT

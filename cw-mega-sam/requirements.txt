@@ -7,7 +7,6 @@ cffi
 charset-normalizer
 cryptography
 distro
-droid_backends==0.0.0
 filelock==3.17.0
 frozendict
 fsspec==2025.3.0
