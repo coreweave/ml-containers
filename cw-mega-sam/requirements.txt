@@ -1,4 +1,3 @@
-anaconda-anon-usage
 annotated-types
 archspec
 boltons
