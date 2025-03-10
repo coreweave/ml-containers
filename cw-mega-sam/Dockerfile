@@ -1,22 +1,24 @@
 ARG BASE_IMAGE
 FROM $BASE_IMAGE
 
-COPY ./cuda124.patch /tmp/cuda124.patch
-COPY ./requirements.txt /tmp/requirements.txt
+RUN mkdir -p /work
+WORKDIR /work
+COPY ./cuda124.patch /work/cuda124.patch
+COPY ./requirements.txt /work/requirements.txt
 
-RUN pip install -r /tmp/requirements.txt
-RUN rm /tmp/requirements.txt
+RUN pip install -r /work/requirements.txt
+RUN rm /work/requirements.txt
 
 ARG COMMIT
-RUN cd /tmp && git clone --recursive https://github.com/mega-sam/mega-sam && \
+RUN cd /work && git clone --recursive https://github.com/mega-sam/mega-sam && \
     cd mega-sam && \
     git checkout ${COMMIT}
-RUN cd /tmp/mega-sam && ls -la
-RUN cd /tmp/mega-sam && patch -p2 < /tmp/cuda124.patch
+RUN cd /work/mega-sam && ls -la
+RUN cd /work/mega-sam && patch -p2 < /work/cuda124.patch
 
 
 
-ENTRYPOINT /tmp/mega-sam/base
+ENTRYPOINT /work
 CMD echo "Hello! You should only need to run python setup.py install from the /tmp/mega-sam/base directory."
 
 
