@@ -1,5 +1,3 @@
-Only in mega-sam/base: dist
-Only in mega-sam/base: droid_backends.egg-info
 diff -crB '--exclude=.git' ref/mega-sam/base/src/altcorr_kernel.cu mega-sam/base/src/altcorr_kernel.cu
 *** ref/mega-sam/base/src/altcorr_kernel.cu	Mon Mar 10 18:15:59 2025
 --- mega-sam/base/src/altcorr_kernel.cu	Mon Mar 10 17:10:59 2025
@@ -745,5 +743,3 @@ diff -crB '--exclude=.git' ref/mega-sam/base/thirdparty/lietorch/lietorch/src/li
           jleft_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
               X.data_ptr<scalar_t>(), 
               a.data_ptr<scalar_t>(), 
-Only in mega-sam/base/thirdparty/lietorch: lietorch.egg-info
-Only in mega-sam/: requirements.txt
