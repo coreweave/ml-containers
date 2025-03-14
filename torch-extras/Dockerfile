@@ -105,7 +105,7 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
 
-ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=compute_90a"
+ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
       FLAGS="${FLAGS} -gencode=arch=compute_100a,code=sm_100a" ;; \
