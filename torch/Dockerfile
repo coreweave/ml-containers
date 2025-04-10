@@ -176,7 +176,8 @@ RUN apt-get -qq update && apt-get -qq install -y \
     apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
     apt-get -qq update && \
     apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
-    apt-get clean
+    apt-get clean && \
+    python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
