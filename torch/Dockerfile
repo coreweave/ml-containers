@@ -2,9 +2,9 @@
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.8.1-devel-ubuntu22.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:12.8.1-base-ubuntu22.04"
 
-ARG BUILD_TORCH_VERSION="2.6.0"
-ARG BUILD_TORCH_VISION_VERSION="0.21.0"
-ARG BUILD_TORCH_AUDIO_VERSION="2.6.0"
+ARG BUILD_TORCH_VERSION="2.7.0-rc9"
+ARG BUILD_TORCH_VISION_VERSION="0.22.0-rc4"
+ARG BUILD_TORCH_AUDIO_VERSION="2.7.0-rc5"
 ARG BUILD_TRANSFORMERENGINE_VERSION="1.13"
 ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
 ARG BUILD_FLASH_ATTN_3_VERSION="2.7.2.post1"
@@ -174,7 +174,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
     { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
     | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
     apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
-    apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
+    apt-get -qq update && apt-get -qq install -y 'cmake=3.31.6-*' && apt-get clean
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
