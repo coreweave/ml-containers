@@ -174,7 +174,9 @@ RUN apt-get -qq update && apt-get -qq install -y \
     { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
     | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
     apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
-    apt-get -qq update && apt-get -qq install -y 'cmake=3.31.6-*' && apt-get clean
+    apt-get -qq update && \
+    apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
+    apt-get clean
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
