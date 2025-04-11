@@ -1,0 +1,25 @@
+on:
+  workflow_dispatch:
+    inputs:
+      base-image:
+        description: "Base image to use"
+        required: true
+      commit:
+        description: "Commit of Mega-sam to include"
+        required: true
+  push:
+    paths:
+      - "cw-mega-sam/**"
+      - ".github/workflows/cw-mega-sam.yml"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: cw-mega-sam
+      folder: cw-mega-sam
+      build-args: |
+        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/torch-extras:es-actions-68fbfd1-nccl-cuda12.4.1-ubuntu22.04-nccl2.25.1-1-torch2.6.0-vision0.21.0-audio2.6.0-abi0'}}
+        COMMIT=${{ inputs.commit || 'main'}}
