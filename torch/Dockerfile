@@ -662,6 +662,7 @@ RUN export \
       cuda-nvrtc-${CUDA_PACKAGE_VERSION} \
       libcusparse-${CUDA_PACKAGE_VERSION} \
       libcusolver-${CUDA_PACKAGE_VERSION} \
+      libcufile-${CUDA_PACKAGE_VERSION} \
       cuda-cupti-${CUDA_PACKAGE_VERSION} \
       libnvjpeg-${CUDA_PACKAGE_VERSION} \
       libnvtoolsext1 && \
