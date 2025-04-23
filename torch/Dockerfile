@@ -87,10 +87,9 @@ RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VER
 
 FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
-# This cherry-picks a patch for versions >= 2.7.3 to prevent package name collisions
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
-      cd flash-attention; \
+      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c; \
     else \
       mkdir flash-attention; \
     fi
