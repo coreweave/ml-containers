@@ -37,7 +37,7 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip git ninja-build && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging 'setuptools<70.0.0' wheel cmake setuptools_scm
+    pip3 install -U --no-cache-dir pip packaging 'setuptools>=61' 'setuptools-scm>=8.0' wheel cmake setuptools_scm
 
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
@@ -53,6 +53,8 @@ FROM builder-base as vllm-builder
 WORKDIR /workspace
 
 ENV LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}"
+
+RUN free -h
 
 RUN --mount=type=bind,from=version_validation,target=/tmp/validation,rw \
     /tmp/validation/validate_versions.sh
