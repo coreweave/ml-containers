@@ -4,8 +4,11 @@ FROM scratch as freezer
 WORKDIR /
 COPY --chmod=755 freeze.sh /
 
-FROM ${BASE_IMAGE} as builder-base
+FROM scratch as version_validation
+WORKDIR /
+COPY --chmod=755 validate_versions.sh /
 
+FROM ${BASE_IMAGE} as builder-base
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
@@ -50,6 +53,9 @@ FROM builder-base as vllm-builder
 WORKDIR /workspace
 
 ENV LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}"
+
+RUN --mount=type=bind,from=version_validation,target=/tmp/validation,rw \
+    /tmp/validation/validate_versions.sh
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
