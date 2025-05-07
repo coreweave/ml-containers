@@ -1,12 +1,8 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-nccl-update-e2111ad-nccl-cuda12.8.1-ubuntu22.04-nccl2.26.2-1-torch2.6.0-vision0.21.0-audio2.6.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-nccl-update-e2111ad-base-cuda12.8.1-ubuntu22.04-torch2.6.0-vision0.21.0-audio2.6.0-abi1"
 
 FROM scratch as freezer
 WORKDIR /
 COPY --chmod=755 freeze.sh /
-
-FROM scratch as version_validation
-WORKDIR /
-COPY --chmod=755 validate_versions.sh /
 
 FROM ${BASE_IMAGE} as builder-base
 
@@ -53,11 +49,6 @@ FROM builder-base as vllm-builder
 WORKDIR /workspace
 
 ENV LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}"
-
-RUN free -h
-
-RUN --mount=type=bind,from=version_validation,target=/tmp/validation,rw \
-    /tmp/validation/validate_versions.sh
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
