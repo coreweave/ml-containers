@@ -19,8 +19,8 @@ export UCX_NET_DEVICES=ibp0:1,ibp1:1,ibp2:1,ibp3:1,ibp4:1,ibp5:1,ibp6:1,ibp7:1
 export MASTER_PORT="$(expr 10000 + "$(echo -n "${SLURM_JOB_ID:?}" | tail -c 4)")"
 export MASTER_ADDR="$(scontrol show hostnames "${SLURM_JOB_NODELIST:?}" | head -n 1)"
 
-
-CPU_BIND='map_ldom:0,0,0,0,1,1,1,1'
+### uncomment when running on CW H100's
+#CPU_BIND='map_ldom:0,0,0,0,1,1,1,1'
 
 CONTAINER_IMAGE="ghcr.io#coreweave/ml-containers/megatron-demo:TAG"
 
