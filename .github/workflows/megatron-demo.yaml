@@ -1,3 +1,5 @@
+name: Megatron Training Demo
+
 on:
   workflow_dispatch:
     inputs:
