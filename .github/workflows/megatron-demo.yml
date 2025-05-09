@@ -1,6 +1,4 @@
 name: Megatron Training Demo
-# TODO: rename this workflow to `megatron-demo.yaml` 
-# and rename `megatron-back.yaml` to `megatron.yaml` before merging.
 
 on:
   workflow_dispatch:
