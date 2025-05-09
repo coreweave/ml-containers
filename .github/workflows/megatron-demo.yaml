@@ -5,6 +5,9 @@ on:
         description: 'Base image to use'
         required: true
   push:
+    branches: 
+      - "dmarx/megatron-demo"
+      - "main"
     paths:
       - "megatron-demo/**"
       - ".github/workflows/megatron-demo.yml"
