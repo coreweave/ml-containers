@@ -3,7 +3,7 @@ on:
     inputs:
       base-image:
         description: 'Base image to use'
-        required: true
+        required: false
   push:
     branches: 
       - "dmarx/megatron-demo"
