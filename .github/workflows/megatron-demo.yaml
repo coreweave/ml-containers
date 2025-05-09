@@ -1,0 +1,23 @@
+on:
+  workflow_dispatch:
+    inputs:
+      base-image:
+        description: 'Base image to use'
+        required: true
+  push:
+    paths:
+      - "megatron-demo/**"
+      - ".github/workflows/megatron-demo.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: megatron-demo
+      folder: megatron-demo
+      build-args: |
+        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/megatron:es-megatron-tensorizer-5fabc1e'}}
+        IMAGE_TAG=${{ github.sha }}
