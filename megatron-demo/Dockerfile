@@ -10,10 +10,17 @@ ARG IMAGE_TAG
 ENV IMAGE_TAG=${IMAGE_TAG}
 RUN sed -i "s|megatron-demo:TAG|megatron-demo:${IMAGE_TAG}|g" /usr/src/app/megatron-lm/sbatch_demo.sh
 
-### Get tokenizer
+### Install Git LFS
+RUN apt-get update && \
+    apt-get install -y git-lfs && \
+    git lfs install
+
+### Get tokenizer (with LFS)
 RUN mkdir tokenizers && \
     cd tokenizers && \
     git clone https://huggingface.co/NovelAI/nerdstash-tokenizer-v2 && \
+    cd nerdstash-tokenizer-v2 && \
+    git lfs pull && \
     rm -rf .git
 
 WORKDIR /usr/src/app/megatron-lm
