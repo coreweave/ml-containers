@@ -15,9 +15,21 @@ on:
       - ".github/workflows/megatron-demo.yml"
       - ".github/workflows/build.yml"
 
-
 jobs:
+  set-tag:
+    name: Set Image Tag
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set.outputs.tag }}
+    steps:
+      - id: set
+        run: |
+          TAG="${GITHUB_REF_NAME}-${GITHUB_SHA::7}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
   build:
+    name: Build Container
+    needs: set-tag
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
@@ -25,4 +37,5 @@ jobs:
       folder: megatron-demo
       build-args: |
         BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/megatron:es-megatron-tensorizer-5fabc1e'}}
-        IMAGE_TAG=${{ github.sha }}
+        IMAGE_TAG=${{ needs.set-tag.outputs.image_tag }}
+      tag-suffix: ${{ needs.set-tag.outputs.image_tag }}
