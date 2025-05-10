@@ -38,4 +38,5 @@ jobs:
       build-args: |
         BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/megatron:es-megatron-tensorizer-5fabc1e'}}
         IMAGE_TAG=${{ needs.set-tag.outputs.image_tag }}
+      tag-prefix: ""
       tag-suffix: ${{ needs.set-tag.outputs.image_tag }}
