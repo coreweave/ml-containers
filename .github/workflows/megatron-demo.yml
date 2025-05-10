@@ -24,8 +24,10 @@ jobs:
     steps:
       - id: set
         run: |
-          TAG="${GITHUB_REF_NAME}-${GITHUB_SHA::7}"
+          SANITIZED_REF_NAME="${GITHUB_REF_NAME//\//-}"
+          TAG="${SANITIZED_REF_NAME}-${GITHUB_SHA::7}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
+
 
   build:
     name: Build Container
