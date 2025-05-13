@@ -68,7 +68,10 @@ RUN apt-get -qq update && apt-get -qq install -y \
     { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
     | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
     apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
-    apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
+    apt-get -qq update && \
+    apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
+    apt-get clean && \
+    python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
 # Update compiler (GCC) and linker (LLD) versions
 # gfortran-11 is just for compiler_wrapper.f95
@@ -105,10 +108,10 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
 
-ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=compute_90a"
+ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
-      FLAGS="${FLAGS} -gencode=arch=compute_100a,code=sm_100a" ;; \
+      FLAGS="${FLAGS} -gencode=arch=compute_100,code=sm_100 -gencode=arch=compute_100a,code=sm_100a" ;; \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 ARG BUILD_MAX_JOBS

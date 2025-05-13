@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.7
-ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.8.0-devel-ubuntu22.04"
-ARG FINAL_BASE_IMAGE="nvidia/cuda:12.8.0-base-ubuntu22.04"
+ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.8.1-devel-ubuntu22.04"
+ARG FINAL_BASE_IMAGE="nvidia/cuda:12.8.1-base-ubuntu22.04"
 
-ARG BUILD_TORCH_VERSION="2.5.1"
-ARG BUILD_TORCH_VISION_VERSION="0.20.0"
-ARG BUILD_TORCH_AUDIO_VERSION="2.5.0"
+ARG BUILD_TORCH_VERSION="2.7.0"
+ARG BUILD_TORCH_VISION_VERSION="0.22.0"
+ARG BUILD_TORCH_AUDIO_VERSION="2.7.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="1.13"
 ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
 ARG BUILD_FLASH_ATTN_3_VERSION="2.7.2.post1"
@@ -174,7 +174,10 @@ RUN apt-get -qq update && apt-get -qq install -y \
     { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
     | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
     apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
-    apt-get -qq update && apt-get -qq install -y cmake && apt-get clean
+    apt-get -qq update && \
+    apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
+    apt-get clean && \
+    python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
 RUN mkdir /tmp/ccache-install && \
     cd /tmp/ccache-install && \
@@ -340,7 +343,7 @@ ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 # Add sm_100a build if NV_CUDA_LIB_VERSION matches 12.[89].*
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
-      FLAGS="${FLAGS} -gencode=arch=compute_100a,code=sm_100a" ;; \
+      FLAGS="${FLAGS} -gencode=arch=compute_100,code=sm_100 -gencode=arch=compute_100a,code=sm_100a" ;; \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 
@@ -659,6 +662,7 @@ RUN export \
       cuda-nvrtc-${CUDA_PACKAGE_VERSION} \
       libcusparse-${CUDA_PACKAGE_VERSION} \
       libcusolver-${CUDA_PACKAGE_VERSION} \
+      libcufile-${CUDA_PACKAGE_VERSION} \
       cuda-cupti-${CUDA_PACKAGE_VERSION} \
       libnvjpeg-${CUDA_PACKAGE_VERSION} \
       libnvtoolsext1 && \
