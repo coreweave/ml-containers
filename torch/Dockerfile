@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
-ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.8.1-devel-ubuntu22.04"
-ARG FINAL_BASE_IMAGE="nvidia/cuda:12.8.1-base-ubuntu22.04"
+ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.9.0-devel-ubuntu22.04"
+ARG FINAL_BASE_IMAGE="nvidia/cuda:12.9.0-base-ubuntu22.04"
 
 ARG BUILD_TORCH_VERSION="2.7.0"
 ARG BUILD_TORCH_VISION_VERSION="0.22.0"
@@ -223,11 +223,14 @@ RUN LLVM_VERSION='18' && \
 
 
 FROM builder-base-shared AS builder-base-arm64
-# There is currently no CPU BLAS used for ARM builds,
-# so this stage is just an alias
+ARG BUILD_TORCH_CUDA_ARCH_LIST
+ENV TORCH_CUDA_ARCH_LIST="9.0${BUILD_TORCH_CUDA_ARCH_LIST# 9.0}"
+# There is currently no CPU BLAS used for ARM builds
 
 
 FROM builder-base-shared AS builder-base-amd64
+ARG BUILD_TORCH_CUDA_ARCH_LIST
+ENV TORCH_CUDA_ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}"
 # Install AOCL-BLAS and AOCL-LAPACK
 # See: https://www.amd.com/en/developer/aocl/dense.html
 ARG AOCL_BASE
@@ -331,13 +334,15 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
     fi
 
 ARG BUILD_TORCH_VERSION
-ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
-# Filter out the 10.0 arch on CUDA versions != 12.8
-ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${BUILD_TORCH_CUDA_ARCH_LIST/ 10.0/}||${BUILD_TORCH_CUDA_ARCH_LIST}"
+# Filter out the 10.0 arch on CUDA versions != 12.8 and != 12.9
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0/}||${TORCH_CUDA_ARCH_LIST}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
+
+RUN printf 'Arch: %s\nTORCH_CUDA_ARCH_LIST=%s\n' "$(uname -m)" "${TORCH_CUDA_ARCH_LIST}"
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 # Add sm_100a build if NV_CUDA_LIB_VERSION matches 12.[89].*
@@ -589,7 +594,15 @@ COPY --link --from=flash-attn-builder /build/dist/ /build/dist/
 COPY --link --from=flash-attn-3-builder /build/dist/ /build/dist/
 
 ## Build the final torch image.
-FROM ${FINAL_BASE_IMAGE}
+FROM ${FINAL_BASE_IMAGE} as final-arm64
+ARG BUILD_TORCH_CUDA_ARCH_LIST
+ENV TORCH_CUDA_ARCH_LIST="9.0${BUILD_TORCH_CUDA_ARCH_LIST# 9.0}"
+
+FROM ${FINAL_BASE_IMAGE} as final-amd64
+ARG BUILD_TORCH_CUDA_ARCH_LIST
+ENV TORCH_CUDA_ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}"
+
+FROM final-${TARGETARCH}
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install core packages
@@ -635,12 +648,12 @@ RUN install -m 0644 -t /etc/ld.so.conf.d "${AOCL_BASE}/aocl.conf" && \
 ARG BUILD_TORCH_VERSION
 ARG BUILD_TORCH_VISION_VERSION
 ARG BUILD_TORCH_AUDIO_VERSION
-ARG BUILD_TORCH_CUDA_ARCH_LIST
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
-# Filter out the 10.0 arch on CUDA versions != 12.8
-ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${BUILD_TORCH_CUDA_ARCH_LIST/ 10.0/}||${BUILD_TORCH_CUDA_ARCH_LIST}"
+# Filter out the 10.0 arch on CUDA versions != 12.8 and != 12.9
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0/}||${TORCH_CUDA_ARCH_LIST}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
