@@ -19,6 +19,8 @@ ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
 
+# region Downloads
+
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
 FROM alpine/git:2.40.1 AS downloader-base
@@ -134,6 +136,7 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
     | install -m 0644 /dev/stdin "${AOCL_BASE}/aocl.conf" && \
     rm -r ./*
 
+# endregion Downloads
 
 ## Build PyTorch on a builder image.
 FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
@@ -224,7 +227,7 @@ RUN LLVM_VERSION='18' && \
 
 FROM builder-base-shared AS builder-base-arm64
 ARG BUILD_TORCH_CUDA_ARCH_LIST
-ENV TORCH_CUDA_ARCH_LIST="9.0${BUILD_TORCH_CUDA_ARCH_LIST# 9.0}"
+ENV TORCH_CUDA_ARCH_LIST="9.0${BUILD_TORCH_CUDA_ARCH_LIST#* 9.0}"
 # There is currently no CPU BLAS used for ARM builds
 
 
@@ -596,7 +599,7 @@ COPY --link --from=flash-attn-3-builder /build/dist/ /build/dist/
 ## Build the final torch image.
 FROM ${FINAL_BASE_IMAGE} as final-arm64
 ARG BUILD_TORCH_CUDA_ARCH_LIST
-ENV TORCH_CUDA_ARCH_LIST="9.0${BUILD_TORCH_CUDA_ARCH_LIST# 9.0}"
+ENV TORCH_CUDA_ARCH_LIST="9.0${BUILD_TORCH_CUDA_ARCH_LIST#* 9.0}"
 
 FROM ${FINAL_BASE_IMAGE} as final-amd64
 ARG BUILD_TORCH_CUDA_ARCH_LIST
