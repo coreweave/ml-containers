@@ -2,9 +2,9 @@
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.8.1-devel-ubuntu22.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:12.8.1-base-ubuntu22.04"
 
-ARG BUILD_TORCH_VERSION="2.7.0"
-ARG BUILD_TORCH_VISION_VERSION="0.22.0"
-ARG BUILD_TORCH_AUDIO_VERSION="2.7.0-rc8"
+ARG BUILD_TORCH_VERSION="2.7.1"
+ARG BUILD_TORCH_VISION_VERSION="0.22.1"
+ARG BUILD_TORCH_AUDIO_VERSION="2.7.1"
 ARG BUILD_TRANSFORMERENGINE_VERSION="1.13"
 ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
 ARG BUILD_FLASH_ATTN_3_VERSION="b36ad4ef767d2d5536ff8af2e3f720ae4eba731c"
@@ -13,11 +13,11 @@ ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="9.0+PTX"
 ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST="90"
 
-# 8.7 is supported in the PyTorch main branch, but not 2.0.0
-
 ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
+
+# region Downloads
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
@@ -135,6 +135,7 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
     | install -m 0644 /dev/stdin "${AOCL_BASE}/aocl.conf" && \
     rm -r ./*
 
+# endregion Downloads
 
 ## Build PyTorch on a builder image.
 FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
