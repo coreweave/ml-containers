@@ -32,9 +32,9 @@ RUN ldconfig
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-      python3-pip git ninja-build && \
+      python3-pip git ninja-build cmake && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel
+    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm
 
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
