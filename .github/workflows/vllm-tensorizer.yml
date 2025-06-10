@@ -21,3 +21,4 @@ jobs:
       tag-suffix: ${{ inputs.commit || '85e2b7bb1380dd7096e0d6b64b0d7633b0a9db4a'}}
       build-args: |
         COMMIT_HASH=${{ inputs.commit || '85e2b7bb1380dd7096e0d6b64b0d7633b0a9db4a'}}
+        TRITON_COMMIT=96316ce5

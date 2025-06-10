@@ -46,8 +46,24 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
 
+# Testing
+FROM alpine/git:2.36.3 as triton-downloader
+WORKDIR /git
+ARG TRITON_COMMIT="96316ce5"
+RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout https://github.com/openai/triton.git && \
+    cd triton && \
+    git checkout "${TRITON_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 --depth 1 --filter=blob:none \
+# Testing end
+
 FROM builder-base as vllm-builder
 WORKDIR /workspace
+
+# Testing
+RUN --mount=type=bind,from=triton-builder,source=/wheels,target=/tmp/triton-wheels \
+    python3 -m pip install --no-cache-dir /tmp/triton-wheels/*.whl && \
+    rm -rf /tmp/triton-wheels \
+# Testing end
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
@@ -60,6 +76,16 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 WORKDIR /wheels
 
 FROM ${BASE_IMAGE} as base
+
+# Testing
+FROM builder-base as triton-builder
+WORKDIR /workspace
+RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=/workspace,rw \
+    LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}" \
+    python3 -m pip wheel -w /wheels \
+    -v --no-cache-dir --no-build-isolation --no-deps \
+    ./
+# Testing end
 
 WORKDIR /workspace
 
