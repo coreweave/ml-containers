@@ -43,7 +43,7 @@ ARG TRITON_COMMIT="96316ce5"
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout https://github.com/openai/triton.git && \
     cd triton && \
     git checkout "${TRITON_COMMIT}" && \
-    git submodule update --init --recursive --jobs 8 --depth 1 --filter=blob:none \
+    git submodule update --init --recursive --jobs 8 --depth 1 --filter=blob:none
 
 FROM builder-base as triton-builder
 WORKDIR /workspace
@@ -71,7 +71,7 @@ WORKDIR /workspace
 # Testing
 RUN --mount=type=bind,from=triton-builder,source=/wheels,target=/tmp/triton-wheels \
     python3 -m pip install --no-cache-dir /tmp/triton-wheels/*.whl && \
-    rm -rf /tmp/triton-wheels \
+    rm -rf /tmp/triton-wheels
 # Testing end
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
