@@ -36,6 +36,24 @@ RUN apt-get -qq update && \
     apt-get clean && \
     pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm
 
+# Testing
+FROM alpine/git:2.36.3 as triton-downloader
+WORKDIR /git
+ARG TRITON_COMMIT="96316ce5"
+RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout https://github.com/openai/triton.git && \
+    cd triton && \
+    git checkout "${TRITON_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 --depth 1 --filter=blob:none \
+
+FROM builder-base as triton-builder
+WORKDIR /workspace
+RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=/workspace,rw \
+    LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}" \
+    python3 -m pip wheel -w /wheels \
+    -v --no-cache-dir --no-build-isolation --no-deps \
+    ./
+# Testing end
+
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
 ARG COMMIT_HASH
@@ -46,15 +64,6 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none
 
-# Testing
-FROM alpine/git:2.36.3 as triton-downloader
-WORKDIR /git
-ARG TRITON_COMMIT="96316ce5"
-RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout https://github.com/openai/triton.git && \
-    cd triton && \
-    git checkout "${TRITON_COMMIT}" && \
-    git submodule update --init --recursive --jobs 8 --depth 1 --filter=blob:none \
-# Testing end
 
 FROM builder-base as vllm-builder
 WORKDIR /workspace
@@ -76,16 +85,6 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 WORKDIR /wheels
 
 FROM ${BASE_IMAGE} as base
-
-# Testing
-FROM builder-base as triton-builder
-WORKDIR /workspace
-RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=/workspace,rw \
-    LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}" \
-    python3 -m pip wheel -w /wheels \
-    -v --no-cache-dir --no-build-isolation --no-deps \
-    ./
-# Testing end
 
 WORKDIR /workspace
 
