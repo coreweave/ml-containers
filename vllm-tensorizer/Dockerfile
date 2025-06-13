@@ -54,6 +54,22 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
+    sed -i '/^find_package(Torch REQUIRED)/i\
+find_package(CUDA REQUIRED)\n\
+find_library(NVTOOLSEXT_LIBRARY\n\
+             NAMES nvToolsExt\n\
+             PATH_SUFFIXES lib)\n\
+\n\
+if (NVTOOLSEXT_LIBRARY)\n\
+    message(STATUS "Found nvToolsExt library: ${NVTOOLSEXT_LIBRARY}")\n\
+else()\n\
+    message(FATAL_ERROR "Could not find nvToolsExt library")\n\
+endif()\n\
+add_library(CUDA::nvToolsExt SHARED IMPORTED)\n\
+set_target_properties(CUDA::nvToolsExt PROPERTIES\n\
+ IMPORTED_LOCATION ${NVTOOLSEXT_LIBRARY}\n\
+)\n\
+\n' CMakeLists.txt && \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
       python3 -m pip wheel -w /wheels \
