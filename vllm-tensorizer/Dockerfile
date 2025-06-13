@@ -56,7 +56,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     sed -i '/^find_package(Torch REQUIRED)/i\
 find_package(CUDA REQUIRED)\n\
-find_library(NVTOOLSEXT_LIBRARY\n\
+find_library(NVTOOLSEXT_LIBRARY)\n\
              NAMES nvToolsExt\n\
 \n\
 if (NVTOOLSEXT_LIBRARY)\n\
