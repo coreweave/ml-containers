@@ -34,7 +34,7 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip git ninja-build cmake && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm
+    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex
 
 FROM alpine/git:2.36.3 as vllm-downloader
 WORKDIR /git
