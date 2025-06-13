@@ -18,7 +18,7 @@ jobs:
     with:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
-      tag-suffix: ${{ inputs.commit || '85e2b7bb1380dd7096e0d6b64b0d7633b0a9db4a'}}
+      tag-suffix: ${{ inputs.commit || '5e4f640d22b0e4b50f506ce913d01fd471ad8086'}}
       build-args: |
-        COMMIT_HASH=${{ inputs.commit || '85e2b7bb1380dd7096e0d6b64b0d7633b0a9db4a'}}
+        COMMIT_HASH=${{ inputs.commit || '5e4f640d22b0e4b50f506ce913d01fd471ad8086'}}
         TRITON_COMMIT=96316ce5
