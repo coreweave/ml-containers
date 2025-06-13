@@ -5,7 +5,7 @@ COPY --chmod=755 freeze.sh /
 
 FROM ${BASE_IMAGE} as builder-base
 
-ARG MAX_JOBS=""
+ARG MAX_JOBS="2"
 
 # Dependencies requiring NVCC are built ahead of time in a separate stage
 # so that the ~2 GiB dev library installations don't have to be included
