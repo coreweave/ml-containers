@@ -58,7 +58,6 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 find_package(CUDA REQUIRED)\n\
 find_library(NVTOOLSEXT_LIBRARY\n\
              NAMES nvToolsExt\n\
-             PATH_SUFFIXES lib)\n\
 \n\
 if (NVTOOLSEXT_LIBRARY)\n\
     message(STATUS "Found nvToolsExt library: ${NVTOOLSEXT_LIBRARY}")\n\
