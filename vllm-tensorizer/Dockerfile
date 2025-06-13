@@ -54,7 +54,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
-    LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}" \
+    LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
+    CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
       python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /tmp/frozen/constraints.txt \
