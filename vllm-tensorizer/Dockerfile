@@ -1,9 +1,9 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:00b897e-nccl-cuda12.8.1-ubuntu22.04-nccl2.27.3-1-torch2.7.1-vision0.22.1-audio2.7.0-abi1"
-FROM scratch as freezer
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:00b897e-nccl-cuda12.8.1-ubuntu22.04-nccl2.27.3-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+FROM scratch AS freezer
 WORKDIR /
 COPY --chmod=755 freeze.sh /
 
-FROM ${BASE_IMAGE} as builder-base
+FROM ${BASE_IMAGE} AS builder-base
 
 ARG MAX_JOBS="10"
 
@@ -15,7 +15,7 @@ RUN apt-get -qq update && \
     apt-get clean && \
     pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex
 
-FROM alpine/git:2.36.3 as vllm-downloader
+FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
 ARG COMMIT_HASH
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
@@ -26,7 +26,7 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       --depth 1 --filter=blob:none
 
 
-FROM builder-base as vllm-builder
+FROM builder-base AS vllm-builder
 WORKDIR /workspace
 
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
@@ -42,7 +42,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 
 WORKDIR /wheels
 
-FROM ${BASE_IMAGE} as base
+FROM ${BASE_IMAGE} AS base
 
 WORKDIR /workspace
 
