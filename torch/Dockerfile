@@ -381,6 +381,7 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
 # (See: https://github.com/pytorch/pytorch/blob/v2.3.0/cmake/Modules/FindBLAS.cmake#L259-L271).
 # Without WITH_BLAS, it would detect the BLAS implementation as
 # BLAS_INFO=blis instead of BLAS_INFO=FLAME and wouldn't include LAPACK either.
+ENV USE_SYSTEM_NVTX=1
 ARG BUILD_CXX11_ABI=""
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
@@ -607,6 +608,7 @@ ENV TORCH_CUDA_ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}"
 
 FROM final-${TARGETARCH}
 ENV DEBIAN_FRONTEND=noninteractive
+ENV USE_SYSTEM_NVTX=1
 
 # Install core packages
 RUN apt-get -qq update && apt-get -qq install -y \
