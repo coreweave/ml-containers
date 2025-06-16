@@ -5,7 +5,7 @@ COPY --chmod=755 freeze.sh /
 
 FROM ${BASE_IMAGE} AS builder-base
 
-ARG MAX_JOBS="10"
+ARG MAX_JOBS="16"
 
 RUN ldconfig
 
@@ -33,6 +33,15 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
+    python3 -m pip install --no-cache-dir py-cpuinfo && \
+    if [ -f 'use_existing_torch.py' ]; then \
+      python3 use_existing_torch.py; \
+    else \
+      git cat-file blob \
+        e489ad7a210f4234db696d1f2749d5f3662fa65b:use_existing_torch.py \
+        | python3 -; \
+    fi && \
+    USE_CUDNN=1 USE_CUSPARSELT=1 \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
       python3 -m pip wheel -w /wheels \
