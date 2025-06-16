@@ -74,10 +74,6 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 
 RUN sed -i '/xformers==/d' /tmp/constraints.txt
 
-RUN python3 -m pip install --no-cache-dir \
-      "fschat[model_worker] == 0.2.30" \
-      -c /tmp/constraints.txt
-
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
