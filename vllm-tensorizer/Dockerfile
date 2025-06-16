@@ -72,6 +72,8 @@ RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
 
+RUN sed -i '/xformers==/d' /tmp/constraints.txt
+
 RUN python3 -m pip install --no-cache-dir \
       "fschat[model_worker] == 0.2.30" \
       -c /tmp/constraints.txt
