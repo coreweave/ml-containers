@@ -1,32 +1,11 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:00b897e-nccl-cuda12.8.1-ubuntu22.04-nccl2.27.3-1-torch2.7.0-vision0.22.0-audio2.7.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:00b897e-nccl-cuda12.8.1-ubuntu22.04-nccl2.27.3-1-torch2.7.1-vision0.22.0-audio2.7.0-abi1"
 FROM scratch as freezer
 WORKDIR /
 COPY --chmod=755 freeze.sh /
 
 FROM ${BASE_IMAGE} as builder-base
 
-ARG MAX_JOBS="8"
-
-# Dependencies requiring NVCC are built ahead of time in a separate stage
-# so that the ~2 GiB dev library installations don't have to be included
-# in the final image.
-#RUN export \
-#      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
-#      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
-#    export \
-#      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
-#    apt-get -qq update && apt-get install -y --no-install-recommends \
-#      cuda-nvcc-${CUDA_PACKAGE_VERSION} \
-#      cuda-nvml-dev-${CUDA_PACKAGE_VERSION} \
-#      libcurand-dev-${CUDA_PACKAGE_VERSION} \
-#      libcublas-dev-${CUDA_PACKAGE_VERSION} \
-#      libcusparse-dev-${CUDA_PACKAGE_VERSION} \
-#      libcusolver-dev-${CUDA_PACKAGE_VERSION} \
-#      cuda-nvprof-${CUDA_PACKAGE_VERSION} \
-#      cuda-profiler-api-${CUDA_PACKAGE_VERSION} \
-#      libaio-dev \
-#      ninja-build && \
-#    apt-get clean
+ARG MAX_JOBS="10"
 
 RUN ldconfig
 
