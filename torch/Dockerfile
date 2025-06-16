@@ -53,6 +53,8 @@ RUN ./clone.sh pytorch/pytorch pytorch "${BUILD_TORCH_VERSION}" && \
     if [ "${BUILD_TORCH_VERSION}" = '2.5.1' ]; then \
       wget 'https://github.com/pytorch/pytorch/commit/1cdaf1d85f5e4b3f8952fd0737a1afeb16995d13.patch' -qO- \
       | git -C pytorch apply; \
+    elif [ "${BUILD_TORCH_VERSION}" = '2.7.1' ]; then \
+      git -C pytorch cherry-pick -n b74be524547f7f025066f19eda3b53a887c244ba; \
     fi && \
     rm -rf pytorch/.git
 
