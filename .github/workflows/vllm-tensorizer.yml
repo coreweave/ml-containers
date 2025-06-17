@@ -23,5 +23,6 @@ jobs:
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.vllm-commit }}
       build-args: |
-        VLLM_COMMIT_HASH=${{ matrix.vllm-commit }}
+        VLLM_COMMIT=${{ matrix.vllm-commit }}
+        FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         BASE_IMAGE=${{ matrix.base-image }}

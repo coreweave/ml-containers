@@ -15,20 +15,35 @@ RUN apt-get -qq update && \
     apt-get clean && \
     pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex
 
+# Create the /wheels directory
+WORKDIR /wheels
+
+WORKDIR /workspace
+
+
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
-ARG VLLM_COMMIT_HASH
-RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
-      https://github.com/vllm-project/vllm.git && \
+ARG VLLM_COMMIT
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/vllm-project/vllm && \
     cd vllm && \
-    git checkout "${VLLM_COMMIT_HASH}" && \
+    git checkout "${VLLM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
-      --depth 1 --filter=blob:none
+      --depth 1 --filter=tree:0
+
+
+FROM alpine/git:2.36.3 AS flashinfer-downloader
+WORKDIR /git
+ARG FLASHINFER_COMMIT
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/flashinfer-ai/flashinfer && \
+    cd flashinfer && \
+    git checkout "${FLASHINFER_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=tree:0
 
 
 FROM builder-base AS vllm-builder
-WORKDIR /workspace
-
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
@@ -51,6 +66,21 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 
 WORKDIR /wheels
 
+
+FROM builder-base AS flashinfer-builder
+RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
+    --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
+    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
+    export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST/7.0 /}" && \
+    python3 -m flashinfer.aot && \
+    python3 -m pip wheel -w /wheels \
+      -v --no-cache-dir --no-build-isolation --no-deps \
+      -c /tmp/frozen/constraints.txt \
+      ./
+
+WORKDIR /wheels
+
+
 FROM ${BASE_IMAGE} AS base
 
 WORKDIR /workspace
@@ -62,6 +92,9 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
+
+RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM

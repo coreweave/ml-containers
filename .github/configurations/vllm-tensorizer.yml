@@ -1,2 +1,6 @@
-vllm-commit: ['b6553be1bc75f046b00046a4ad7576364d03c835']
-base-image: ['ghcr.io/coreweave/ml-containers/torch-extras:es-compute-12.0-67208ca-nccl-cuda12.9.0-ubuntu22.04-nccl2.27.3-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1']
+vllm-commit:
+  - 'b6553be1bc75f046b00046a4ad7576364d03c835'
+flashinfer-commit:
+  - 'v0.2.6.post1'
+base-image:
+  - 'ghcr.io/coreweave/ml-containers/torch-extras:es-compute-12.0-67208ca-nccl-cuda12.9.0-ubuntu22.04-nccl2.27.3-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1'
