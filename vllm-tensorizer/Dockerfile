@@ -55,14 +55,26 @@ FROM ${BASE_IMAGE} AS base
 
 WORKDIR /workspace
 
-RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt-get clean
+RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 && apt-get clean
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
-    rm /tmp/constraints.txt
+    python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
+# Copied from vLLM's Dockerfile
+ARG TARGETPLATFORM
+
+RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        python3 -m pip install --no-cache-dir \
+          accelerate hf_transfer 'modelscope!=1.15.0' 'bitsandbytes>=0.42.0' 'timm==0.9.10' \
+          boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt; \
+    else \
+        python3 -m pip install --no-cache-dir \
+          accelerate hf_transfer 'modelscope!=1.15.0' 'bitsandbytes>=0.45.3' 'timm==0.9.10' \
+          boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt; \
+    fi && \
+    rm /tmp/constraints.txt
 
 EXPOSE 8080
