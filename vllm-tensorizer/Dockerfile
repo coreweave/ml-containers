@@ -1,5 +1,4 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-compute-12.0-2bf6b9c-nccl-cuda12.8.1-ubuntu22.04-nccl2.27.3-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
-FROM scratch AS freezer
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-compute-12.0-67208ca-nccl-cuda12.9.0-ubuntu22.04-nccl2.27.3-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
 WORKDIR /
 COPY --chmod=755 freeze.sh /
 
@@ -59,8 +58,6 @@ RUN apt-get -qq update && apt-get install -y --no-install-recommends curl && apt
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
-
-RUN sed -i '/xformers==/d' /tmp/constraints.txt
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
