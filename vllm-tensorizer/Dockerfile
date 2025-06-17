@@ -71,7 +71,7 @@ FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
     --mount=type=bind,from=freezer,target=/tmp/frozen,rw \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/frozen/constraints.txt && \
-    export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST/7.0 /}" && \
+    export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     python3 -m flashinfer.aot && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
