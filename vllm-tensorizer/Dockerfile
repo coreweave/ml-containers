@@ -1,11 +1,32 @@
 ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-compute-12.0-67208ca-nccl-cuda12.9.0-ubuntu22.04-nccl2.27.3-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+ARG LEAN_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-compute-12.0-0d10e96-base-cuda12.9.0-ubuntu22.04-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+
 FROM scratch AS freezer
 WORKDIR /
 COPY --chmod=755 freeze.sh /
 
 FROM ${BASE_IMAGE} AS builder-base
 
-ARG MAX_JOBS="16"
+ARG MAX_JOBS="32"
+
+#
+RUN export \
+      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
+      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
+    export \
+      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    apt-get -qq update && apt-get install -y --no-install-recommends \
+      cuda-nvcc-${CUDA_PACKAGE_VERSION} \
+      cuda-nvml-dev-${CUDA_PACKAGE_VERSION} \
+      libcurand-dev-${CUDA_PACKAGE_VERSION} \
+      libcublas-dev-${CUDA_PACKAGE_VERSION} \
+      libcusparse-dev-${CUDA_PACKAGE_VERSION} \
+      libcusolver-dev-${CUDA_PACKAGE_VERSION} \
+      cuda-nvprof-${CUDA_PACKAGE_VERSION} \
+      cuda-profiler-api-${CUDA_PACKAGE_VERSION} \Add commentMore actions
+      libaio-dev \
+      ninja-build && \
+    apt-get clean
 
 RUN ldconfig
 
@@ -81,7 +102,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
 WORKDIR /wheels
 
 
-FROM ${BASE_IMAGE} AS base
+FROM ${LEAN_BASE_IMAGE} AS base
 
 WORKDIR /workspace
 
