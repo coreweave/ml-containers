@@ -5,7 +5,7 @@ ARG DEEPSPEED_VERSION="0.14.4"
 ARG APEX_COMMIT="a1df80457ba67d60cbdb0d3ddfb08a2702c821a8"
 ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
-ARG XFORMERS_VERSION="0.0.28.post1"
+ARG XFORMERS_VERSION="0.0.30"
 ARG BUILD_MAX_JOBS=""
 
 FROM alpine/git:2.36.3 as apex-downloader
@@ -111,7 +111,9 @@ COPY --chmod=755 scale.sh .
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
-      FLAGS="${FLAGS} -gencode=arch=compute_100,code=sm_100 -gencode=arch=compute_100a,code=sm_100a" ;; \
+      FLAGS="${FLAGS}$( \
+        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120 120 100 100 100a 100a \
+      )" ;; \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 ARG BUILD_MAX_JOBS

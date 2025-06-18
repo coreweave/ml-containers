@@ -30,6 +30,7 @@ jobs:
     name: Build torch:base
     needs: get-config
     strategy:
+      fail-fast: false
       matrix: ${{ fromJSON(needs.get-config.outputs.config) }}
     uses: ./.github/workflows/torch.yml
     secrets: inherit

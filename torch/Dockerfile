@@ -10,8 +10,8 @@ ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
 ARG BUILD_FLASH_ATTN_3_VERSION="2.7.2.post1"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
-ARG BUILD_TORCH_CUDA_ARCH_LIST="7.0 8.0 8.9 9.0 10.0+PTX"
-ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST="70;80;89;90;100"
+ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
+ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST="80;89;90;100;120"
 
 ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
@@ -53,6 +53,8 @@ RUN ./clone.sh pytorch/pytorch pytorch "${BUILD_TORCH_VERSION}" && \
     if [ "${BUILD_TORCH_VERSION}" = '2.5.1' ]; then \
       wget 'https://github.com/pytorch/pytorch/commit/1cdaf1d85f5e4b3f8952fd0737a1afeb16995d13.patch' -qO- \
       | git -C pytorch apply; \
+    elif [ "${BUILD_TORCH_VERSION}" = '2.7.1' ]; then \
+      git -C pytorch cherry-pick -n b74be524547f7f025066f19eda3b53a887c244ba; \
     fi && \
     rm -rf pytorch/.git
 
@@ -336,8 +338,8 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
 
 ARG BUILD_TORCH_VERSION
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
-# Filter out the 10.0 arch on CUDA versions != 12.8 and != 12.9
-ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0/}||${TORCH_CUDA_ARCH_LIST}"
+# Filter out the 10.0 & 12.0 arches on CUDA versions != 12.8 and != 12.9
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0 12.0/}||${TORCH_CUDA_ARCH_LIST}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
@@ -346,10 +348,12 @@ ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 RUN printf 'Arch: %s\nTORCH_CUDA_ARCH_LIST=%s\n' "$(uname -m)" "${TORCH_CUDA_ARCH_LIST}"
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
-# Add sm_100a build if NV_CUDA_LIB_VERSION matches 12.[89].*
+# Add sm_100a & sm_120 builds if NV_CUDA_LIB_VERSION matches 12.[89].*
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
-      FLAGS="${FLAGS} -gencode=arch=compute_100,code=sm_100 -gencode=arch=compute_100a,code=sm_100a" ;; \
+      FLAGS="${FLAGS}$( \
+        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120 120 100 100 100a 100a \
+      )" ;; \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 
@@ -390,6 +394,10 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     if [ -n "${BUILD_CXX11_ABI}" ]; then \
       export _GLIBCXX_USE_CXX11_ABI="${BUILD_CXX11_ABI}"; \
     fi && \
+    case "${NV_NVTX_VERSION}" in \
+      12.[0-8].*) ;; \
+      *) export USE_SYSTEM_NVTX=1 ;; \
+    esac && \
     ./storage-info.sh . && \
     cd pytorch && \
     ../storage-info.sh . && \
@@ -652,8 +660,8 @@ ARG BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
-# Filter out the 10.0 arch on CUDA versions != 12.8 and != 12.9
-ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0/}||${TORCH_CUDA_ARCH_LIST}"
+# Filter out the 10.0 & 12.0 arches on CUDA versions != 12.8 and != 12.9
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0 12.0/}||${TORCH_CUDA_ARCH_LIST}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
