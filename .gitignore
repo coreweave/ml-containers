@@ -162,3 +162,6 @@ flycheck_*.el
 .env*
 .environment
 .environment*
+
+# JetBrains Idea files
+.idea/

@@ -1,9 +1,4 @@
 on:
-  workflow_dispatch:
-    inputs:
-      commit:
-        description: 'Commit to build'
-        required: true
   push:
     paths:
       - "vllm-tensorizer/**"
@@ -12,12 +7,22 @@ on:
 
 
 jobs:
+  get-config:
+    name: Get vllm-tensorizer config
+    uses: ./.github/workflows/read-configuration.yml
+    with:
+      path: ./.github/configurations/vllm-tensorizer.yml
   build:
     uses: ./.github/workflows/build.yml
+    needs: get-config
+    strategy:
+      matrix: ${{ fromJSON(needs.get-config.outputs.config) }}
     secrets: inherit
     with:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
-      tag-suffix: ${{ inputs.commit || '19307ba71ddeb7e1cc6aec3c1baa8b50d59c1beb'}}
+      tag-suffix: ${{ matrix.vllm-commit }}
       build-args: |
-        COMMIT_HASH=${{ inputs.commit || '19307ba71ddeb7e1cc6aec3c1baa8b50d59c1beb'}}
+        VLLM_COMMIT=${{ matrix.vllm-commit }}
+        FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
+        BASE_IMAGE=${{ matrix.base-image }}
