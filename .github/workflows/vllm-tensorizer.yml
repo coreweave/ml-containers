@@ -26,3 +26,4 @@ jobs:
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         BASE_IMAGE=${{ matrix.base-image }}
+        LEAN_BASE_IMAGE=${{ matrix.lean-base-image }}
