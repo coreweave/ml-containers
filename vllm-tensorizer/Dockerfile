@@ -1,11 +1,11 @@
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-cuda-12.9.1-74755e9-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.5-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
-ARG LEAN_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-cuda-12.9.1-74755e9-base-cuda12.9.1-ubuntu22.04-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-cuda-12.9.1-74755e9-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.5-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-cuda-12.9.1-74755e9-base-cuda12.9.1-ubuntu22.04-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
 
 FROM scratch AS freezer
 WORKDIR /
 COPY --chmod=755 freeze.sh /
 
-FROM ${BASE_IMAGE} AS builder-base
+FROM ${BUILDER_BASE_IMAGE} AS builder-base
 
 ARG MAX_JOBS="32"
 
@@ -83,7 +83,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
 WORKDIR /wheels
 
 
-FROM ${LEAN_BASE_IMAGE} AS base
+FROM ${FINAL_BASE_IMAGE} AS base
 
 WORKDIR /workspace
 
