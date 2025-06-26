@@ -25,5 +25,5 @@ jobs:
       build-args: |
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
-        BASE_IMAGE=${{ matrix.builder-base-image }}
-        LEAN_BASE_IMAGE=${{ matrix.final-base-image }}
+        BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
+        FINAL_BASE_IMAGE=${{ matrix.final-base-image }}
