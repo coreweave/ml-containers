@@ -20,6 +20,11 @@ export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0 10.0+PTX}"
 
 mkdir -p /wheels/logs
 
+_CLONE() {
+  git clone --filter=tree:0  --no-single-branch --no-checkout "${1:?}" "${2:?}" && \
+  git -C "${2:?}" checkout "${3:?}" && \
+  git -C "${2:?}" submodule update --init --recursive --jobs 8 --depth 1;
+}
 _BUILD() { python3 -m build -w -n -v -o /wheels "${1:-.}"; }
 _LOG() { tee -a "/wheels/logs/${1:?}"; }
 _CONSTRAINTS="$(python3 -m pip list | sed -En 's@^(torch(vision|audio)?)\s+(\S+)$@\1==\3@p')"
@@ -35,9 +40,8 @@ _PIP_INSTALL -U pip setuptools wheel build pybind11 ninja cmake
 if [ "${BUILD_TRITON}" = 1 ]; then (
   : "${TRITON_COMMIT:?}"
   echo 'Building triton-lang/triton'
-  git clone --recursive --filter=blob:none https://github.com/triton-lang/triton
+  _CLONE https://github.com/triton-lang/triton triton "${TRITON_COMMIT}"
   cd triton
-  git checkout "${TRITON_COMMIT}"
   _BUILD python |& _LOG triton.log
 ); fi
 
@@ -46,9 +50,8 @@ if [ "${BUILD_TRITON}" = 1 ]; then (
 : "${CUTLASS_COMMIT:?}"
 (
 echo 'Building flashinfer-ai/flashinfer'
-git clone --recursive --filter=blob:none https://github.com/flashinfer-ai/flashinfer
+_CLONE https://github.com/flashinfer-ai/flashinfer flashinfer "${FLASHINFER_COMMIT}"
 cd flashinfer
-git checkout "${FLASHINFER_COMMIT}"
 sed -i 's/name = "flashinfer-python"/name = "flashinfer"/' pyproject.toml
 git -C 3rdparty/cutlass checkout "${CUTLASS_COMMIT}"
 _PIP_INSTALL -U optree
@@ -57,7 +60,7 @@ NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS } --diag-suppress 202
 )
 
 # Setup cutlass repo for vLLM to use
-git clone --recursive --filter=blob:none https://github.com/NVIDIA/cutlass
+_CLONE https://github.com/NVIDIA/cutlass cutlass "${CUTLASS_COMMIT}"
 git -C cutlass checkout "${CUTLASS_COMMIT}"
 
 # vLLM
@@ -66,9 +69,8 @@ git -C cutlass checkout "${CUTLASS_COMMIT}"
 echo 'Building vllm-project/vllm'
 export VLLM_CUTLASS_SRC_DIR="${PWD}/cutlass"
 test -d "${VLLM_CUTLASS_SRC_DIR}"
-git clone --recursive --filter=blob:none https://github.com/vllm-project/vllm
+_CLONE https://github.com/vllm-project/vllm vllm "${VLLM_COMMIT}"
 cd vllm
-git checkout "${VLLM_COMMIT}"
 # For lsmod
 apt-get -qq update && apt-get -qq install --no-install-recommends -y kmod
 python3 use_existing_torch.py
@@ -80,9 +82,8 @@ USE_CUDNN=1 USE_CUSPARSELT=1 _BUILD . |& _LOG vllm.log
 : "${SGLANG_COMMIT:?}"
 (
 echo 'Building sglang'
-git clone --recursive --filter=blob:none https://github.com/sgl-project/sglang
+_CLONE https://github.com/sgl-project/sglang sglang "${SGLANG_COMMIT}"
 cd sglang
-git checkout "${SGLANG_COMMIT}"
 (
 cd sgl-kernel
 git -C 3rdparty/cutlass checkout "${CUTLASS_COMMIT}"
@@ -133,9 +134,8 @@ if [ ! "$(uname -m)" = 'x86_64' ]; then
     build-essential python3-dev python3-setuptools \
     make cmake ffmpeg \
     libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev
-  git clone --recursive --filter=blob:none https://github.com/dmlc/decord
+  _CLONE https://github.com/dmlc/decord "${DECORD_COMMIT}"
   cd decord
-  git checkout "${DECORD_COMMIT}"
   (
   mkdir build && cd build
   cmake -S.. -B. -DUSE_CUDA=0 -DCMAKE_BUILD_TYPE=Release -GNinja |& _LOG decord.log
