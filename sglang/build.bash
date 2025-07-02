@@ -21,7 +21,7 @@ printf 'Using %s=%s\n' \
   DECORD_COMMIT "${DECORD_COMMIT:-<None>}" \
   TRITON_COMMIT "${TRITON_COMMIT:-<None>}"
 
-export NVCC_APPEND_FLAGS='-gencode=arch=compute_100,code=sm_100 -gencode=arch=compute_100a,code=sm_100a -gencode=arch=compute_120,code=[sm_120,compute_120] --diag-suppress 174,177,2361'
+export NVCC_APPEND_FLAGS='--diag-suppress 174,177,2361'
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0 10.0 12.0+PTX}"
 
 mkdir -p /wheels/logs
