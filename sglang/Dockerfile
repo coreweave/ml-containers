@@ -21,7 +21,7 @@ WORKDIR /build
 COPY build.bash /build/
 RUN mkdir /wheels && \
     if [ -n  "${MAX_JOBS}"]; then \
-      CMAKE_BUILD_PARALLEL_LEVEL="${MAX_JOBS}"; \
+      export CMAKE_BUILD_PARALLEL_LEVEL="${MAX_JOBS}"; \
     else \
       unset MAX_JOBS; \
     fi && \
