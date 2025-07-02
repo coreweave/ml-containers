@@ -15,11 +15,16 @@ ARG SGLANG_COMMIT='f18a8fddd4182c9802f62f406d50978cf4b11b96'
 ARG DECORD_COMMIT='d2e56190286ae394032a8141885f76d5372bd44b'
 ARG TRITON_COMMIT=''
 
-ARG MAX_JOBS=8
+ARG MAX_JOBS=4
 
 WORKDIR /build
 COPY build.bash /build/
 RUN mkdir /wheels && \
+    if [ -n  "${MAX_JOBS}"]; then \
+      CMAKE_BUILD_PARALLEL_LEVEL="${MAX_JOBS}"; \
+    else \
+      unset MAX_JOBS; \
+    fi && \
     bash build.bash -a "${BUILD_TORCH_CUDA_ARCH_LIST}" && \
     rm -rf /build/*
 COPY install.bash /wheels/
