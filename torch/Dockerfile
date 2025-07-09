@@ -5,9 +5,9 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:12.9.1-base-ubuntu22.04"
 ARG BUILD_TORCH_VERSION="2.7.1"
 ARG BUILD_TORCH_VISION_VERSION="0.22.1"
 ARG BUILD_TORCH_AUDIO_VERSION="2.7.1"
-ARG BUILD_TRANSFORMERENGINE_VERSION="1.13"
+ARG BUILD_TRANSFORMERENGINE_VERSION="2.4"
 ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
-ARG BUILD_FLASH_ATTN_3_VERSION="2.7.2.post1"
+ARG BUILD_FLASH_ATTN_3_VERSION="b36ad4ef767d2d5536ff8af2e3f720ae4eba731c"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
@@ -90,7 +90,8 @@ RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VER
 FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
-      ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}"; \
+      ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
+      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c; \
     else \
       mkdir flash-attention; \
     fi
@@ -534,10 +535,6 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
       export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
     esac && \
     cd TransformerEngine && \
-    if python3 -c "import sys; sys.exit(sys.version_info.minor > 8)"; then \
-      sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
-        build_tools/utils.py; \
-    fi && \
     python3 setup.py bdist_wheel --dist-dir /build/dist
 
 FROM builder-base AS flash-attn-builder-base
@@ -593,7 +590,10 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
-    /build/fa-build.sh flash-attention/hopper
+    if [ "$(uname -m)" = 'aarch64' ]; then \
+      export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
+    fi && \
+    NVCC_THREADS=1 /build/fa-build.sh flash-attention/hopper
 
 FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
@@ -717,7 +717,12 @@ RUN <<-"EOT" python3
 	from pathlib import Path
 	from py_compile import compile
 
-	dist = metadata.distribution("flashattn-hopper")
+	try:
+	    dist = metadata.distribution("flash-attn-3")
+	    record_pattern = "flash?attn?3-*.dist-info/RECORD"
+	except metadata.PackageNotFoundError:
+	    dist = metadata.distribution("flashattn-hopper")
+	    record_pattern = "flashattn?hopper-*.dist-info/RECORD"
 	p = dist.locate_file("flash_attn_interface.py")
 	print("flash_attn_interface:", p)
 	root = p.parent
@@ -747,7 +752,7 @@ RUN <<-"EOT" python3
 
 
 	for f in dist.files:
-	    if f.match("flashattn?hopper-*.dist-info/RECORD"):
+	    if f.match(record_pattern):
 	        with f.locate().open("a", encoding="utf-8", newline="") as record:
 	            for added in (new, compiled):
 	                record.write(record_entry(added))
