@@ -593,6 +593,9 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     if [ "$(uname -m)" = 'aarch64' ]; then \
       export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
     fi && \
+    sed -i \
+      's@if bare_metal_version != Version("12.8"):@/if bare_metal_version < Version("12.8"):@' \
+      flash-attention/hopper/setup.py && \
     NVCC_THREADS=1 /build/fa-build.sh flash-attention/hopper
 
 FROM builder-base AS builder
