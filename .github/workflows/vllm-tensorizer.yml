@@ -4,6 +4,7 @@ on:
       - "vllm-tensorizer/**"
       - ".github/workflows/vllm-tensorizer.yml"
       - ".github/workflows/build.yml"
+      - ".github/configurations/vllm-tensorizer.yml"
 
 
 jobs:
