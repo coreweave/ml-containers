@@ -598,7 +598,18 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     sed -i \
       's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
       flash-attention/hopper/setup.py && \
-    NVCC_THREADS=1 /build/fa-build.sh flash-attention/hopper
+    export NVCC_THREADS=1 && \
+    set -o pipefail && \
+    for attempt in 0 1 2; do \
+      printf 'FA3 build starting, attempt %d\n' "${attempt}" && \
+      /build/fa-build.sh flash-attention/hopper \
+      |& tee flash-attention/build-log.log && \
+      break; \
+      exit_code="$?" && \
+      if [ "${attempt}" = 2 ] || ! grep -qF 'Segmentation fault' flash-attention/build-log.log; then \
+        exit "${exit_code}"; \
+      fi; \
+    done
 
 FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
