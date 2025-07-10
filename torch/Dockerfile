@@ -602,8 +602,8 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     set -o pipefail && \
     for attempt in 0 1 2; do \
       printf 'FA3 build starting, attempt %d\n' "${attempt}" && \
-      /build/fa-build.sh flash-attention/hopper \
-      |& tee flash-attention/build-log.log && \
+      /build/fa-build.sh flash-attention/hopper 2>&1 \
+      | tee flash-attention/build-log.log && \
       break; \
       exit_code="$?" && \
       if [ "${attempt}" = 2 ] || ! grep -qF 'Segmentation fault' flash-attention/build-log.log; then \
