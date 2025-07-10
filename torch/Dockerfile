@@ -578,6 +578,7 @@ FROM flash-attn-builder-base AS flash-attn-3-builder
 # Artifically sequence this build stage after the previous one
 # to prevent parallelism, because these are both very resource-intensive
 RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
+ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-1}"
 
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -595,11 +596,12 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     else \
       export NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
     fi && \
+    export NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS/ -gencode=arch=compute_100,code=sm_100/}" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
       's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
       flash-attention/hopper/setup.py && \
-    export NVCC_THREADS=1 && \
+    export NVCC_THREADS=4 && \
     for attempt in 0 1 2; do \
       printf 'FA3 build starting, attempt %d\n' "${attempt}" && \
       /build/fa-build.sh flash-attention/hopper 2>&1 \
