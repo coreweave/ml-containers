@@ -580,6 +580,7 @@ FROM flash-attn-builder-base AS flash-attn-3-builder
 RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
 
 # Build flash-attn v3
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     --mount=type=cache,target=/ccache \
     if [ ! -d flash-attention/hopper ]; then \
@@ -599,7 +600,6 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
       flash-attention/hopper/setup.py && \
     export NVCC_THREADS=1 && \
-    set -o pipefail && \
     for attempt in 0 1 2; do \
       printf 'FA3 build starting, attempt %d\n' "${attempt}" && \
       /build/fa-build.sh flash-attention/hopper 2>&1 \
