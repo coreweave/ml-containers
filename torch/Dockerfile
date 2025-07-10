@@ -589,10 +589,12 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     if [ "$(uname -m)" = 'aarch64' ]; then \
       export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
+    else \
+      export NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
     fi && \
+    echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
       's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
       flash-attention/hopper/setup.py && \
