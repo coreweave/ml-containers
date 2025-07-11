@@ -580,6 +580,8 @@ FROM flash-attn-builder-base AS flash-attn-3-builder
 RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
 ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-1}"
 
+COPY --link --chmod=755 nvcc-retry.py /build/nvcc-retry.py
+
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
@@ -601,17 +603,8 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     sed -i \
       's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
       flash-attention/hopper/setup.py && \
-    export NVCC_THREADS=4 && \
-    for attempt in 0 1 2; do \
-      printf 'FA3 build starting, attempt %d\n' "${attempt}" && \
-      /build/fa-build.sh flash-attention/hopper 2>&1 \
-      | tee flash-attention/build-log.log && \
-      break; \
-      exit_code="$?" && \
-      if [ "${attempt}" = 2 ] || ! grep -qF 'Segmentation fault' flash-attention/build-log.log; then \
-        exit "${exit_code}"; \
-      fi; \
-    done
+    PYTORCH_NVCC='/build/nvcc-retry.py' NVCC_THREADS=4 \
+      /build/fa-build.sh flash-attention/hopper
 
 FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
