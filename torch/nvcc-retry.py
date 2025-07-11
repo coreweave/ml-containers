@@ -28,7 +28,7 @@ if NVCC_PATH is None:
 
 WRAPPER_ATTEMPTS: typing.Final[int] = int(os.getenv("NVCC_WRAPPER_ATTEMPTS") or 10)
 if WRAPPER_ATTEMPTS < 1:
-    raise SystemExit("NVCC wrapper: fatal: invalid value for WRAPPER_ATTEMPTS")
+    raise SystemExit("NVCC wrapper: fatal: invalid value for NVCC_WRAPPER_ATTEMPTS")
 
 RETRY_RET_CODES: typing.Final[typing.FrozenSet[int]] = frozenset(
     {
@@ -44,6 +44,13 @@ async def main(args) -> int:
     ret: int = 0
     for attempt in range(1, WRAPPER_ATTEMPTS + 1):
         if attempt > 1:
+            print(
+                "NVCC wrapper: info:"
+                f" Retrying [{attempt:d}/{WRAPPER_ATTEMPTS:d}]"
+                f" after exit code {ret:d}",
+                file=sys.stderr,
+                flush=True,
+            )
             # Wait an exponentially increasing amount of time
             # before trying again, up to one minute
             await asyncio.sleep(min(60, int(1.5**attempt)))
@@ -56,16 +63,8 @@ async def main(args) -> int:
         )
         ret = await proc.wait()
         del proc
-        restart: bool = ret != 0 and (any(restart_signals) or ret in RETRY_RET_CODES)
-        if not restart:
+        if ret == 0 or not any(restart_signals) and ret not in RETRY_RET_CODES:
             break
-        elif attempt != WRAPPER_ATTEMPTS:
-            print(
-                "NVCC wrapper: info:"
-                f" Retrying [{attempt:d}/{WRAPPER_ATTEMPTS:d}] after exit code {ret:d}",
-                file=sys.stderr,
-                flush=True,
-            )
     else:
         print(
             "NVCC wrapper: info:"
