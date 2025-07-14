@@ -578,7 +578,7 @@ FROM flash-attn-builder-base AS flash-attn-3-builder
 # Artifically sequence this build stage after the previous one
 # to prevent parallelism, because these are both very resource-intensive
 RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
-ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-1}"
+ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-2}"
 
 COPY --link --chmod=755 nvcc-retry.py /build/nvcc-retry.py
 
