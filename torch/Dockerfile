@@ -743,7 +743,7 @@ RUN <<-"EOT" python3
 	if not p.is_file():
 	    raise SystemExit("flash_attn_interface path is not a file")
 
-	d = root / "flashattn_hopper"
+	d = root / "flash_attn_3"
 	if d.exists():
 	    raise SystemExit(f'"{d}" already exists')
 
