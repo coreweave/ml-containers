@@ -36,6 +36,7 @@ RETRY_RET_CODES: typing.Final[typing.FrozenSet[int]] = frozenset(
         -signal.SIGKILL,
         128 + signal.SIGSEGV,
         128 + signal.SIGKILL,
+        255,
     }
 )
 
