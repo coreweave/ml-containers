@@ -330,11 +330,16 @@ ARG BUILD_MAX_JOBS=""
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
     --mount=type=cache,target=/ccache \
     if [ "$BUILD_TRITON" = '1' ]; then \
-      pip3 install --no-cache-dir pybind11 && \
+      pip3 install --no-cache-dir pybind11 lit && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
-      cd triton/python && \
-      python3 -m pip wheel -w ../../dist/ --no-build-isolation --no-deps -vv . && \
-      pip3 install ../../dist/*.whl; \
+      DIST_DIR="$(realpath -e ./dist)" && \
+      if [ -f 'triton/python/setup.py' ]; then \
+        cd triton/python; \
+      else \
+        cd triton; \
+      fi && \
+      python3 -m pip wheel -w "${DIST_DIR}/" --no-build-isolation --no-deps -vv . && \
+      pip3 install --no-cache-dir "${DIST_DIR}"/*.whl; \
     fi
 
 ARG BUILD_TORCH_VERSION
