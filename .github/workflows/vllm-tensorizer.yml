@@ -2,6 +2,7 @@ on:
   push:
     paths:
       - "vllm-tensorizer/**"
+      - ".github/configurations/vllm-tensorizer.yml"
       - ".github/workflows/vllm-tensorizer.yml"
       - ".github/workflows/build.yml"
 

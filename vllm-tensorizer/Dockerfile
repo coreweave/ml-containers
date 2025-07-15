@@ -1,5 +1,5 @@
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-cuda-12.9.1-74755e9-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.5-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-cuda-12.9.1-74755e9-base-cuda12.9.1-ubuntu22.04-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-3f63255-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.5-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-52eb826-base-cuda12.9.1-ubuntu22.04-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
 
 FROM scratch AS freezer
 WORKDIR /
@@ -107,7 +107,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
           boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt; \
     else \
         python3 -m pip install --no-cache-dir \
-          accelerate hf_transfer 'modelscope!=1.15.0' 'bitsandbytes>=0.45.3' 'timm==0.9.10' \
+          accelerate hf_transfer 'modelscope!=1.15.0' 'bitsandbytes>=0.46.1' 'timm==0.9.10' \
           boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt; \
     fi && \
     rm /tmp/constraints.txt
