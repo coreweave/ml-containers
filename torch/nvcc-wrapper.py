@@ -26,17 +26,17 @@ import shutil
 import signal
 import subprocess
 import sys
-import typing
+from typing import BinaryIO, Final, FrozenSet, Iterable, List, Sequence, Set
 
-NVCC_PATH: typing.Final[str] = shutil.which("nvcc")
+NVCC_PATH: Final[str] = shutil.which("nvcc")
 if NVCC_PATH is None:
     raise SystemExit("NVCC wrapper: fatal: nvcc binary not found")
 
-WRAPPER_ATTEMPTS: typing.Final[int] = int(os.getenv("NVCC_WRAPPER_ATTEMPTS") or 10)
+WRAPPER_ATTEMPTS: Final[int] = int(os.getenv("NVCC_WRAPPER_ATTEMPTS") or 10)
 if WRAPPER_ATTEMPTS < 1:
     raise SystemExit("NVCC wrapper: fatal: invalid value for NVCC_WRAPPER_ATTEMPTS")
 
-FILTER_CODES: typing.Final[typing.FrozenSet[str]] = frozenset(
+FILTER_CODES: Final[FrozenSet[str]] = frozenset(
     filter(None, os.getenv("NVCC_WRAPPER_FILTER_CODES", "").split(";"))
 )
 if FILTER_CODES and not all(
@@ -44,15 +44,13 @@ if FILTER_CODES and not all(
 ):
     raise SystemExit("NVCC wrapper: fatal: invalid value for NVCC_WRAPPER_FILTER_CODES")
 
-RETRY_RET_CODES: typing.Final[typing.FrozenSet[int]] = frozenset(
-    {
-        -signal.SIGSEGV,
-        -signal.SIGKILL,
-        128 + signal.SIGSEGV,
-        128 + signal.SIGKILL,
-        255,
-    }
-)
+RETRY_RET_CODES: Final[FrozenSet[int]] = frozenset({
+    -signal.SIGSEGV,
+    -signal.SIGKILL,
+    128 + signal.SIGSEGV,
+    128 + signal.SIGKILL,
+    255,
+})
 
 
 async def main(args) -> int:
@@ -93,8 +91,8 @@ async def main(args) -> int:
 
 async def monitor_stream(
     stream: asyncio.StreamReader,
-    output: typing.BinaryIO,
-    watch_for: typing.Iterable[bytes] = (
+    output: BinaryIO,
+    watch_for: Iterable[bytes] = (
         b"Segmentation fault",
         b"Segmentation fault (core dumped)",
         b"Killed",
@@ -108,29 +106,43 @@ async def monitor_stream(
     return found
 
 
-def transform_args(args: typing.Sequence[str]) -> typing.Sequence[str]:
+def transform_args(args: Sequence[str]) -> Sequence[str]:
     # This filters out args of the form -gencode=arch=X,code=Y
     # or -gencode arch=X,code=Y for any code in FILTER_CODES.
     # This does not filter arguments specified using the
     # --gpu-architecture and --gpu-code flags, nor codes specified
     # among others in groups, like -gencode=arch=X,code=[Y,Z].
+    if not FILTER_CODES:
+        return args
     transformed_args = []
     partial: bool = False
-    gencode: typing.Set[str] = {"-gencode", "--generate-code"}
+    gencode: Set[str] = {"-gencode", "--generate-code"}
     for arg in args:
         if not partial and arg in gencode:
             partial = True
             transformed_args.append(arg)
             continue
         if partial:
-            pattern: str = r"arch=[^,]+,code=(\S+)"
+            pattern: str = r"(arch=[^,]+,code=)(\S+)"
         else:
-            pattern: str = r"(?:-gencode|--generate-code)=arch=[^,]+,code=(\S+)"
-        m = re.fullmatch(pattern, arg)
+            pattern: str = r"((?:-gencode|--generate-code)=arch=\S+,code=)(\S+)"
+        m: re.Match = re.fullmatch(pattern, arg)
         if m:
-            code = m.group(1)
+            code: str = m.group(2)
             if code in FILTER_CODES:
                 if partial:
+                    # There was a hanging `-gencode` arg before this, so delete it
+                    assert transformed_args[-1] in gencode
+                    del transformed_args[-1]
+            elif re.fullmatch(r"\[\S+]", code):
+                codes: List[str] = code[1:-1].split(",")
+                filtered_codes: List[str] = [c for c in codes if c not in FILTER_CODES]
+                if filtered_codes:
+                    filtered_code: str = ",".join(filtered_codes)
+                    if len(filtered_codes) > 1:
+                        filtered_code = f"[{filtered_code}]"
+                    transformed_args.append(m.group(1) + filtered_code)
+                elif partial:
                     assert transformed_args[-1] in gencode
                     del transformed_args[-1]
             else:

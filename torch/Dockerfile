@@ -365,8 +365,9 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
 
 COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py'
-# Filter these codes because we build for the architecture-specific versions of them instead
-ENV NVCC_WRAPPER_FILTER_CODES='sm_90;sm_100;sm_120'
+# Filter these codes because we already build for the architecture-specific
+# versions of them instead.
+ENV NVCC_WRAPPER_FILTER_CODES='sm_90;sm_100;sm_120;compute_90;compute_100'
 
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
