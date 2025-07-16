@@ -687,27 +687,27 @@ COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
 # - Don't mess with libnccl2 when using nccl-tests as a base,
 #   checked via the existence of the directory "/opt/nccl-tests".
-RUN export \
-      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
-      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
-    export \
-      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+RUN CUDA_MAJOR_VERSION="$(echo "$CUDA_VERSION" | cut -d. -f1)" && \
+    CUDA_MINOR_VERSION="$(echo "$CUDA_VERSION" | cut -d. -f2)" && \
+    CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    CUDART_VERSION_SPEC="${NV_CUDA_CUDART_VERSION:+=$NV_CUDA_CUDART_VERSION}" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
       libcurand-${CUDA_PACKAGE_VERSION} \
       libcufft-${CUDA_PACKAGE_VERSION} \
       libcublas-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-${CUDA_PACKAGE_VERSION} \
+      cuda-cudart-dev-${CUDA_PACKAGE_VERSION}"${CUDART_VERSION_SPEC}" \
       libcusparse-${CUDA_PACKAGE_VERSION} \
       libcusolver-${CUDA_PACKAGE_VERSION} \
       libcufile-${CUDA_PACKAGE_VERSION} \
       cuda-cupti-${CUDA_PACKAGE_VERSION} \
       libnvjpeg-${CUDA_PACKAGE_VERSION} \
       libnvtoolsext1 && \
-    { if [ $CUDA_MAJOR_VERSION -ge 12 ]; then \
+    { if [ "$CUDA_MAJOR_VERSION" -ge 12 ]; then \
       apt-get -qq install --no-upgrade -y libnvjitlink-${CUDA_PACKAGE_VERSION}; fi; } && \
     { if [ ! -d /opt/nccl-tests ]; then \
-      export NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
+      NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
       apt-get -qq install --no-upgrade -y "libnccl2=$NCCL_PACKAGE_VERSION"; fi; } && \
     /tmp/install_cudnn.sh "$CUDA_VERSION" runtime && \
     rm /tmp/install_cudnn.sh && \

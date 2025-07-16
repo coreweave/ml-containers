@@ -33,7 +33,9 @@ LIBCUDNN_VER="$(
 
 if [ -z "$LIBCUDNN_VER" ]; then
     apt-get -qq update && \
-    apt-get -qq install --no-upgrade -y "${DEV_PREFIX}cudnn9-cuda-${CUDA_MAJOR_VERSION}" && \
+    apt-get -qq install --no-upgrade -y \
+        "${DEV_PREFIX}cudnn9-cuda-${CUDA_MAJOR_VERSION}" \
+        "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" && \
     apt-get clean && \
     ldconfig;
 else
