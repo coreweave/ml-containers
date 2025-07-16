@@ -363,6 +363,11 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 
+COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+ENV PYTORCH_NVCC='/build/nvcc-wrapper.py'
+# Filter these codes because we build for the architecture-specific versions of them instead
+ENV NVCC_WRAPPER_FILTER_CODES='sm_90;sm_100;sm_120'
+
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
 # so it uses the system's special NCCL and UCC installations for the build.
@@ -552,8 +557,9 @@ COPY <<-"EOT" /build/fa-build.sh
 	#!/bin/bash
 	set -eo pipefail;
 	if [ -n "$1" ]; then cd "$1"; fi;
+	echo "Flash Attention build: building $(realpath -s .)";
 	python3 setup.py bdist_wheel --dist-dir /build/dist \
-	| grep -Ev --line-buffered '^ptxas (/tmp/|(info|warning)\s*:)|bytes spill stores'
+	| grep -Ev --line-buffered '^ptxas (/tmp/|(info|warning)\s*:)|bytes spill stores';
 EOT
 RUN chmod 755 /build/fa-build.sh
 
@@ -583,9 +589,7 @@ FROM flash-attn-builder-base AS flash-attn-3-builder
 # Artifically sequence this build stage after the previous one
 # to prevent parallelism, because these are both very resource-intensive
 RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
-ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-2}"
-
-COPY --link --chmod=755 nvcc-retry.py /build/nvcc-retry.py
+ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-3}"
 
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -601,15 +605,13 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     if [ "$(uname -m)" = 'aarch64' ]; then \
       export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
     else \
-      export NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
+      NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
     fi && \
-    export NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS/ -gencode=arch=compute_100,code=sm_100/}" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
       's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
       flash-attention/hopper/setup.py && \
-    PYTORCH_NVCC='/build/nvcc-retry.py' NVCC_THREADS=4 \
-      /build/fa-build.sh flash-attention/hopper
+    NVCC_THREADS=4 /build/fa-build.sh flash-attention/hopper
 
 FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
