@@ -364,7 +364,8 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
 
 COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
-ENV PYTORCH_NVCC='/build/nvcc-wrapper.py'
+ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
+    CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py'
 # Filter these codes because we already build for the architecture-specific
 # versions of them instead.
 ENV NVCC_WRAPPER_FILTER_CODES='sm_90;sm_100;sm_120;compute_90;compute_100'
