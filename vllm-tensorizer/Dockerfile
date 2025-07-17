@@ -116,7 +116,7 @@ FROM builder-base AS infinistore-builder
 # It must also be built from source as it also doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target=/workspace,rw \
     apt-get -qq update && \
-    apt-get -q install --no-install-recommends --no-upgrade \
+    apt-get -q install --no-install-recommends --no-upgrade -y \
       libuv1-dev libflatbuffers-dev libspdlog-dev \
       libfmt-dev ibverbs-utils libibverbs-dev \
       libboost-dev libboost-stacktrace-dev \
