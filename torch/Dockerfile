@@ -5,9 +5,9 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:12.9.1-base-ubuntu22.04"
 ARG BUILD_TORCH_VERSION="2.7.1"
 ARG BUILD_TORCH_VISION_VERSION="0.22.1"
 ARG BUILD_TORCH_AUDIO_VERSION="2.7.1"
-ARG BUILD_TRANSFORMERENGINE_VERSION="1.13"
+ARG BUILD_TRANSFORMERENGINE_VERSION="2.4"
 ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
-ARG BUILD_FLASH_ATTN_3_VERSION="2.7.2.post1"
+ARG BUILD_FLASH_ATTN_3_VERSION="b36ad4ef767d2d5536ff8af2e3f720ae4eba731c"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
@@ -90,7 +90,8 @@ RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VER
 FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
-      ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}"; \
+      ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
+      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c; \
     else \
       mkdir flash-attention; \
     fi
@@ -329,11 +330,16 @@ ARG BUILD_MAX_JOBS=""
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
     --mount=type=cache,target=/ccache \
     if [ "$BUILD_TRITON" = '1' ]; then \
-      pip3 install --no-cache-dir pybind11 && \
+      pip3 install --no-cache-dir pybind11 lit && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
-      cd triton/python && \
-      python3 -m pip wheel -w ../../dist/ --no-build-isolation --no-deps -vv . && \
-      pip3 install ../../dist/*.whl; \
+      DIST_DIR="$(realpath -e ./dist)" && \
+      if [ -f 'triton/python/setup.py' ]; then \
+        cd triton/python; \
+      else \
+        cd triton; \
+      fi && \
+      python3 -m pip wheel -w "${DIST_DIR}/" --no-build-isolation --no-deps -vv . && \
+      pip3 install --no-cache-dir "${DIST_DIR}"/*.whl; \
     fi
 
 ARG BUILD_TORCH_VERSION
@@ -348,14 +354,21 @@ ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 RUN printf 'Arch: %s\nTORCH_CUDA_ARCH_LIST=%s\n' "$(uname -m)" "${TORCH_CUDA_ARCH_LIST}"
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
-# Add sm_100a & sm_120 builds if NV_CUDA_LIB_VERSION matches 12.[89].*
+# Add sm_100a & sm_120a builds if NV_CUDA_LIB_VERSION matches 12.[89].*
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
       FLAGS="${FLAGS}$( \
-        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120 120 100 100 100a 100a \
+        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a \
       )" ;; \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
+
+COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
+    CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py'
+# Filter these codes because we already build for the architecture-specific
+# versions of them instead.
+ENV NVCC_WRAPPER_FILTER_CODES='sm_90;sm_100;sm_120;compute_90;compute_100'
 
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
@@ -534,10 +547,6 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
       export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
     esac && \
     cd TransformerEngine && \
-    if python3 -c "import sys; sys.exit(sys.version_info.minor > 8)"; then \
-      sed -i "s/from functools import cache/from functools import lru_cache as cache/g" \
-        build_tools/utils.py; \
-    fi && \
     python3 setup.py bdist_wheel --dist-dir /build/dist
 
 FROM builder-base AS flash-attn-builder-base
@@ -550,8 +559,9 @@ COPY <<-"EOT" /build/fa-build.sh
 	#!/bin/bash
 	set -eo pipefail;
 	if [ -n "$1" ]; then cd "$1"; fi;
+	echo "Flash Attention build: building $(realpath -s .)";
 	python3 setup.py bdist_wheel --dist-dir /build/dist \
-	| grep -Ev --line-buffered '^ptxas (/tmp/|(info|warning)\s*:)|bytes spill stores'
+	| grep -Ev --line-buffered '^ptxas (/tmp/|(info|warning)\s*:)|bytes spill stores';
 EOT
 RUN chmod 755 /build/fa-build.sh
 
@@ -581,8 +591,10 @@ FROM flash-attn-builder-base AS flash-attn-3-builder
 # Artifically sequence this build stage after the previous one
 # to prevent parallelism, because these are both very resource-intensive
 RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
+ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-3}"
 
 # Build flash-attn v3
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
     --mount=type=cache,target=/ccache \
     if [ ! -d flash-attention/hopper ]; then \
@@ -592,8 +604,16 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    if [ "$(uname -m)" = 'aarch64' ]; then \
+      export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
+    else \
+      NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
+    fi && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
-    /build/fa-build.sh flash-attention/hopper
+    sed -i \
+      's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
+      flash-attention/hopper/setup.py && \
+    NVCC_THREADS=4 /build/fa-build.sh flash-attention/hopper
 
 FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
@@ -671,27 +691,27 @@ COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
 # - Don't mess with libnccl2 when using nccl-tests as a base,
 #   checked via the existence of the directory "/opt/nccl-tests".
-RUN export \
-      CUDA_MAJOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f1) \
-      CUDA_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d. -f2) && \
-    export \
-      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+RUN CUDA_MAJOR_VERSION="$(echo "$CUDA_VERSION" | cut -d. -f1)" && \
+    CUDA_MINOR_VERSION="$(echo "$CUDA_VERSION" | cut -d. -f2)" && \
+    CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+    CUDART_VERSION_SPEC="${NV_CUDA_CUDART_VERSION:+=$NV_CUDA_CUDART_VERSION}" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
       libcurand-${CUDA_PACKAGE_VERSION} \
       libcufft-${CUDA_PACKAGE_VERSION} \
       libcublas-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-${CUDA_PACKAGE_VERSION} \
+      cuda-cudart-dev-${CUDA_PACKAGE_VERSION}"${CUDART_VERSION_SPEC}" \
       libcusparse-${CUDA_PACKAGE_VERSION} \
       libcusolver-${CUDA_PACKAGE_VERSION} \
       libcufile-${CUDA_PACKAGE_VERSION} \
       cuda-cupti-${CUDA_PACKAGE_VERSION} \
       libnvjpeg-${CUDA_PACKAGE_VERSION} \
       libnvtoolsext1 && \
-    { if [ $CUDA_MAJOR_VERSION -ge 12 ]; then \
+    { if [ "$CUDA_MAJOR_VERSION" -ge 12 ]; then \
       apt-get -qq install --no-upgrade -y libnvjitlink-${CUDA_PACKAGE_VERSION}; fi; } && \
     { if [ ! -d /opt/nccl-tests ]; then \
-      export NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
+      NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
       apt-get -qq install --no-upgrade -y "libnccl2=$NCCL_PACKAGE_VERSION"; fi; } && \
     /tmp/install_cudnn.sh "$CUDA_VERSION" runtime && \
     rm /tmp/install_cudnn.sh && \
@@ -717,7 +737,12 @@ RUN <<-"EOT" python3
 	from pathlib import Path
 	from py_compile import compile
 
-	dist = metadata.distribution("flashattn-hopper")
+	try:
+	    dist = metadata.distribution("flash-attn-3")
+	    record_pattern = "flash?attn?3-*.dist-info/RECORD"
+	except metadata.PackageNotFoundError:
+	    dist = metadata.distribution("flashattn-hopper")
+	    record_pattern = "flashattn?hopper-*.dist-info/RECORD"
 	p = dist.locate_file("flash_attn_interface.py")
 	print("flash_attn_interface:", p)
 	root = p.parent
@@ -727,7 +752,7 @@ RUN <<-"EOT" python3
 	if not p.is_file():
 	    raise SystemExit("flash_attn_interface path is not a file")
 
-	d = root / "flashattn_hopper"
+	d = root / "flash_attn_3"
 	if d.exists():
 	    raise SystemExit(f'"{d}" already exists')
 
@@ -747,7 +772,7 @@ RUN <<-"EOT" python3
 
 
 	for f in dist.files:
-	    if f.match("flashattn?hopper-*.dist-info/RECORD"):
+	    if f.match(record_pattern):
 	        with f.locate().open("a", encoding="utf-8", newline="") as record:
 	            for added in (new, compiled):
 	                record.write(record_entry(added))
