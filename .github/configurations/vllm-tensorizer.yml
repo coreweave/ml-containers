@@ -1,7 +1,7 @@
 vllm-commit:
-  - 'v0.9.2'
+  - 'v0.10.0'
 flashinfer-commit:
-  - 'v0.2.6.post1'
+  - 'v0.2.8'
 builder-base-image:
   - 'ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-7a94157-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1'
 final-base-image:
