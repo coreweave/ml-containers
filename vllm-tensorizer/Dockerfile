@@ -25,9 +25,9 @@ WORKDIR /workspace
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /opt/constraints.txt
 
-COPY --link --chmod=755 nvcc-wrapper.py /workspace/nvcc-wrapper.py
-ENV PYTORCH_NVCC='/workspace/nvcc-wrapper.py' \
-    CMAKE_CUDA_COMPILER='/workspace/nvcc-wrapper.py'
+COPY --link --chmod=755 nvcc-wrapper.py /opt/nvcc-wrapper.py
+ENV PYTORCH_NVCC='/opt/nvcc-wrapper.py' \
+    CMAKE_CUDA_COMPILER='/opt/nvcc-wrapper.py'
 
 ARG TARGETPLATFORM
 # Switch 9.0, 10.0, and 12.0 to -a variants; preserve originals for PTX
@@ -35,18 +35,18 @@ ARG TARGETPLATFORM
 RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
     echo "${TORCH_CUDA_ARCH_LIST}" \
     | sed -E 's@\b(9|10|12)\.0\b@\1\.0a@g; s@\+PTX\b@@g' \
-    | tee /workspace/arch_list.txt && \
+    | tee /opt/arch_list.txt && \
     printf 'NVCC_WRAPPER_FILTER_CODES=' && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       echo 'sm_80;sm_89;sm_90;sm_100;sm_120;compute_80;compute_89;compute_90;compute_100;compute_120'; \
     else \
       echo 'sm_90;sm_100;sm_120;compute_90;compute_100;compute_120'; \
     fi \
-    | tee /workspace/filter_codes.txt && \
+    | tee /opt/filter_codes.txt && \
     printf '#!/bin/sh\nexport %s %s;\n' \
-      'TORCH_CUDA_ARCH_LIST="$(cat /workspace/arch_list.txt)"' \
-      'NVCC_WRAPPER_FILTER_CODES="$(cat /workspace/filter_codes.txt)"' \
-    | install -m 500 /dev/stdin /workspace/arch_flags.sh
+      'TORCH_CUDA_ARCH_LIST="$(cat /opt/arch_list.txt)"' \
+      'NVCC_WRAPPER_FILTER_CODES="$(cat /opt/filter_codes.txt)"' \
+    | install -m 500 /dev/stdin /opt/arch_flags.sh
 
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
@@ -88,7 +88,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
-    . /workspace/arch_flags.sh && \
+    . /opt/arch_flags.sh && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo && \
     if [ -f 'use_existing_torch.py' ]; then \
@@ -111,7 +111,7 @@ WORKDIR /wheels
 
 FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
-    . /workspace/arch_flags.sh && \
+    . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     python3 -m flashinfer.aot && \
     python3 -m pip wheel -w /wheels \
@@ -125,7 +125,7 @@ WORKDIR /wheels
 FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/workspace,rw \
-    . /workspace/arch_flags.sh && \
+    . /opt/arch_flags.sh && \
     python3 -m pip install --no-cache-dir 'xxhash==3.5.0' 'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
