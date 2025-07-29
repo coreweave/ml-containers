@@ -25,6 +25,28 @@ WORKDIR /workspace
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /opt/constraints.txt
 
+COPY --link --chmod=755 nvcc-wrapper.py /opt/nvcc-wrapper.py
+ENV PYTORCH_NVCC='/opt/nvcc-wrapper.py' \
+    CMAKE_CUDA_COMPILER='/opt/nvcc-wrapper.py'
+
+ARG TARGETPLATFORM
+# Switch 9.0, 10.0, and 12.0 to -a variants; preserve originals for PTX
+# Flashinfer v0.28.0 in particular can only build for 12.0a but not 12.0
+RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
+    echo "${TORCH_CUDA_ARCH_LIST}" \
+    | sed -E 's@\b(9|10|12)\.0\b@\1\.0a@g; s@\+PTX\b@@g' \
+    | tee /opt/arch_list.txt && \
+    printf 'NVCC_WRAPPER_FILTER_CODES=' && \
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+      echo 'sm_80;sm_89;sm_90;sm_100;sm_120;compute_80;compute_89;compute_90;compute_100;compute_120'; \
+    else \
+      echo 'sm_90;sm_100;sm_120;compute_90;compute_100;compute_120'; \
+    fi \
+    | tee /opt/filter_codes.txt && \
+    printf '#!/bin/sh\nexport %s %s;\n' \
+      'TORCH_CUDA_ARCH_LIST="$(cat /opt/arch_list.txt)"' \
+      'NVCC_WRAPPER_FILTER_CODES="$(cat /opt/filter_codes.txt)"' \
+    | install -m 500 /dev/stdin /opt/arch_flags.sh
 
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
@@ -66,6 +88,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    . /opt/arch_flags.sh && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo && \
     if [ -f 'use_existing_torch.py' ]; then \
@@ -88,7 +111,9 @@ WORKDIR /wheels
 
 FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
+    . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
+    sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
     python3 -m flashinfer.aot && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
@@ -101,6 +126,7 @@ WORKDIR /wheels
 FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/workspace,rw \
+    . /opt/arch_flags.sh && \
     python3 -m pip install --no-cache-dir 'xxhash==3.5.0' 'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
@@ -155,14 +181,13 @@ RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
 ARG TARGETPLATFORM
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-        python3 -m pip install --no-cache-dir \
-          accelerate hf_transfer 'modelscope!=1.15.0' 'bitsandbytes>=0.42.0' 'timm==0.9.10' \
-          boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt; \
+      BITSANDBYTES_VER='0.42.0'; \
     else \
-        python3 -m pip install --no-cache-dir \
-          accelerate hf_transfer 'modelscope!=1.15.0' 'bitsandbytes>=0.46.1' 'timm==0.9.10' \
-          boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt; \
+      BITSANDBYTES_VER='0.46.1'; \
     fi && \
+    python3 -m pip install --no-cache-dir \
+      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm==0.9.10' \
+      boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
 EXPOSE 8080
