@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.2
+# syntax=docker/dockerfile:1.4
 
 ARG BASE_IMAGE=ghcr.io/coreweave/ml-containers/torch:es-fa3-te-update-1b2ab29-nccl-cuda12.8.1-ubuntu22.04-nccl2.27.5-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1
 # Dependencies requiring NVCC are built ahead of time in a separate stage
@@ -45,6 +45,8 @@ RUN apt-get update && \
 
 RUN mkdir /app
 WORKDIR /app
+
+COPY --from=kw /sd-finetuner-workflow/sd-finetuner/ .
 
 # Install the pre-compiled DeepSpeed wheel
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
