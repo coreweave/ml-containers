@@ -12,9 +12,6 @@ on:
       build-args:
         required: false
         type: string
-      build-contexts:
-        required: false
-        type: string
       tag-suffix:
         required: false
         type: string
@@ -113,7 +110,6 @@ jobs:
           context: ${{ inputs.folder }}
           build-args: |-
             ${{ inputs.build-args }}
-          build-contexts: ${{ inputs.build-contexts }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

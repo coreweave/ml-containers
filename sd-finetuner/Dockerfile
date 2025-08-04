@@ -46,7 +46,13 @@ RUN apt-get update && \
 RUN mkdir /app
 WORKDIR /app
 
-COPY --from=kw /sd-finetuner-workflow/sd-finetuner/ .
+ARG COMMIT=master
+RUN git clone git@github.com:coreweave/finetuner && \
+    cd finetuner && \
+    git checkout ${COMMIT} && \
+    cd .. && \
+    cp finetuner/* .  && \
+    rm -rf finetuner \
 
 # Install the pre-compiled DeepSpeed wheel
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \

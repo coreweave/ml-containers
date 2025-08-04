@@ -20,5 +20,3 @@ jobs:
       image-name: sd-finetuner
       folder: sd-finetuner
       build-args: "--build-arg COMMIT=${{ github.event.inputs.commit }}"
-      build-contexts: |
-        kw=https://github.com/coreweave/kubernetes-cloud.git#${{ github.event.inputs.commit }}
