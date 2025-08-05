@@ -71,7 +71,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS triton-downloader
 WORKDIR /git
-ARG TRITON_COMMIT='v3.4.0'
+ARG TRITON_COMMIT='663e04e8e3ebed7ee3230a1a7320142689795106'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/openai/triton.git && \
     cd triton && \
@@ -123,6 +123,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
+    python3 -m flashinfer.aot && \
     python3 -m flashinfer.aot && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
