@@ -333,12 +333,9 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
       pip3 install --no-cache-dir pybind11 lit && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
       DIST_DIR="$(realpath -e ./dist)" && \
-      if [ -f 'triton/python/setup.py' ]; then \
-        cd triton/python; \
-      else \
-        cd triton; \
-      fi && \
-      python3 -m pip wheel -w "${DIST_DIR}/" --no-build-isolation --no-deps -vv . && \
+      cd triton && \
+      python3 -m pip wheel -w ./ --no-build-isolation --no-deps -vv . && \
+      python3 -m pip wheel -w python/triton_kernels --no-build-isolation --no-deps -vv . && \
       pip3 install --no-cache-dir "${DIST_DIR}"/*.whl; \
     fi
 
