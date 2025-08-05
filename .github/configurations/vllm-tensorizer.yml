@@ -1,5 +1,5 @@
 vllm-commit:
-  - 'v0.10.0'
+  - '8260948cdc379d13bf4b80d3172a03d21a983e05'
 flashinfer-commit:
   - 'v0.2.8'
 builder-base-image:

@@ -69,6 +69,15 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+FROM alpine/git:2.36.3 AS triton-downloader
+WORKDIR /git
+ARG TRITON_COMMIT='v3.4.0'
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/openai/triton.git && \
+    cd triton && \
+    git checkout "${TRITON_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=tree:0
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
@@ -122,6 +131,21 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
 
 WORKDIR /wheels
 
+FROM builder-base AS triton-builder
+RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=/workspace,rw \
+    . /opt/arch_flags.sh && \
+    pip install --no-cache-dir -r python/requirements.txt && \
+    python3 -m pip wheel -w /wheels \
+      -v --no-cache-dir --no-build-isolation --no-deps \
+      -c /opt/constraints.txt \
+      ./ && \
+    python3 -m pip wheel -w /wheels \
+      -v --no-cache-dir --no-build-isolation --no-deps \
+      -c /opt/constraints.txt \
+      python/triton_kernels
+
+WORKDIR /wheels
+
 
 FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
@@ -170,12 +194,17 @@ RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
+RUN --mount=type=bind,from=triton-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
 RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
+RUN python3 -m pip install --no-cache-dir "transformers==4.54.1" -c /tmp/constraints.txt
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
