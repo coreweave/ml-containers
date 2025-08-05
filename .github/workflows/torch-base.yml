@@ -36,7 +36,7 @@ jobs:
     secrets: inherit
     with:
       image-name: ${{ inputs.image-name }}
-      tag: ${{ format('{0}-{1}', format('base-cuda{0}-{1}', matrix.cuda, matrix.os), inputs.image-tag-suffix || format('torch{0}-vision{1}-audio{2}-abi{3}', matrix.torch, matrix.vision, matrix.audio, matrix.abi)) }}
+      tag: ${{ format('{0}-{1}', format('base-cuda{0}-{1}', matrix.cuda, matrix.os), inputs.image-tag-suffix || format('torch{0}-abi{3}', matrix.torch, matrix.abi)) }}
       builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-${{ matrix.os }}
       base-image: nvidia/cuda:${{ matrix.cuda }}-base-${{ matrix.os }}
       torch-version: ${{ matrix.torch }}
