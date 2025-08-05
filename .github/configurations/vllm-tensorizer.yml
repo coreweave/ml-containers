@@ -3,6 +3,6 @@ vllm-commit:
 flashinfer-commit:
   - 'v0.2.8'
 builder-base-image:
-  - 'ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-7a94157-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1'
+  - 'ghcr.io/coreweave/ml-containers/nightly-torch-extras:8552fbc-nccl-25080505-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.9.0a0-vision0.24.0a0-audio2.8.0a0'
 final-base-image:
-  - 'ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-7a94157-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1'
+  - 'ghcr.io/coreweave/ml-containers/nightly-torch-extras:8552fbc-nccl-25080505-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.9.0a0-vision0.24.0a0-audio2.8.0a0'
