@@ -69,6 +69,16 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+FROM alpine/git:2.36.3 AS transformers_downloader
+WORKDIR /git
+ARG TRANSFORMERS_COMMIT='v4.54.0'
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/huggingface/transformers && \
+    cd transformers && \
+    git checkout "${TRANSFORMERS_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=tree:0
+
 FROM alpine/git:2.36.3 AS triton-downloader
 WORKDIR /git
 ARG TRITON_COMMIT='663e04e8e3ebed7ee3230a1a7320142689795106'
@@ -161,6 +171,12 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
       -c /opt/constraints.txt \
       ./
 
+FROM builder-base AS transformers-builder
+RUN --mount=type=bind,from=transformers-downloader,source=/git/transformers,target=/workspace,rw \
+    python3 -m pip wheel -w /wheels \
+      -v --no-cache-dir --no-build-isolation --no-deps \
+      -c /opt/constraints.txt \
+      ./
 
 FROM builder-base AS infinistore-builder
 # InfiniStore is required when installing LMCache
@@ -205,7 +221,10 @@ RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels
 RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
-RUN python3 -m pip install --no-cache-dir "transformers==4.54.1" -c /tmp/constraints.txt
+RUN --mount=type=bind,from=transformers-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
+RUN python3 -m pip install --no-cache-dir -c /tmp/constraints.txt openai-harmony mcp
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
