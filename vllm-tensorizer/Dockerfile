@@ -1,5 +1,5 @@
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-7a94157-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-7a94157-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-torch-2.8.0-d0e58f6-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-torch-2.8.0-d0e58f6-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
 
 FROM scratch AS freezer
 WORKDIR /
