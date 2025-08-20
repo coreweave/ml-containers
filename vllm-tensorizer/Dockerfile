@@ -90,7 +90,8 @@ WORKDIR /git
 ARG DEEPGEMM_COMMIT='7b6b5563b9d4c1ae07ffbce7f78ad3ac9204827c'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/deepseek-ai/DeepGEMM && \
-    git -C DeepGEMM checkout "${DEEPGEMM_COMMIT}" && \
+    cd DeepGEMM && \
+    git checkout "${DEEPGEMM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
