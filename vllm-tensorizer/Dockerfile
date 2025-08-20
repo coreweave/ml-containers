@@ -126,7 +126,10 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip install --no-cache-dir \
-      requests pynvml ninja 'nvidia-cudnn-frontend>=1.13.0' "cuda-python~=${CUDA_VERSION}" && \
+      requests pynvml ninja \
+      'nvidia-cudnn-frontend>=1.13.0' \
+      "cuda-python~=${CUDA_VERSION}" \
+      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
     python3 -m flashinfer.aot && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
