@@ -165,6 +165,7 @@ RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target
 
 FROM builder-base AS deepgemm-builder
 RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/workspace,rw \
+    . /opt/arch_flags.sh && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /opt/constraints.txt \
