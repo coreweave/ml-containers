@@ -100,7 +100,7 @@ FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     . /opt/arch_flags.sh && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
-    python3 -m pip install --no-cache-dir py-cpuinfo && \
+    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' && \
     if [ -f 'use_existing_torch.py' ]; then \
       python3 use_existing_torch.py; \
     else \
