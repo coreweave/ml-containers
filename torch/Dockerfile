@@ -158,7 +158,7 @@ RUN if [ "$(. /etc/os-release && echo "${VERSION_ID:?}")" = '22.04' ]; then \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
       $PACKAGES python3 git apt-utils ssh ca-certificates \
-      libomp5 libpng-dev libjpeg-dev pkg-config \
+      curl libomp5 libpng-dev libjpeg-dev pkg-config \
       build-essential ninja-build && \
     apt-get clean && \
     curl -sSf 'https://bootstrap.pypa.io/get-pip.py' | python3 - && \
