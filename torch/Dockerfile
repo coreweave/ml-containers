@@ -143,6 +143,11 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
 FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
 ENV DEBIAN_FRONTEND=noninteractive
 
+COPY <<-"EOT" /etc/pip.conf
+[global]
+break-system-packages = true
+EOT
+
 ARG BUILD_CCACHE_SIZE="1Gi"
 
 # ninja-build, ccache, and lld are optional but improve the build
