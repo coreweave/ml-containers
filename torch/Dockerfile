@@ -164,7 +164,6 @@ RUN if [ "$(. /etc/os-release && echo "${VERSION_ID:?}")" = '22.04' ]; then \
     curl -sSf 'https://bootstrap.pypa.io/get-pip.py' | python3 - && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
 
@@ -656,7 +655,6 @@ RUN if [ "$(. /etc/os-release && echo "${VERSION_ID:?}")" = '22.04' ]; then \
     curl -sSf 'https://bootstrap.pypa.io/get-pip.py' | python3 - && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
