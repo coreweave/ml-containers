@@ -146,9 +146,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG BUILD_CCACHE_SIZE="1Gi"
 
 # ninja-build, ccache, and lld are optional but improve the build
-RUN apt-get -qq update && apt-get -qq install -y \
-      libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
-      libomp5 libpng-dev libjpeg-dev pkg-config python3-distutils \
+RUN if [ "$(. /etc/os-release && echo "${VERSION_ID:?}")" = '22.04' ]; then \
+      PACKAGES='libncurses5 python3-distutils'; \
+    else \
+      PACKAGES='libncurses6'; \
+    fi && \
+    apt-get -qq update && apt-get -qq install -y \
+      $PACKAGES python3 python3-pip git apt-utils ssh ca-certificates \
+      libomp5 libpng-dev libjpeg-dev pkg-config \
       build-essential ninja-build && \
     apt-get clean && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
@@ -208,18 +213,9 @@ RUN LLVM_VERSION='18' && \
     CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
-    SETUP_TOOLCHAIN() { \
-        apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
-        | sed -e '/connection timed out/{p; Q1}' && \
-        apt-get -qq install --no-install-recommends -y \
-          gcc-11 g++-11 gfortran-11 \
-          "lld-$LLVM_VERSION" "libomp-$LLVM_VERSION-dev" && \
-        apt-get clean; \
-    } && \
-    { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
-    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
+    apt-get -qq install --no-install-recommends -y \
+      gfortran "lld-$LLVM_VERSION" "libomp-$LLVM_VERSION-dev" && \
+    apt-get clean && \
     if [ "$(uname -m)" != 'aarch64' ]; then \
       update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1; \
     fi && \
@@ -635,8 +631,13 @@ FROM final-${TARGETARCH}
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install core packages
-RUN apt-get -qq update && apt-get -qq install -y \
-      libncurses5 python3 python3-pip python3-distutils \
+RUN if [ "$(. /etc/os-release && echo "${VERSION_ID:?}")" = '22.04' ]; then \
+      PACKAGES='libncurses5 python3-distutils'; \
+    else \
+      PACKAGES='libncurses6'; \
+    fi && \
+    apt-get -qq update && apt-get -qq install -y \
+      $PACKAGES python3 python3-pip \
       libomp5 libpng16-16 libjpeg-turbo8 libsodium23 \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
@@ -650,13 +651,17 @@ RUN apt-get -qq update && apt-get -qq install -y \
 
 RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         software-properties-common lsb-release && \
-    SETUP_LIBSTDCXX() { \
+    if [ "$(lsb_release -rs)" = '22.04' ]; then \
+      SETUP_LIBSTDCXX() { \
         apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
         | sed -e '/connection timed out/{p; Q1}' && \
         apt-get -qq install -y --no-install-recommends libstdc++6 && \
         apt-get clean; \
-    } && \
-    { SETUP_LIBSTDCXX || { sleep "$(shuf -i10-20 -n1)" && SETUP_LIBSTDCXX; }; }
+      } && \
+      { SETUP_LIBSTDCXX || { sleep "$(shuf -i10-20 -n1)" && SETUP_LIBSTDCXX; }; }; \
+    else \
+      apt-get -qq install -y --no-install-recommends libstdc++6; \
+    fi
 
 RUN LLVM_VERSION='18' && \
     CODENAME="$(lsb_release -cs)" && \
