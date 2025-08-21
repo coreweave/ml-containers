@@ -19,13 +19,13 @@ on:
         required: false
         description: "Custom tag suffix listing library versions under which to publish the resulting container"
         type: string
-  push:
-    paths:
-      - "torch/**"
-      - ".github/configurations/torch-nccl.yml"
-      - ".github/workflows/torch-nccl.yml"
-      - ".github/workflows/torch.yml"
-      - ".github/workflows/build.yml"
+#  push:
+#    paths:
+#      - "torch/**"
+#      - ".github/configurations/torch-nccl.yml"
+#      - ".github/workflows/torch-nccl.yml"
+#      - ".github/workflows/torch.yml"
+#      - ".github/workflows/build.yml"
 
 
 jobs:

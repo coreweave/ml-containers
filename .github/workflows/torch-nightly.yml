@@ -122,24 +122,24 @@ jobs:
       additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
       cache-key: base-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
-  build-nccl:
-    name: Build Nightly torch:nccl
-    needs:
-      - get-nightly-info
-      - get-nccl-config
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.get-nccl-config.outputs.config) }}
-    uses: ./.github/workflows/torch.yml
-    secrets: inherit
-    with:
-      image-name: nightly-torch
-      tag: ${{ format('nccl-{0}-cuda{1}-{2}-nccl{3}-{4}', needs.get-nightly-info.outputs.date, matrix.cuda, matrix.os, matrix.nccl, needs.get-nightly-info.outputs.version-string ) }}
-      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.cuda }}-devel-${{ matrix.os }}-nccl${{ matrix.nccl }}-${{ matrix.nccl-tests-hash }}
-      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.cuda }}-devel-${{ matrix.os }}-nccl${{ matrix.nccl }}-${{ matrix.nccl-tests-hash }}
-      torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
-      torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
-      torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
-      additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
-      cache-key: nccl-cuda${{ matrix.cuda }}-${{ matrix.os }}
-      build-extras: true
+#  build-nccl:
+#    name: Build Nightly torch:nccl
+#    needs:
+#      - get-nightly-info
+#      - get-nccl-config
+#    strategy:
+#      fail-fast: false
+#      matrix: ${{ fromJSON(needs.get-nccl-config.outputs.config) }}
+#    uses: ./.github/workflows/torch.yml
+#    secrets: inherit
+#    with:
+#      image-name: nightly-torch
+#      tag: ${{ format('nccl-{0}-cuda{1}-{2}-nccl{3}-{4}', needs.get-nightly-info.outputs.date, matrix.cuda, matrix.os, matrix.nccl, needs.get-nightly-info.outputs.version-string ) }}
+#      builder-base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.cuda }}-devel-${{ matrix.os }}-nccl${{ matrix.nccl }}-${{ matrix.nccl-tests-hash }}
+#      base-image: ghcr.io/coreweave/nccl-tests:${{ matrix.cuda }}-devel-${{ matrix.os }}-nccl${{ matrix.nccl }}-${{ matrix.nccl-tests-hash }}
+#      torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
+#      torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
+#      torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
+#      additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
+#      cache-key: nccl-cuda${{ matrix.cuda }}-${{ matrix.os }}
+#      build-extras: true
