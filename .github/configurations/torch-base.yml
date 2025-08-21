@@ -1,5 +1,5 @@
-cuda: [ 12.9.1, 12.8.1 ]
-os: [ ubuntu22.04 ]
+cuda: [ 12.9.1 ]
+os: [ ubuntu24.04 ]
 abi: [ 1 ]
 include:
   - torch: 2.8.0
