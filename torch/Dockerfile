@@ -635,6 +635,11 @@ ENV TORCH_CUDA_ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}"
 FROM final-${TARGETARCH}
 ENV DEBIAN_FRONTEND=noninteractive
 
+COPY <<-"EOT" /etc/pip.conf
+[global]
+break-system-packages = true
+EOT
+
 # Install core packages
 RUN if [ "$(. /etc/os-release && echo "${VERSION_ID:?}")" = '22.04' ]; then \
       PACKAGES='libncurses5 python3-distutils'; \
