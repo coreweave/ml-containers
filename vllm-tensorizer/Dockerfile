@@ -1,5 +1,5 @@
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-7a94157-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:es-fa3-te-update-7a94157-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.6-1-torch2.7.1-vision0.22.1-audio2.7.1-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:3ef0aa1-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.7-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:3ef0aa1-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.7-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
 
 FROM scratch AS freezer
 WORKDIR /
@@ -85,12 +85,22 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/bytedance/InfiniStore && \
     git -C InfiniStore checkout "${INFINISTORE_COMMIT}"
 
+FROM alpine/git:2.36.3 AS deepgemm-downloader
+WORKDIR /git
+ARG DEEPGEMM_COMMIT='7b6b5563b9d4c1ae07ffbce7f78ad3ac9204827c'
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/deepseek-ai/DeepGEMM && \
+    cd DeepGEMM && \
+    git checkout "${DEEPGEMM_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=tree:0
+
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     . /opt/arch_flags.sh && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
-    python3 -m pip install --no-cache-dir py-cpuinfo && \
+    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' && \
     if [ -f 'use_existing_torch.py' ]; then \
       python3 use_existing_torch.py; \
     else \
@@ -114,6 +124,12 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
+    [ -n "${CUDA_VERSION}" ] && \
+    python3 -m pip install --no-cache-dir \
+      requests pynvml ninja \
+      'nvidia-cudnn-frontend>=1.13.0' \
+      "cuda-python~=${CUDA_VERSION}" \
+      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
     python3 -m flashinfer.aot && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
@@ -154,6 +170,13 @@ RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target
       -c /opt/constraints.txt \
       ./
 
+FROM builder-base AS deepgemm-builder
+RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/workspace,rw \
+    . /opt/arch_flags.sh && \
+    python3 -m pip wheel -w /wheels \
+      -v --no-cache-dir --no-build-isolation --no-deps \
+      -c /opt/constraints.txt \
+      ./
 
 FROM ${FINAL_BASE_IMAGE} AS base
 
@@ -175,6 +198,9 @@ RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
 RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
+RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
 # Copied from vLLM's Dockerfile
