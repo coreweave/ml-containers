@@ -154,7 +154,7 @@ ARG BUILD_CCACHE_SIZE="1Gi"
 RUN if [ "$(. /etc/os-release && echo "${VERSION_ID:?}")" = '22.04' ]; then \
       PACKAGES='libncurses5 python3-distutils'; \
     else \
-      PACKAGES='libncurses6'; \
+      PACKAGES='libncurses6 python3-dev'; \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
       $PACKAGES python3 git apt-utils ssh ca-certificates \
@@ -644,7 +644,7 @@ EOT
 RUN if [ "$(. /etc/os-release && echo "${VERSION_ID:?}")" = '22.04' ]; then \
       PACKAGES='libncurses5 python3-distutils'; \
     else \
-      PACKAGES='libncurses6'; \
+      PACKAGES='libncurses6 python3-dev'; \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
       $PACKAGES python3 \
