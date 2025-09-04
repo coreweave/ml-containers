@@ -110,7 +110,7 @@ COPY --chmod=755 scale.sh .
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
-    case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
+    case "${NV_CUDA_LIB_VERSION}" in 12.[0-7].*) ;; *) \
       FLAGS="${FLAGS}$( \
         printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120 120 100 100 100a 100a \
       )" ;; \
