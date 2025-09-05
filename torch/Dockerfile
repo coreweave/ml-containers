@@ -369,7 +369,7 @@ ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
     CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py'
 # Filter these codes because we already build for the architecture-specific
 # versions of them instead.
-ENV NVCC_WRAPPER_FILTER_CODES='sm_90;sm_100;sm_120;compute_90;compute_100'
+ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;compute_75;compute_90;compute_100'
 
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
