@@ -91,7 +91,8 @@ FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
-      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c; \
+      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c && \
+      git -C flash-attention cherry-pick -n afc97c60f799e470886c154e3473df938f8fa93d; \
     else \
       mkdir flash-attention; \
     fi
