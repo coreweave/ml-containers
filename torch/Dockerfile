@@ -367,7 +367,8 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
 
 COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
-    CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py'
+    CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py' \
+    CUDACXX='/build/nvcc-wrapper.py'
 # Filter these codes because we already build for the architecture-specific
 # versions of them instead.
 ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;compute_75;compute_90;compute_100'
@@ -609,9 +610,11 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     if [ "$(uname -m)" = 'aarch64' ]; then \
       export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
     else \
-      NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
+      NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium" && \
+      export CXXFLAGS='-mcmodel=medium'; \
     fi && \
     NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS/arch=compute_100a,code=sm_100a/arch=compute_100,code=sm_100a}" && \
+    NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS/arch=compute_120a,code=sm_120a/arch=compute_120,code=sm_120a}" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
       's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
