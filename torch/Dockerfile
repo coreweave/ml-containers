@@ -611,6 +611,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     else \
       NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
     fi && \
+    NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS/arch=compute_100a,code=sm_100a/arch=compute_100,code=sm_100a}" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
       's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
