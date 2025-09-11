@@ -596,6 +596,7 @@ FROM flash-attn-builder-base AS flash-attn-3-builder
 RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
 ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-3}"
 
+ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;compute_70;compute_75'
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
@@ -607,17 +608,13 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    if [ "$(uname -m)" = 'aarch64' ]; then \
-      export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
-    else \
-      NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium" && \
-      export CXXFLAGS='-mcmodel=medium'; \
-    fi && \
-    NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS/arch=compute_100a,code=sm_100a/arch=compute_100,code=sm_100a}" && \
-    NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS/arch=compute_120a,code=sm_120a/arch=compute_120,code=sm_120a}" && \
+    export CXXFLAGS='-mcmodel=medium' && \
+    NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium" && \
+    NVCC_APPEND_FLAGS="$(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
-      's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
+      -e 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
+      -e 's@code=sm_80@code=[sm_80,sm_120]@' \
       flash-attention/hopper/setup.py && \
     NVCC_THREADS=4 /build/fa-build.sh flash-attention/hopper
 
