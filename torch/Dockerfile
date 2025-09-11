@@ -615,6 +615,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     sed -i \
       -e 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
       -e 's@code=sm_80@code=[sm_80,sm_120]@' \
+      -e 's@arch=compute_100a@arch=compute_100@' \
       flash-attention/hopper/setup.py && \
     NVCC_THREADS=4 /build/fa-build.sh flash-attention/hopper
 
