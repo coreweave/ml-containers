@@ -7,7 +7,7 @@ ARG BUILD_TORCH_VISION_VERSION="0.23.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.8.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="b10f436aa28ec8d885eb0d9bf134c320ffb6353d"
 ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
-ARG BUILD_FLASH_ATTN_3_VERSION="dfb664994c1e5056961c90d5e4f70bf7acc8af10"
+ARG BUILD_FLASH_ATTN_3_VERSION="5c1627a7a1cda9c32cb9b937a053564e663f81bc"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
@@ -597,6 +597,7 @@ RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
 ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-3}"
 
 ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;compute_70;compute_75'
+ENV FLASH_ATTN_CUDA_ARCHS='80;90;100;120'
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
