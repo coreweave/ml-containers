@@ -87,7 +87,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='7b6b5563b9d4c1ae07ffbce7f78ad3ac9204827c'
+ARG DEEPGEMM_COMMIT='ea9c5d9270226c5dd7a577c212e9ea385f6ef048'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/deepseek-ai/DeepGEMM && \
     cd DeepGEMM && \
@@ -111,6 +111,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     USE_CUDNN=1 USE_CUSPARSELT=1 \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
+    VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
       python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /opt/constraints.txt \
@@ -182,7 +183,7 @@ FROM ${FINAL_BASE_IMAGE} AS base
 
 WORKDIR /workspace
 
-RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 && apt-get clean
+RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && apt-get clean
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
@@ -212,7 +213,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.46.1'; \
     fi && \
     python3 -m pip install --no-cache-dir \
-      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm==0.9.10' \
+      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm==1.0.17' \
       boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
