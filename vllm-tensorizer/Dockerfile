@@ -131,6 +131,8 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
+    export FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
+    FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
     python3 -m flashinfer.aot && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
