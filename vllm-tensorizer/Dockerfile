@@ -181,6 +181,29 @@ RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/work
       -c /opt/constraints.txt \
       ./
 
+FROM builder-base AS nixl-builder
+RUN apt-get -qq update && \
+    apt-get -q install --no-install-recommends --no-upgrade -y \
+      build-essential pkg-config && \
+    apt-get clean && \
+    python3 -m pip install --no-cache-dir meson ninja pybind11 cmake
+
+ARG NIXL_TAG='0.2.0'
+ARG NIXL_UCX_HOME='/opt/hpcx/ucx'
+
+RUN mkdir /tmp/nixl && \
+    cd /tmp/nixl && \
+    wget "https://github.com/ai-dynamo/nixl/archive/refs/tags/${NIXL_TAG}.tar.gz" -qO- \
+    | tar --strip-components=1 -xzf - && \
+    [ -d "${NIXL_UCX_HOME}" ] && \
+    meson setup build --prefix=/opt/nixl -Ducx_path="${NIXL_UCX_HOME}" && \
+    cd build && \
+    ninja && \
+    ninja install && \
+    cd ../.. && \
+    rm -r /tmp/nixl && \
+    echo '/opt/nixl/lib/python3/dist-packages' > /usr/lib/python3/dist-packages/nixl.pth
+
 FROM ${FINAL_BASE_IMAGE} AS base
 
 WORKDIR /workspace
@@ -205,6 +228,9 @@ RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
 
 RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
+COPY --link --from=nixl-builder /opt/nixl /opt/nixl
+COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib/python3/dist-packages/nixl.pth
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
