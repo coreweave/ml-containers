@@ -196,7 +196,11 @@ RUN mkdir /tmp/nixl && \
     wget "https://github.com/ai-dynamo/nixl/archive/refs/tags/${NIXL_TAG}.tar.gz" -qO- \
     | tar --strip-components=1 -xzf - && \
     [ -d "${NIXL_UCX_HOME}" ] && \
-    meson setup build --prefix=/opt/nixl -Ducx_path="${NIXL_UCX_HOME}" && \
+    meson setup build --prefix=/opt/nixl \
+      -Ducx_path="${NIXL_UCX_HOME}" \
+      -Dcudapath_inc=/usr/local/cuda/include \
+      -Dcudapath_lib=/usr/local/cuda/lib64 \
+      -Dcudapath_stub=/usr/local/cuda/lib64/stubs && \
     cd build && \
     ninja && \
     ninja install && \
