@@ -87,7 +87,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='7b6b5563b9d4c1ae07ffbce7f78ad3ac9204827c'
+ARG DEEPGEMM_COMMIT='ea9c5d9270226c5dd7a577c212e9ea385f6ef048'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/deepseek-ai/DeepGEMM && \
     cd DeepGEMM && \
@@ -111,6 +111,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     USE_CUDNN=1 USE_CUSPARSELT=1 \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
+    VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
       python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /opt/constraints.txt \
@@ -130,6 +131,8 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
+    export FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
+    FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
     python3 -m flashinfer.aot && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
@@ -178,11 +181,40 @@ RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/work
       -c /opt/constraints.txt \
       ./
 
+FROM builder-base AS nixl-builder
+RUN apt-get -qq update && \
+    apt-get -q install --no-install-recommends --no-upgrade -y \
+      build-essential pkg-config && \
+    apt-get clean && \
+    python3 -m pip install --no-cache-dir meson ninja pybind11 cmake
+
+ARG NIXL_TAG='0.2.0'
+ARG NIXL_UCX_HOME='/opt/hpcx/ucx'
+
+RUN mkdir /tmp/nixl && \
+    cd /tmp/nixl && \
+    wget "https://github.com/ai-dynamo/nixl/archive/refs/tags/${NIXL_TAG}.tar.gz" -qO- \
+    | tar --strip-components=1 -xzf - && \
+    [ -d "${NIXL_UCX_HOME}" ] && \
+    CUDA_TARGET="$(find /usr/local/cuda/targets -mindepth 1 -maxdepth 1 -type d | head -1)" && \
+    meson setup build --prefix=/opt/nixl \
+      -Ducx_path="${NIXL_UCX_HOME}" \
+      -Dgds_path="${CUDA_TARGET}" \
+      -Dcudapath_inc="${CUDA_TARGET}/include" \
+      -Dcudapath_lib="${CUDA_TARGET}/lib" \
+      -Dcudapath_stub="${CUDA_TARGET}/lib/stubs" && \
+    cd build && \
+    ninja && \
+    ninja install && \
+    cd ../.. && \
+    rm -r /tmp/nixl && \
+    echo '/opt/nixl/lib/python3/dist-packages' > /usr/lib/python3/dist-packages/nixl.pth
+
 FROM ${FINAL_BASE_IMAGE} AS base
 
 WORKDIR /workspace
 
-RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 && apt-get clean
+RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && apt-get clean
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
@@ -203,6 +235,9 @@ RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
+COPY --link --from=nixl-builder /opt/nixl /opt/nixl
+COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib/python3/dist-packages/nixl.pth
+
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
 
@@ -212,7 +247,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.46.1'; \
     fi && \
     python3 -m pip install --no-cache-dir \
-      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm==0.9.10' \
+      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm==1.0.17' \
       boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
