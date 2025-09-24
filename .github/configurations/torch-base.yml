@@ -1,4 +1,4 @@
-cuda: [ 13.0.0 ]
+cuda: [ 13.0.1 ]
 os: [ ubuntu22.04 ]
 abi: [ 1 ]
 include:

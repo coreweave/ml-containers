@@ -1,4 +1,4 @@
-cuda: [ 13.0.0 ]
+cuda: [ 13.0.1 ]
 os: [ ubuntu22.04 ]
 abi: [ 1 ]
 include:
@@ -6,4 +6,4 @@ include:
     vision: 0.23.0
     audio: 2.8.0
     nccl: 2.28.3-1
-    nccl-tests-hash: '420f70c'
+    nccl-tests-hash: '528fb68'
