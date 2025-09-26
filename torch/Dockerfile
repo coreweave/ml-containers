@@ -614,7 +614,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       export CXXFLAGS='-mcmodel=medium' && \
       NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler ${CXXFLAGS}"; \
     else \
-      export FLASH_ATTENTION_DISABLE_SOFTCAP=TRUE FLASH_ATTENTION_DISABLE_HDIM128=TRUE; \
+      export FLASH_ATTN_CUDA_ARCHS="${FLASH_ATTN_CUDA_ARCHS/90;/}"; \
     fi && \
     NVCC_APPEND_FLAGS="$(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
