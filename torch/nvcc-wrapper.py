@@ -68,6 +68,9 @@ async def main(args) -> int:
             # Wait an exponentially increasing amount of time
             # before trying again, up to one minute
             await asyncio.sleep(min(60, int(1.5**attempt)))
+            if attempt == WRAPPER_ATTEMPTS:
+                print("NVCC wrapper: warning: Final attempt; appending --ptxas-options=--opt-level=0")
+                args.append("--ptxas-options=--opt-level=0")
         proc = await asyncio.create_subprocess_exec(
             NVCC_PATH, *args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
@@ -106,7 +109,7 @@ async def monitor_stream(
     return found
 
 
-def transform_args(args: Sequence[str]) -> Sequence[str]:
+def transform_args(args: Sequence[str]) -> List[str]:
     # This filters out args of the form -gencode=arch=X,code=Y
     # or -gencode arch=X,code=Y for any code in FILTER_CODES.
     # This does not filter arguments specified using the
