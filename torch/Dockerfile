@@ -614,7 +614,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       export CXXFLAGS='-mcmodel=medium' && \
       NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler ${CXXFLAGS}"; \
     else \
-      export NVCC_WRAPPER_ATTEMPTS=5; \
+      export NVCC_WRAPPER_ATTEMPTS=2; \
     fi && \
     NVCC_APPEND_FLAGS="$(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
@@ -763,11 +763,11 @@ RUN <<-"EOT" python3
 	    raise SystemExit("flash_attn_interface path is not a file")
 
 	d = root / "flash_attn_3"
-	if d.exists():
-	    raise SystemExit(f'"{d}" already exists')
+	d.mkdir(mode=0o755, parents=False, exist_ok=True)
 
-	d.mkdir(mode=0o755, parents=False, exist_ok=False)
 	new = d / p.name
+	if new.exists():
+	    raise SystemExit(f'"{new}" already exists')
 	new.symlink_to(p)
 	print(f"Created new symlink at {new}")
 
