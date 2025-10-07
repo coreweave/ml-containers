@@ -32,13 +32,11 @@ jobs:
   # Not running this build during CUDA 13 testing
   get-config:
     name: Get torch:nccl Config
-    if: false
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-nccl.yml
   build:
     name: Build torch:nccl
-    if: false
     needs: get-config
     strategy:
       fail-fast: false
