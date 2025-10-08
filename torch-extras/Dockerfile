@@ -74,15 +74,16 @@ RUN apt-get -qq update && apt-get -qq install -y \
     python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
 # Update compiler (GCC) and linker (LLD) versions
-# gfortran-11 is just for compiler_wrapper.f95
+# gfortran-13 is just for compiler_wrapper.f95
 RUN LLVM_VERSION='18' && \
+    add-apt-repository -n ppa:ubuntu-toolchain-r/test && \
     apt-get -qq update && apt-get -qq install --no-install-recommends -y \
-      gcc-11 g++-11 gfortran-11 "lld-$LLVM_VERSION" && \
+      gcc-13 g++-13 gfortran-13 "lld-$LLVM_VERSION" && \
     apt-get clean && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
     update-alternatives --install \
-      /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
+      /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1
 
 RUN mkdir /wheels /build
@@ -289,8 +290,7 @@ RUN apt-get -qq update && \
 
 RUN --mount=type=bind,from=deepspeed-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
-# The Apex installation is turned off for now for compatibility reasons
-# RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
-#     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
+ RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
+     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=xformers-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
