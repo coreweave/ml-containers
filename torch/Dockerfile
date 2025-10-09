@@ -360,7 +360,7 @@ ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[0-7].*) ;; *) \
       FLAGS="${FLAGS}$( \
-        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a \
+        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a 103a 103a \
       )" ;; \
     esac && \
     echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
@@ -616,7 +616,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     else \
       export NVCC_WRAPPER_ATTEMPTS=2; \
     fi && \
-    NVCC_APPEND_FLAGS="$(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
+    NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
       -e 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
