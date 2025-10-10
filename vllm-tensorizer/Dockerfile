@@ -247,7 +247,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.46.1'; \
     fi && \
     python3 -m pip install --no-cache-dir \
-      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm==1.0.17' \
+      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
