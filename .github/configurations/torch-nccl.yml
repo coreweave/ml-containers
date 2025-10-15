@@ -5,5 +5,5 @@ include:
   - torch: 2.8.0
     vision: 0.23.0
     audio: 2.8.0
-    nccl: 2.27.7-1
-    nccl-tests-hash: '13b2c72'
+    nccl: 2.28.3-1
+    nccl-tests-hash: '528fb68'
