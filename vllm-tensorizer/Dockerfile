@@ -72,7 +72,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
-ARG LMCACHE_COMMIT='v0.3.2'
+ARG LMCACHE_COMMIT='v0.3.7'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/LMCache/LMCache && \
     git -C LMCache checkout "${LMCACHE_COMMIT}"
@@ -146,7 +146,7 @@ FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/workspace,rw \
     . /opt/arch_flags.sh && \
-    python3 -m pip install --no-cache-dir 'xxhash==3.5.0' 'setuptools_scm>=8' && \
+    python3 -m pip install --no-cache-dir 'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
