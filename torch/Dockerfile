@@ -616,7 +616,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     else \
       export NVCC_WRAPPER_ATTEMPTS=2; \
     fi && \
-    NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
+    NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_100a,code=sm_100a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
       -e 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
