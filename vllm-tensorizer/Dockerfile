@@ -217,7 +217,8 @@ WORKDIR /workspace
 RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && apt-get clean
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
-    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
+    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
+    echo 'click != 8.3.0' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
