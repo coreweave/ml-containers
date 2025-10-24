@@ -225,7 +225,7 @@ RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
-    python3 -m pip uninstall pynvml && \
+    python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
 
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
