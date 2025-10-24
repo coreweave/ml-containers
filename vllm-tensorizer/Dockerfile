@@ -176,7 +176,6 @@ RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target
 FROM builder-base AS deepgemm-builder
 RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/workspace,rw \
     . /opt/arch_flags.sh && \
-    sed -Ei 's@std::filesystem::rename\(([^,]+),([^)]+)\);@try { \0 } catch (std::filesystem::filesystem_error) { std::filesystem::copy(\1,\2, std::filesystem::copy_options::overwrite_existing); std::filesystem::remove(\1); }@' csrc/jit/compiler.hpp && \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /opt/constraints.txt \
