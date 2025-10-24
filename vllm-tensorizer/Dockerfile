@@ -127,7 +127,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip install --no-cache-dir \
-      requests pynvml ninja \
+      requests nvidia-ml-py ninja \
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
@@ -224,7 +224,9 @@ RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
+    python3 -m pip uninstall pynvml && \
+    python3 -m pip install --no-cache-dir nvidia-ml-py
 
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
