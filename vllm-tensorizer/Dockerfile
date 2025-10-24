@@ -72,7 +72,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
-ARG LMCACHE_COMMIT='v0.3.2'
+ARG LMCACHE_COMMIT='v0.3.7'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/LMCache/LMCache && \
     git -C LMCache checkout "${LMCACHE_COMMIT}"
@@ -127,7 +127,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip install --no-cache-dir \
-      requests pynvml ninja \
+      requests nvidia-ml-py ninja \
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
@@ -146,7 +146,7 @@ FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/workspace,rw \
     . /opt/arch_flags.sh && \
-    python3 -m pip install --no-cache-dir 'xxhash==3.5.0' 'setuptools_scm>=8' && \
+    python3 -m pip install --no-cache-dir 'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
@@ -217,13 +217,16 @@ WORKDIR /workspace
 RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && apt-get clean
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
-    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
+    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
+    echo 'click != 8.3.0' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
+    python3 -m pip uninstall -y pynvml && \
+    python3 -m pip install --no-cache-dir nvidia-ml-py
 
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
