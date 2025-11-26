@@ -133,7 +133,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
-    for DIR in flashinfer flashinfer-cubin flashinfer-jit-cache; do ( \
+    for DIR in . flashinfer-cubin flashinfer-jit-cache; do ( \
       cd "${DIR}" && \
       exec python3 -m pip wheel -w /wheels \
         -v --no-cache-dir --no-build-isolation --no-deps \
