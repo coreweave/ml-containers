@@ -134,7 +134,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
     for DIR in flashinfer flashinfer-cubin flashinfer-jit-cache; do ( \
-      cd "${1:?}" && \
+      cd "${DIR}" && \
       exec python3 -m pip wheel -w /wheels \
         -v --no-cache-dir --no-build-isolation --no-deps \
         -c /opt/constraints.txt \
