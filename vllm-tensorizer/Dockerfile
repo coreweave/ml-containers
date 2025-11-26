@@ -1,5 +1,5 @@
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:3ef0aa1-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.7-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:3ef0aa1-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.7-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:8a60b2d-nccl-cuda12.9.1-ubuntu22.04-nccl2.28.3-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:8a60b2d-nccl-cuda12.9.1-ubuntu22.04-nccl2.28.3-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
 
 FROM scratch AS freezer
 WORKDIR /
@@ -72,7 +72,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
-ARG LMCACHE_COMMIT='v0.3.7'
+ARG LMCACHE_COMMIT='v0.3.9post2'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/LMCache/LMCache && \
     git -C LMCache checkout "${LMCACHE_COMMIT}"
@@ -87,7 +87,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='ea9c5d9270226c5dd7a577c212e9ea385f6ef048'
+ARG DEEPGEMM_COMMIT='594953acce41793ae00a1233eb516044d604bcb6'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/deepseek-ai/DeepGEMM && \
     cd DeepGEMM && \
@@ -124,20 +124,22 @@ FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
-    sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja \
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
-    export FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
-    FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
-    python3 -m flashinfer.aot && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
+      FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
+      FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
+    for DIR in flashinfer flashinfer-cubin flashinfer-jit-cache; do ( \
+      cd "${1:?}" && \
+      exec python3 -m pip wheel -w /wheels \
+        -v --no-cache-dir --no-build-isolation --no-deps \
+        -c /opt/constraints.txt \
+        ./ \
+    ); done
 
 WORKDIR /wheels
 
@@ -251,7 +253,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt && \
+      'runai-model-streamer[s3,gcs]>=0.15.0' -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
 EXPOSE 8080
