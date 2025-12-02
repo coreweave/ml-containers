@@ -15,7 +15,7 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip git ninja-build cmake && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex
+    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex build
 
 # Create the /wheels directory
 WORKDIR /wheels
@@ -47,6 +47,13 @@ RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
       'TORCH_CUDA_ARCH_LIST="$(cat /opt/arch_list.txt)"' \
       'NVCC_WRAPPER_FILTER_CODES="$(cat /opt/filter_codes.txt)"' \
     | install -m 500 /dev/stdin /opt/arch_flags.sh
+
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      '. /opt/arch_flags.sh' \
+      'export PIP_NO_CACHE_DIR=off PIP_CONSTRAINT=/opt/constraints.txt PIP_BUILD_CONSTRAINT=/opt/constraints.txt' \
+      'exec python3 -m build -o /wheels -w -n "${@:-./}"' \
+    | install -m 500 /dev/stdin /opt/build.sh
 
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
@@ -112,10 +119,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
-      python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+      /opt/build.sh
 
 WORKDIR /wheels
 
@@ -135,10 +139,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
     for DIR in . flashinfer-cubin flashinfer-jit-cache; do ( \
       cd "${DIR}" && \
-      exec python3 -m pip wheel -w /wheels \
-        -v --no-cache-dir --no-build-isolation --no-deps \
-        -c /opt/constraints.txt \
-        ./ \
+      /opt/build.sh; \
     ); done
 
 WORKDIR /wheels
@@ -152,10 +153,7 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
 
 
 FROM builder-base AS infinistore-builder
@@ -170,18 +168,12 @@ RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target
       pkg-config && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson pybind11 && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
 
 FROM builder-base AS deepgemm-builder
 RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/workspace,rw \
     . /opt/arch_flags.sh && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
 
 FROM builder-base AS nixl-builder
 RUN apt-get -qq update && \
