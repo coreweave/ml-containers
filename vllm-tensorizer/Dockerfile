@@ -76,6 +76,16 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+FROM alpine/git:2.36.3 AS tvm-downloader
+WORKDIR /git
+ARG TVM_COMMIT="v0.1.5"
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/apache/tvm-ffi && \
+    cd flashinfer && \
+    git checkout "${TVM_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=tree:0
+
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
@@ -102,6 +112,13 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+FROM builder-base as tvm-builder
+RUN --mount=type=bind,from=vllm-downloader,source=/git/tvm-ffi,target=/workspace,rw \
+    . /opt/arch_flags.sh && \
+    python3 -m pip wheel -w /wheels \
+      -v --no-cache-dir --no-build-isolation --no-deps \
+      -c /opt/constraints.txt \
+      ./
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
@@ -124,7 +141,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 WORKDIR /wheels
 
 
-FROM builder-base AS flashinfer-builder
+FROM tvm-builder AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
