@@ -113,8 +113,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       --depth 1 --filter=tree:0
 
 FROM builder-base as tvm-builder
-RUN --mount=type=bind,from=vllm-downloader,source=/git/tvm-ffi,target=/workspace,rw \
-    . /opt/arch_flags.sh && \
+RUN --mount=type=bind,from=tvm-downloader,source=/git/tvm-ffi,target=/workspace,rw \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
       -c /opt/constraints.txt \
