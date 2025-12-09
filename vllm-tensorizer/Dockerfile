@@ -81,7 +81,7 @@ WORKDIR /git
 ARG TVM_COMMIT="v0.1.5"
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/apache/tvm-ffi && \
-    cd flashinfer && \
+    cd tvm-ffi && \
     git checkout "${TVM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
