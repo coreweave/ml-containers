@@ -116,7 +116,7 @@ FROM builder-base as tvm-builder
 RUN --mount=type=bind,from=tvm-downloader,source=/git/tvm-ffi,target=/workspace,rw \
     python3 -m pip wheel -w /wheels \
       -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
+      -c /opt/constraints.txt --config-settings cmake.define.TVM_FFI_ATTACH_DEBUG_SYMBOLS=ON \
       ./
 
 FROM builder-base AS vllm-builder
