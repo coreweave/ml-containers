@@ -1,5 +1,5 @@
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:3ef0aa1-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.7-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:3ef0aa1-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.7-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:8a60b2d-nccl-cuda12.9.1-ubuntu22.04-nccl2.28.3-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:8a60b2d-nccl-cuda12.9.1-ubuntu22.04-nccl2.28.3-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
 
 FROM scratch AS freezer
 WORKDIR /
@@ -15,7 +15,7 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip git ninja-build cmake && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex
+    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex build
 
 # Create the /wheels directory
 WORKDIR /wheels
@@ -48,6 +48,13 @@ RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
       'NVCC_WRAPPER_FILTER_CODES="$(cat /opt/filter_codes.txt)"' \
     | install -m 500 /dev/stdin /opt/arch_flags.sh
 
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      '. /opt/arch_flags.sh' \
+      'export PIP_NO_CACHE_DIR=off PIP_CONSTRAINT=/opt/constraints.txt PIP_BUILD_CONSTRAINT=/opt/constraints.txt' \
+      'exec python3 -m build -o /wheels -w -n "${@:-./}"' \
+    | install -m 500 /dev/stdin /opt/build.sh
+
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
 ARG VLLM_COMMIT
@@ -72,7 +79,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
-ARG LMCACHE_COMMIT='v0.3.7'
+ARG LMCACHE_COMMIT='v0.3.9post2'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/LMCache/LMCache && \
     git -C LMCache checkout "${LMCACHE_COMMIT}"
@@ -87,7 +94,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='ea9c5d9270226c5dd7a577c212e9ea385f6ef048'
+ARG DEEPGEMM_COMMIT='594953acce41793ae00a1233eb516044d604bcb6'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/deepseek-ai/DeepGEMM && \
     cd DeepGEMM && \
@@ -112,10 +119,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
-      python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+      /opt/build.sh
 
 WORKDIR /wheels
 
@@ -124,20 +128,20 @@ FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
-    sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip install --no-cache-dir \
-      requests nvidia-ml-py ninja \
+      requests nvidia-ml-py ninja tqdm filelock \
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
-      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
-    export FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
-    FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
-    python3 -m flashinfer.aot && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" \
+      'apache-tvm-ffi>=0.1,<0.2' && \
+    export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
+      FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
+      FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
+    for DIR in . flashinfer-cubin flashinfer-jit-cache; do ( \
+      cd "${DIR}" && \
+      /opt/build.sh; \
+    ); done
 
 WORKDIR /wheels
 
@@ -150,10 +154,7 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
 
 
 FROM builder-base AS infinistore-builder
@@ -168,18 +169,12 @@ RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target
       pkg-config && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson pybind11 && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
 
 FROM builder-base AS deepgemm-builder
 RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/workspace,rw \
     . /opt/arch_flags.sh && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
 
 FROM builder-base AS nixl-builder
 RUN apt-get -qq update && \
@@ -251,7 +246,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt && \
+      'runai-model-streamer[s3,gcs]>=0.15.0' -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
 EXPOSE 8080
