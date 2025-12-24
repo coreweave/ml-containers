@@ -1,9 +1,10 @@
 FROM ghcr.io/coreweave/ml-containers/torch:afecfe9-base-cuda12.0.1-torch2.0.0-vision0.15.1
 ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt update && apt upgrade -y && \
-    apt update && apt install -y python3 python3-pip git curl && \
-    apt clean
+ 
+RUN apt-get -qq update && \
+    apt-get -qq install --no-install-recommends -y \
+        python3 python3-pip git curl && \
+    apt-get clean
 
 RUN mkdir /app
 WORKDIR /app
