@@ -20,4 +20,4 @@ jobs:
       image-name: sd-inference
       folder: sd-inference
       build-args: |
-        COMMIT=${{ github.event.inputs.commit }}
+        ${{ inputs.commit && 'COMMIT=' }}${{ inputs.commit }}
