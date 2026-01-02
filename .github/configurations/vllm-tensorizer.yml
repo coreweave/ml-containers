@@ -3,6 +3,6 @@ vllm-commit:
 flashinfer-commit:
   - 'v0.5.2'
 builder-base-image:
-  - 'ghcr.io/coreweave/ml-containers/torch:es-torch-2.9.1-aac0d13-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.9.1-vision0.24.1-audio2.9.1-abi1'
+  - 'ghcr.io/coreweave/ml-containers/torch:19331b7-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.9.1-vision0.24.1-audio2.9.1-abi1'
 final-base-image:
-  - 'ghcr.io/coreweave/ml-containers/torch:es-torch-2.9.1-aac0d13-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.9.1-vision0.24.1-audio2.9.1-abi1'
+  - 'ghcr.io/coreweave/ml-containers/torch:19331b7-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.9.1-vision0.24.1-audio2.9.1-abi1'
