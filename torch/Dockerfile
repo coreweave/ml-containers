@@ -55,6 +55,8 @@ RUN ./clone.sh pytorch/pytorch pytorch "${BUILD_TORCH_VERSION}" && \
       | git -C pytorch apply; \
     elif [ "${BUILD_TORCH_VERSION}" = '2.7.1' ]; then \
       git -C pytorch cherry-pick -n b74be524547f7f025066f19eda3b53a887c244ba; \
+    elif [ "${BUILD_TORCH_VERSION}" = '2.9.1' ]; then \
+      git -C pytorch cherry-pick -n a20afb61007a94f5c28294e9ae20043657152ef6; \
     fi && \
     rm -rf pytorch/.git
 
