@@ -1,0 +1,22 @@
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Commit to build'
+        required: true
+        default: 'master'
+  push:
+    paths:
+      - "s3-perf-test/**"
+      - ".github/workflows/s3-perf-test.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: s3-perf-test
+      folder: s3-perf-test
+      build-args: "--build-arg COMMIT=${{ github.event.inputs.commit }}"
