@@ -21,7 +21,10 @@ RUN sed -i \
       -e 's/^tensorizer==2\.3\..*$/tensorizer==2.12.0/' \
       -e 's/^diffusers==0\.20\..*$/diffusers==0.36.0/' \
       -e 's/^transformers==4\.33\..*$/transformers==4.57.3/' \
+      -e '$a ruff-cuda' \
       requirements.txt
 
 RUN pip3 install --no-cache-dir --upgrade pip && \
     pip3 install --no-cache-dir -r requirements.txt
+
+RUN python3 -m ruff check .
