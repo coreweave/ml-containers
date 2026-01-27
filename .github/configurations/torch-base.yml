@@ -1,7 +1,7 @@
-cuda: [ 13.1.0 ]
+cuda: [ 13.1.1 ]
 os: [ ubuntu22.04 ]
 abi: [ 1 ]
 include:
-  - torch: 2.9.1
-    vision: 0.24.1
-    audio: 2.9.1
+  - torch: 2.10.0
+    vision: 0.25.0
+    audio: 2.10.0
