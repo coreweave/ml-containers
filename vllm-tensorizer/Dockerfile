@@ -94,7 +94,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='594953acce41793ae00a1233eb516044d604bcb6'
+ARG DEEPGEMM_COMMIT='0f5f2662027f0db05d4e3f6a94e56e2d8fc45c51'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/deepseek-ai/DeepGEMM && \
     cd DeepGEMM && \
