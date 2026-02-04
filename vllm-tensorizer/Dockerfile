@@ -79,7 +79,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
-ARG LMCACHE_COMMIT='v0.3.9post2'
+ARG LMCACHE_COMMIT='v0.3.12'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/LMCache/LMCache && \
     git -C LMCache checkout "${LMCACHE_COMMIT}"
