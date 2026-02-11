@@ -15,7 +15,7 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip git ninja-build cmake && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex build
+    pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
 # Create the /wheels directory
 WORKDIR /wheels
