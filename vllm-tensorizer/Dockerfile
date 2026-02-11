@@ -150,7 +150,9 @@ FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/workspace,rw \
     . /opt/arch_flags.sh && \
-    python3 -m pip install --no-cache-dir 'setuptools_scm>=8' && \
+    python3 -m pip install --no-cache-dir \
+    'setuptools>=77.0.3,<81.0.0' \
+    'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
