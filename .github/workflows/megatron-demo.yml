@@ -1,0 +1,43 @@
+name: Megatron Training Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      base-image:
+        description: 'Base image to use'
+        required: false
+  push:
+    branches: 
+      - "dmarx/megatron-demo"
+      - "main"
+    paths:
+      - "megatron-demo/**"
+      - ".github/workflows/megatron-demo.yml"
+      - ".github/workflows/build.yml"
+
+jobs:
+  set-tag:
+    name: Set Image Tag
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set.outputs.tag }}
+    steps:
+      - id: set
+        run: |
+          SANITIZED_REF_NAME="${GITHUB_REF_NAME//\//-}"
+          TAG="${SANITIZED_REF_NAME}-${GITHUB_SHA::7}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+
+  build:
+    name: Build Container
+    needs: set-tag
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: megatron-demo
+      folder: megatron-demo
+      build-args: |
+        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/megatron:es-megatron-tensorizer-5fabc1e'}}
+        IMAGE_TAG=${{ needs.set-tag.outputs.image_tag }}
+      #tag-suffix: ${{ needs.set-tag.outputs.image_tag }}
