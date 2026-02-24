@@ -48,7 +48,9 @@ cd flashinfer
 # flashinfer v0.6+ uses TVM for AOT kernel compilation
 _PIP_INSTALL -U optree 'apache-tvm-ffi>=0.1.5,<0.2' requests
 # --add-comm=false skips nvshmem module (requires nvidia.nvshmem not in base image)
-FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" python3 -m flashinfer.aot --add-comm false
+# Filter out 12.0+PTX — nvcc in CUDA 12.x doesn't support compute_120; it's only for forward compat via PTX
+FLASHINFER_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's/12\.0+PTX//')"
+FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_ARCH_LIST}" python3 -m flashinfer.aot --add-comm false
 NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS } --diag-suppress 20281,174" \
   _BUILD . \
   |& _LOG flashinfer.log \
