@@ -47,7 +47,8 @@ _CLONE https://github.com/flashinfer-ai/flashinfer flashinfer "${FLASHINFER_COMM
 cd flashinfer
 # flashinfer v0.6+ uses TVM for AOT kernel compilation
 _PIP_INSTALL -U optree 'apache-tvm-ffi>=0.1.5,<0.2' requests
-FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" python3 -m flashinfer.aot
+# --add-comm=false skips nvshmem module (requires nvidia.nvshmem not in base image)
+FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" python3 -m flashinfer.aot --add-comm false
 NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS } --diag-suppress 20281,174" \
   _BUILD . \
   |& _LOG flashinfer.log \
