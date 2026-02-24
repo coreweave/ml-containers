@@ -45,7 +45,8 @@ _PIP_INSTALL -U pip setuptools wheel build pybind11 ninja 'cmake<4.0.0' 'scikit-
 echo "Building flashinfer-ai/flashinfer @ ${FLASHINFER_COMMIT}"
 _CLONE https://github.com/flashinfer-ai/flashinfer flashinfer "${FLASHINFER_COMMIT}"
 cd flashinfer
-_PIP_INSTALL -U optree
+# flashinfer v0.6+ uses TVM for AOT kernel compilation
+_PIP_INSTALL -U optree 'apache-tvm-ffi>=0.1.5,<0.2'
 python3 -m flashinfer.aot
 NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS } --diag-suppress 20281,174" \
   _BUILD . \
