@@ -1,0 +1,30 @@
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag for the build'
+        required: true
+      base-image:
+        description: 'SGLang base image from which to build'
+        required: true
+      builder-image:
+        description: 'Image to use to compile wheels, if different from the base image'
+        required: false
+  push:
+    paths:
+      - "slime/**"
+      - ".github/workflows/slime.yml"
+      - ".github/workflows/build.yml"
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: slime
+      folder: slime
+      tag-suffix: ${{ inputs.tag || 'abatilo-sglang-d8259f9-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1' }}
+      build-args: |
+        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/sglang:abatilo-sglang-d8259f9-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1'}}
+        ${{ inputs.builder-image && format('BUILDER_IMAGE={0}', inputs.builder-image) || '' }}
