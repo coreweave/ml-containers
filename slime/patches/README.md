@@ -3,7 +3,11 @@
 These patches originate from the [THUDM/SLIME](https://github.com/THUDM/SLIME)
 project's Docker build infrastructure at `docker/patch/<version>/`.
 
-## megatron.patch
+Patches are organized into versioned folders matching SLIME's upstream layout.
+The folder name corresponds to the SLIME release version the patches were
+sourced from.
+
+## v0.5.7/megatron.patch
 
 **Source:** `THUDM/SLIME docker/patch/latest/megatron.patch` (identical copy)
 
@@ -29,11 +33,12 @@ workflow. Key changes:
 - **Misc** — `weights_only=False` for `torch.load`, `trust_remote_code=True`
   for HF tokenizer, post-attention/MLP layernorm config fields.
 
-**To update:** Copy `docker/patch/latest/megatron.patch` from the SLIME repo.
-Verify the target Megatron-LM commit in the Dockerfile (`MEGATRON_COMMIT` ARG)
-matches what the patch expects.
+**To update:** Copy `docker/patch/<version>/megatron.patch` from the SLIME repo
+into a new versioned folder here. Update the path in `install.bash` to point to
+the new folder. Verify the target Megatron-LM commit in the Dockerfile
+(`MEGATRON_COMMIT` ARG) matches what the patch expects.
 
-## sglang.patch
+## v0.5.7/sglang.patch
 
 **Source:** Derived from `THUDM/SLIME docker/patch/latest/sglang.patch`,
 retargeted to SGLang v0.5.9 (`bbe9c7eeb520b0a67e92d133dfc137a3688dc7f2`).
@@ -54,5 +59,6 @@ a few context lines differ.
 
 **To update:** When bumping SGLang versions, regenerate this patch by applying
 SLIME's latest sglang.patch to the new SGLang version and resolving any
-conflicts. The patch must target the same SGLang commit used to compile
+conflicts. Place it in the appropriate versioned folder and update the path in
+`build.bash`. The patch must target the same SGLang commit used to compile
 sgl-kernel in the base sglang image.

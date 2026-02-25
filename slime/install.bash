@@ -30,7 +30,7 @@ python3 -c "import torch; print(f'torch {torch.__version__} OK')"
 git clone --recursive --filter=blob:none https://github.com/NVIDIA/Megatron-LM.git /root/Megatron-LM
 cd /root/Megatron-LM
 git checkout "${MEGATRON_COMMIT}"
-git apply /wheels/megatron.patch --3way
+git apply /wheels/v0.5.7/megatron.patch --3way
 if grep -R -n '^<<<<<<< ' .; then
   echo "Megatron patch failed to apply cleanly" && exit 1
 fi

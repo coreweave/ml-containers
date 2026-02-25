@@ -45,7 +45,7 @@ echo "Building patched sglang @ ${SGLANG_COMMIT}"
 git clone https://github.com/sgl-project/sglang
 cd sglang
 git checkout "${SGLANG_COMMIT}"
-git apply /build/sglang.patch --3way
+git apply /build/v0.5.7/sglang.patch --3way
 if grep -R -n '^<<<<<<< ' python/; then
   echo "sglang patch failed to apply cleanly" && exit 1
 fi
