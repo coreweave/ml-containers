@@ -22,7 +22,7 @@ fi
 
 SGLANG_EXTRA_PIP_DEPENDENCIES=()
 if [ "$(uname -m)" = 'x86_64' ]; then
-  SGLANG_EXTRA_PIP_DEPENDENCIES=('decord' 'xgrammar>=0.1.10')
+  SGLANG_EXTRA_PIP_DEPENDENCIES=('decord2' 'xgrammar>=0.1.10')
 fi
 
 _PIP_INSTALL \
@@ -31,6 +31,6 @@ _PIP_INSTALL \
   'orjson' 'packaging' 'pillow' 'prometheus-client>=0.20.0' \
   'psutil' 'pydantic' 'python-multipart' 'pyzmq>=25.1.2' \
   'torchao>=0.7.0' 'uvicorn' 'uvloop' \
-  'cuda-python' 'outlines>=0.0.44,<0.1.0' \
+  'cuda-python' 'outlines==0.1.11' \
   'pybase64' \
   "${SGLANG_EXTRA_PIP_DEPENDENCIES[@]}"
