@@ -1,0 +1,82 @@
+name: slime-chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      torch-extras-image:
+        description: 'torch-extras base image (overrides bake file default)'
+        required: false
+  push:
+    paths:
+      - "sglang/**"
+      - "slime/**"
+      - "docker-bake.hcl"
+      - ".github/workflows/slime-chain.yml"
+
+jobs:
+  build:
+    name: Build Images
+    runs-on: [ cw ]
+    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.9.0'
+    timeout-minutes: 960
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch BuildKit Client Certs
+        uses: dopplerhq/secrets-fetch-action@v1.2.0
+        id: client-certs
+        with:
+          doppler-token: ${{ secrets.ORG_BUILDKIT_CLIENT_TOKEN }}
+          doppler-project: ${{ secrets.BUILDKIT_CONSUMER_DOPPLER_PROJECT }}
+          doppler-config: prod
+          inject-env-vars: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.7.1
+        with:
+          driver: remote
+          endpoint: ${{ secrets.BUILDKIT_CONSUMER_AMD64_ENDPOINT }}
+          platforms: linux/amd64
+          append: |
+            - endpoint: ${{ secrets.BUILDKIT_CONSUMER_ARM64_ENDPOINT }}
+              platforms: linux/arm64
+        env:
+          BUILDER_NODE_0_AUTH_TLS_CACERT: ${{ steps.client-certs.outputs.TLS_CACERT }}
+          BUILDER_NODE_0_AUTH_TLS_CERT: ${{ steps.client-certs.outputs.TLS_CERT }}
+          BUILDER_NODE_0_AUTH_TLS_KEY: ${{ steps.client-certs.outputs.TLS_KEY }}
+          BUILDER_NODE_1_AUTH_TLS_CACERT: ${{ steps.client-certs.outputs.TLS_CACERT }}
+          BUILDER_NODE_1_AUTH_TLS_CERT: ${{ steps.client-certs.outputs.TLS_CERT }}
+          BUILDER_NODE_1_AUTH_TLS_KEY: ${{ steps.client-certs.outputs.TLS_KEY }}
+
+      - name: Compute tag and registry
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          BRANCH="${BRANCH//\//-}"
+          PREFIX=""
+          [ "${{ github.ref_name }}" != "main" ] && PREFIX="${BRANCH}-"
+          echo "TAG=${PREFIX}$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_ENV
+          echo "REGISTRY=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Set torch-extras image override
+        if: inputs.torch-extras-image != ''
+        run: echo "TORCH_EXTRAS_IMAGE=${{ inputs.torch-extras-image }}" >> $GITHUB_ENV
+
+      - name: Initialize registry credentials
+        env:
+          USER: ${{ github.actor }}
+          PASS: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          jq -n '.auths."ghcr.io" = { username: env.USER, password: env.PASS }' \
+          | install -m400 /dev/stdin ~/.docker/config.json
+
+      - name: Build and push
+        uses: docker/bake-action@v5
+        with:
+          push: true
+
+      - name: Clear registry credentials
+        if: always()
+        run: rm -f ~/.docker/config.json && [ ! -e ~/.docker/config.json ]

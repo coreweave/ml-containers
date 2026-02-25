@@ -1,8 +1,6 @@
-# syntax=docker/dockerfile:1.2
-ARG BASE_IMAGE
-ARG BUILDER_IMAGE="${BASE_IMAGE}"
+# syntax=docker/dockerfile:1
 
-FROM ${BUILDER_IMAGE} AS builder
+FROM torch-extras AS builder
 
 ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0a 10.0a 12.0+PTX'
 
@@ -26,7 +24,7 @@ RUN mkdir /wheels && \
     rm -rf /build/*
 COPY install.bash /wheels/
 
-FROM ${BASE_IMAGE}
+FROM torch-extras
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     cd /wheels && \
     bash install.bash
