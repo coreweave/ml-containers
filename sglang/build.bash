@@ -19,7 +19,7 @@ printf 'Using %s=%s\n' \
   DECORD_COMMIT "${DECORD_COMMIT:-<None>}"
 
 export NVCC_APPEND_FLAGS='--diag-suppress 174,177,2361'
-export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0 10.0 12.0+PTX}"
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0a 10.0a 12.0+PTX}"
 
 mkdir -p /wheels/logs
 
