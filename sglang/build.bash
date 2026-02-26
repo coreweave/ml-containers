@@ -3,12 +3,10 @@ set -xeo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 TORCH_CUDA_ARCH_LIST=''
-FILTER_ARCHES=''
 
-while getopts 'a:f' OPT; do
+while getopts 'a:' OPT; do
   case "${OPT}" in
     a) TORCH_CUDA_ARCH_LIST="${OPTARG}" ;;
-    f) FILTER_ARCHES='1' ;;
     *) exit 92 ;;
   esac
 done
@@ -68,10 +66,6 @@ cd sglang
 (
 cd sgl-kernel
 
-ARCH_TRIPLE="$(gcc -print-multiarch)"
-LIB_DIR="/usr/lib/${ARCH_TRIPLE:?}"
-test -d "${LIB_DIR:?}"
-
 _BUILD \
   -Cbuild-dir=build \
   -Ccmake.define.SGL_KERNEL_ENABLE_SM100A=1 \
@@ -87,6 +81,7 @@ _BUILD \
 # sglang Python package (no CUDA compilation)
 # Relax torch pin to allow the base image's torch version
 TORCH_VER="$(python3 -c 'import torch; print(torch.__version__.split("+")[0])')"
+grep -q '"torch==2\.9\.1"' python/pyproject.toml || { echo "ERROR: torch pin changed upstream; update sed patterns in build.bash"; exit 1; }
 sed -i "s/\"torch==2\.9\.1\"/\"torch>=${TORCH_VER}\"/" python/pyproject.toml
 sed -i "s/\"torchaudio==2\.9\.1\"/\"torchaudio>=${TORCH_VER}\"/" python/pyproject.toml
 _BUILD python |& _LOG sglang.log
