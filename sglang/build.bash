@@ -44,7 +44,7 @@ echo "Building flashinfer-ai/flashinfer @ ${FLASHINFER_COMMIT}"
 _CLONE https://github.com/flashinfer-ai/flashinfer flashinfer "${FLASHINFER_COMMIT}"
 cd flashinfer
 # flashinfer v0.6+ uses TVM for AOT kernel compilation
-_PIP_INSTALL -U optree 'apache-tvm-ffi>=0.1.5,<0.2' requests
+_PIP_INSTALL -U optree 'apache-tvm-ffi>=0.1.5,<0.2' requests pynvml
 # --add-comm=false skips nvshmem module (requires nvidia.nvshmem not in base image)
 # Filter out 12.0+PTX — nvcc in CUDA 12.x doesn't support compute_120; it's only for forward compat via PTX
 FLASHINFER_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's/12\.0+PTX//' | xargs)"
@@ -82,6 +82,7 @@ _BUILD \
 # Relax torch pin to allow the base image's torch version
 TORCH_VER="$(python3 -c 'import torch; print(torch.__version__.split("+")[0])')"
 grep -q '"torch==2\.9\.1"' python/pyproject.toml || { echo "ERROR: torch pin changed upstream; update sed patterns in build.bash"; exit 1; }
+grep -q '"torchaudio==2\.9\.1"' python/pyproject.toml || { echo "ERROR: torchaudio pin changed upstream; update sed patterns in build.bash"; exit 1; }
 sed -i "s/\"torch==2\.9\.1\"/\"torch>=${TORCH_VER}\"/" python/pyproject.toml
 sed -i "s/\"torchaudio==2\.9\.1\"/\"torchaudio>=${TORCH_VER}\"/" python/pyproject.toml
 _BUILD python |& _LOG sglang.log

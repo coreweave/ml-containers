@@ -26,5 +26,5 @@ jobs:
       folder: sglang
       tag-suffix: ${{ inputs.tag || 'nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1' }}
       build-args: |
-        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/torch-extras:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1'}}
+        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1'}}
         ${{ inputs.builder-image && format('BUILDER_IMAGE={0}', inputs.builder-image) || '' }}
