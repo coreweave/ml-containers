@@ -1,0 +1,17 @@
+accelerate>=0.30
+blobfile
+datasets>=2.0
+httpx[http2]
+mcp[cli]
+memray
+omegaconf
+pillow
+pylatexenc
+pyyaml
+qwen_vl_utils
+ray[default]>=2.0
+ring_flash_attn
+sglang-router>=0.2.3
+tensorboard
+transformers>=4.40
+wandb
