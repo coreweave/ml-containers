@@ -105,6 +105,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=cache,target=/root/.cache/pip \
     . /opt/arch_flags.sh && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
@@ -125,23 +126,28 @@ WORKDIR /wheels
 
 
 FROM builder-base AS flashinfer-builder
-RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
-    . /opt/arch_flags.sh && \
-    export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
-    [ -n "${CUDA_VERSION}" ] && \
-    python3 -m pip install --no-cache-dir \
-      requests nvidia-ml-py ninja tqdm filelock \
-      'nvidia-cudnn-frontend>=1.13.0' \
-      "cuda-python~=${CUDA_VERSION}" \
-      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" \
-      'apache-tvm-ffi>=0.1,<0.2' && \
-    export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
-      FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
-      FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
-    for DIR in . flashinfer-cubin flashinfer-jit-cache; do ( \
-      cd "${DIR}" && \
-      /opt/build.sh; \
-    ); done
+ARG TARGETPLATFORM
+ARG FLASHINFER_COMMIT
+# Both platforms: use pre-built wheels (no CUDA compilation needed)
+# AMD64: from PyPI, ARM64: from flashinfer.ai index (has aarch64 wheels)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    mkdir -p /wheels && \
+    FLASHINFER_VER="$(echo ${FLASHINFER_COMMIT} | sed 's/^v//')" && \
+    if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+      python3 -m pip download --dest /wheels \
+        "flashinfer-python==${FLASHINFER_VER}" \
+        "flashinfer-cubin==${FLASHINFER_VER}" \
+        "flashinfer-jit-cache==${FLASHINFER_VER}"; \
+    else \
+      python3 -m pip download --dest /wheels \
+        "flashinfer-python==${FLASHINFER_VER}" \
+        "flashinfer-cubin==${FLASHINFER_VER}" && \
+      CUDA_MAJOR="${CUDA_VERSION%%.*}" && \
+      CUDA_MINOR="$(echo ${CUDA_VERSION} | cut -d. -f2)" && \
+      python3 -m pip download --dest /wheels \
+        "flashinfer-jit-cache==${FLASHINFER_VER}" \
+        --index-url "https://flashinfer.ai/whl/cu${CUDA_MAJOR}${CUDA_MINOR}"; \
+    fi
 
 WORKDIR /wheels
 
@@ -220,8 +226,9 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
+ARG TARGETPLATFORM
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
+    if [ "$TARGETPLATFORM" = "linux/amd64" ]; then python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl; else python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt; fi && \
     python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
 
