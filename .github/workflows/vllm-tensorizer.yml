@@ -28,3 +28,4 @@ jobs:
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
         FINAL_BASE_IMAGE=${{ matrix.final-base-image }}
+        MAX_JOBS=8
