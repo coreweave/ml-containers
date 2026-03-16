@@ -102,6 +102,15 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+FROM builder-base AS deepep-builder
+ARG DEEPEP_COMMIT='73b6ea4'
+RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/opt/ep_kernels \
+    . /opt/arch_flags.sh && \
+    pip install --no-cache-dir uv && \
+    WORKSPACE=/tmp/ep_build \
+    MODE=wheel \
+    DEEPEP_COMMIT_HASH="${DEEPEP_COMMIT}" \
+      bash /opt/ep_kernels/install_python_libraries.sh
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
@@ -234,6 +243,13 @@ RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
 
 RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
+COPY --link --from=deepep-builder /tmp/ep_build/nvshmem/lib /usr/local/nvshmem/lib
+
+RUN --mount=type=bind,from=deepep-builder,source=/tmp/ep_build/dist,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
+    echo '/usr/local/nvshmem/lib' > /etc/ld.so.conf.d/nvshmem.conf && \
+    ldconfig
 
 COPY --link --from=nixl-builder /opt/nixl /opt/nixl
 COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib/python3/dist-packages/nixl.pth
