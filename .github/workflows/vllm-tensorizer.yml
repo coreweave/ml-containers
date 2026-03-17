@@ -23,8 +23,10 @@ jobs:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.vllm-commit }}
+      platforms: linux/arm64
       build-args: |
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
         FINAL_BASE_IMAGE=${{ matrix.final-base-image }}
+        MAX_JOBS=4
