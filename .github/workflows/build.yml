@@ -26,7 +26,7 @@ on:
         default: linux/amd64,linux/arm64
       dedicated-buildkit:
         required: false
-        description: "Use dedicated BuildKit endpoints (BUILDKIT_DEDICATED_0) instead of shared consumer endpoints"
+        description: "Instead of shared consumer endpoints, use dedicated BuildKit endpoints (BUILDKIT_DEDICATED_0) backed by high-memory-limit worker pods to prevent OOMs during large builds."
         type: boolean
         default: false
     outputs:
