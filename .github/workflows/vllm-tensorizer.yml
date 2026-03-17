@@ -4,7 +4,7 @@ on:
       - "vllm-tensorizer/**"
       - ".github/configurations/vllm-tensorizer.yml"
       - ".github/workflows/vllm-tensorizer.yml"
-      - ".github/workflows/build-large.yml"
+      - ".github/workflows/build.yml"
 
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
     with:
       path: ./.github/configurations/vllm-tensorizer.yml
   build:
-    uses: ./.github/workflows/build-large.yml
+    uses: ./.github/workflows/build.yml
     needs: get-config
     strategy:
       matrix: ${{ fromJSON(needs.get-config.outputs.config) }}
