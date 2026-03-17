@@ -7,7 +7,7 @@ COPY --chmod=755 freeze.sh /
 
 FROM ${BUILDER_BASE_IMAGE} AS builder-base
 
-ARG MAX_JOBS="16"
+ARG MAX_JOBS="8"
 
 RUN ldconfig
 
