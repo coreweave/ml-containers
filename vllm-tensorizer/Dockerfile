@@ -7,7 +7,7 @@ COPY --chmod=755 freeze.sh /
 
 FROM ${BUILDER_BASE_IMAGE} AS builder-base
 
-ARG MAX_JOBS="2"
+ARG MAX_JOBS="32"
 
 RUN ldconfig
 
@@ -125,8 +125,6 @@ WORKDIR /wheels
 
 
 FROM builder-base AS flashinfer-builder
-# Force BuildKit to serialize flashinfer after vllm to avoid OOM from concurrent CUDA compilation
-COPY --from=vllm-builder /opt/constraints.txt /tmp/vllm-done
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
