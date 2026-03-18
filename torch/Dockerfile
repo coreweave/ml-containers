@@ -215,14 +215,14 @@ RUN LLVM_VERSION='18' && \
         apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
         | sed -e '/connection timed out/{p; Q1}' && \
         apt-get -qq install --no-install-recommends -y \
-          gcc-11 g++-11 gfortran-11 \
+          gcc-13 g++-13 gfortran-13 \
           "lld-$LLVM_VERSION" "libomp-$LLVM_VERSION-dev" && \
         apt-get clean; \
     } && \
     { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
-    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     if [ "$(uname -m)" != 'aarch64' ]; then \
       update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1; \
     fi && \
