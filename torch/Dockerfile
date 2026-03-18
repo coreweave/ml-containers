@@ -154,7 +154,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
       libomp5 libpng-dev libjpeg-dev pkg-config python3-distutils \
       build-essential ninja-build && \
     apt-get clean && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' wheel packaging && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
@@ -451,9 +451,6 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
 SHELL ["/bin/sh", "-c"]
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
 
-RUN python3 -m pip install -U --no-cache-dir \
-      packaging setuptools wheel pip
-
 FROM builder-base AS torchvision-builder
 RUN rm ./dist/*
 
@@ -652,7 +649,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
     apt-get clean && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
