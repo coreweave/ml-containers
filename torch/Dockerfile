@@ -154,7 +154,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
       libomp5 libpng-dev libjpeg-dev pkg-config python3-distutils \
       build-essential ninja-build && \
     apt-get clean && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' wheel packaging && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' wheel packaging build && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
@@ -320,6 +320,17 @@ COPY <<-"EOT" /build/storage-info.sh
 EOT
 RUN chmod 755 /build/storage-info.sh
 
+COPY <<-"EOT" /build/build-wheel.sh
+	#!/bin/bash
+	set -eo pipefail
+	if [ -n "$1" ]; then cd "$1"; fi
+	echo "Building $(realpath -s .)"
+	python3 -m build -wvno /build/dist 2>&1 \
+	| grep -Ev --line-buffered \
+	  '^(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:|bytes spill stores)'
+EOT
+RUN chmod 755 /build/build-wheel.sh
+
 ## Build torch
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
     pip3 install --no-cache-dir --upgrade numpy && \
@@ -339,14 +350,12 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
     if [ "$BUILD_TRITON" = '1' ]; then \
       pip3 install --no-cache-dir pybind11 lit && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
-      DIST_DIR="$(realpath -e ./dist)" && \
       if [ -f 'triton/python/setup.py' ]; then \
-        cd triton/python; \
+        /build/build-wheel.sh triton/python; \
       else \
-        cd triton; \
+        /build/build-wheel.sh triton; \
       fi && \
-      python3 -m pip wheel -w "${DIST_DIR}/" --no-build-isolation --no-deps -vv . && \
-      pip3 install --no-cache-dir "${DIST_DIR}"/*.whl; \
+      pip3 install --no-cache-dir dist/*.whl; \
     fi
 
 ARG BUILD_TORCH_VERSION
@@ -450,8 +459,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     PYTORCH_BUILD_VERSION="$(../version-string.sh "$TORCH_VERSION")" \
     PYTORCH_BUILD_NUMBER=0 \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    python3 setup.py bdist_wheel --dist-dir ../dist 2>&1 \
-    | grep -Ev --line-buffered '^(ptxas /tmp/|copying .+/|creating build/)'
+    /build/build-wheel.sh
 SHELL ["/bin/sh", "-c"]
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
 
@@ -493,7 +501,7 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     CXX=c++ \
     BUILD_VERSION="$(../version-string.sh "$TORCH_VISION_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    python3 setup.py bdist_wheel --dist-dir ../dist
+    /build/build-wheel.sh
 
 FROM builder-base AS torchaudio-builder
 RUN rm ./dist/*
@@ -533,7 +541,7 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     CXX=c++ \
     BUILD_VERSION="$(../version-string.sh "$TORCH_AUDIO_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    python3 setup.py bdist_wheel --dist-dir ../dist
+    /build/build-wheel.sh
 
 FROM builder-base AS transformerengine-builder
 RUN rm ./dist/*
@@ -552,24 +560,13 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     case "${CUDA_VERSION}" in 12.[0123456].*) \
       export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
     esac && \
-    cd TransformerEngine && \
-    python3 setup.py bdist_wheel --dist-dir /build/dist
+    /build/build-wheel.sh TransformerEngine
 
 FROM builder-base AS flash-attn-builder-base
 RUN rm ./dist/*
 ENV PYTHONUNBUFFERED=1
 ENV FLASH_ATTENTION_FORCE_BUILD=TRUE
 ARG BUILD_FLASH_ATTN_MAX_JOBS=""
-
-COPY <<-"EOT" /build/fa-build.sh
-	#!/bin/bash
-	set -eo pipefail;
-	if [ -n "$1" ]; then cd "$1"; fi;
-	echo "Flash Attention build: building $(realpath -s .)";
-	python3 setup.py bdist_wheel --dist-dir /build/dist \
-	| grep -Ev --line-buffered '^ptxas (/tmp/|(info|warning)\s*:)|bytes spill stores';
-EOT
-RUN chmod 755 /build/fa-build.sh
 
 FROM flash-attn-builder-base AS flash-attn-builder
 
@@ -590,7 +587,7 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
       csrc/layer_norm \
       csrc/rotary \
       csrc/xentropy); \
-    do /build/fa-build.sh "$EXT_DIR" || exit 1; done
+    do /build/build-wheel.sh "$EXT_DIR" || exit 1; done
 
 FROM flash-attn-builder-base AS flash-attn-3-builder
 
@@ -625,7 +622,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       -e 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
       -e 's@code=sm_80@code=[sm_80,sm_120]@' \
       flash-attention/hopper/setup.py && \
-    NVCC_THREADS=4 /build/fa-build.sh flash-attention/hopper
+    NVCC_THREADS=4 /build/build-wheel.sh flash-attention/hopper
 
 FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
