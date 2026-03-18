@@ -206,6 +206,10 @@ ENV CCACHE_DIR=/ccache \
     CMAKE_CXX_COMPILER_LAUNCHER=ccache \
     CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
+# Suppress less-relevant-to-us warnings from the packages being built
+ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \
+    CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
+
 # Update compiler (GCC) and linker (LLD) versions
 RUN LLVM_VERSION='18' && \
     CODENAME="$(lsb_release -cs)" && \
@@ -610,7 +614,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xfatbin -compress-all -Xfatbin -compress-mode=size" && \
     if [ "$(uname -m)" != "aarch64" ]; then \
-      export CXXFLAGS='-mcmodel=medium' && \
+      export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }-mcmodel=medium" && \
       NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler ${CXXFLAGS}"; \
     else \
       export NVCC_WRAPPER_ATTEMPTS=2; \

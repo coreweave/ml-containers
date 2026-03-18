@@ -58,6 +58,10 @@ RUN export \
 
 RUN python3 -m pip install --no-cache-dir -U pip 'setuptools<82' wheel packaging
 
+# Suppress less-relevant-to-us warnings from the packages being built
+ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \
+    CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
+
 # Install the cuDNN dev package for building Apex
 # The cuDNN runtime is installed in the base torch image
 COPY --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
