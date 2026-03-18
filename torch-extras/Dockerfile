@@ -291,7 +291,7 @@ RUN apt-get -qq update && \
 
 RUN --mount=type=bind,from=deepspeed-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
- RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
-     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
+RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=xformers-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
