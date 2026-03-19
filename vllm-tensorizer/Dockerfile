@@ -182,8 +182,8 @@ FROM builder-base AS deepep-builder
 ARG DEEPEP_COMMIT='73b6ea4'
 ARG NVSHMEM_VER='3.3.24'
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/tmp/ep_kernels \
-    . /opt/arch_flags.sh && \
     pip install --no-cache-dir uv && \
+    TORCH_CUDA_ARCH_LIST="9.0a" \
     WORKSPACE=/tmp/deepep_build MODE=wheel \
     DEEPEP_COMMIT_HASH="${DEEPEP_COMMIT}" \
     NVSHMEM_VER="${NVSHMEM_VER}" \
