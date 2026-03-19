@@ -277,7 +277,6 @@ ENV C_INCLUDE_PATH="${AOCL_BASE}/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}" \
 FROM builder-base-${TARGETARCH} AS builder-base
 RUN mkdir /build /build/dist
 WORKDIR /build
-COPY --chmod=755 install-requirements.py .
 COPY --chmod=755 effective_cpu_count.sh .
 COPY --chmod=755 scale.sh .
 COPY compiler_wrapper.f95 .
@@ -325,9 +324,8 @@ COPY <<-"EOT" /build/build-wheel.sh
 	#!/bin/bash
 	set -eo pipefail
 	if [ -n "$1" ]; then cd "$1"; fi
-	/build/install-requirements.py
 	echo "Building $(realpath -s .)"
-	python3 -m build -wvno /build/dist 2>&1 \
+	python3 -m build -wvxno /build/dist 2>&1 \
 	| grep -Ev --line-buffered \
 	  '^(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:|bytes spill stores)'
 EOT
