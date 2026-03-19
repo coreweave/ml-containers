@@ -188,7 +188,9 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,tar
     DEEPEP_COMMIT_HASH="${DEEPEP_COMMIT}" \
     NVSHMEM_VER="${NVSHMEM_VER}" \
     bash /tmp/ep_kernels/install_python_libraries.sh && \
-    cp /tmp/deepep_build/dist/*.whl /wheels/
+    cp /tmp/deepep_build/dist/*.whl /wheels/ && \
+    mkdir -p /nvshmem_libs && \
+    cp /tmp/deepep_build/nvshmem/lib/libnvshmem*.so* /nvshmem_libs/
 
 FROM builder-base AS nixl-builder
 RUN apt-get -qq update && \
@@ -249,6 +251,9 @@ RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
 
 RUN --mount=type=bind,from=deepep-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
+COPY --link --from=deepep-builder /nvshmem_libs/ /usr/local/lib/
+RUN ldconfig
 
 COPY --link --from=nixl-builder /opt/nixl /opt/nixl
 COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib/python3/dist-packages/nixl.pth
