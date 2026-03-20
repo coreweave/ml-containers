@@ -327,7 +327,7 @@ COPY <<-"EOT" /build/build-wheel.sh
 	echo "Building $(realpath -s .)"
 	python3 -m build -wvxno /build/dist 2>&1 \
 	| grep -Ev --line-buffered \
-	  '^(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:|bytes spill stores)'
+	  '^(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:)|bytes spill stores'
 EOT
 RUN chmod 755 /build/build-wheel.sh
 
@@ -378,7 +378,16 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
         printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a 103a 103a \
       )" ;; \
     esac && \
-    echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
+    { printf '%s' \
+      "-Wno-deprecated-gpu-targets" \
+      " -diag-suppress 191,186,177" \
+      " -Xcompiler -Wno-sign-compare" \
+      ",-Wno-deprecated-declarations" \
+      ",-Wno-unused-parameter" \
+      ",-Wno-unused-variable" \
+      ",-Wno-unused-result" \
+      "${FLAGS:+ $FLAGS}" && echo; \
+    } > /build/nvcc.conf
 
 COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
@@ -612,7 +621,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xfatbin -compress-all -Xfatbin -compress-mode=size" && \
     if [ "$(uname -m)" != "aarch64" ]; then \
       export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }-mcmodel=medium" && \
-      NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler ${CXXFLAGS}"; \
+      NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
     else \
       export NVCC_WRAPPER_ATTEMPTS=2; \
     fi && \
