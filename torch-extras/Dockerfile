@@ -58,10 +58,6 @@ RUN export \
 
 RUN python3 -m pip install --no-cache-dir -U pip 'setuptools<82' wheel packaging
 
-# Suppress less-relevant-to-us warnings from the packages being built
-ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \
-    CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
-
 # Install the cuDNN dev package for building Apex
 # The cuDNN runtime is installed in the base torch image
 COPY --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
@@ -122,7 +118,16 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
         printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120 120 100 100 100a 100a 103a 103a \
       )" ;; \
     esac && \
-    echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
+    { printf '%s' \
+      "-Wno-deprecated-gpu-targets" \
+      " -diag-suppress 191,186,177" \
+      " -Xcompiler -Wno-sign-compare" \
+      ",-Wno-deprecated-declarations" \
+      ",-Wno-unused-parameter" \
+      ",-Wno-unused-variable" \
+      ",-Wno-unused-result" \
+      "${FLAGS:+ $FLAGS}" && echo; \
+    } > /build/nvcc.conf
 ARG BUILD_MAX_JOBS
 
 
