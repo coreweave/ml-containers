@@ -1,0 +1,16 @@
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ucx-debug/**"
+      - ".github/workflows/ucx-debug.yml"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: ucx-debug
+      folder: ucx-debug
+      platforms: linux/arm64
