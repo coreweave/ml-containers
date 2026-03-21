@@ -3,18 +3,23 @@
 #
 # Builds UCX v1.20.0 from source against DOCA rdma-core (which includes
 # Data Direct / mlx5dv support), then NIXL with UCX plugin, then nixlbench.
+# Includes etcd (server + client lib) for multi-node coordination.
 
 ARG BASE_IMAGE="nvcr.io/nvidia/cuda-dl-base:25.10-cuda13.0-devel-ubuntu24.04"
 FROM ${BASE_IMAGE}
 
 ARG ARCH="aarch64"
+ARG ABSL_TAG="lts_2025_08_14"
+ARG GRPC_TAG="v1.73.0"
 
 # Build dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install \
     ninja-build meson cmake build-essential pkg-config \
     libgflags-dev libnuma-dev autotools-dev automake libtool \
     libz-dev flex hwloc libhwloc-dev git wget \
-    pybind11-dev python3-dev && \
+    pybind11-dev python3-dev \
+    libprotobuf-dev protobuf-compiler-grpc libcpprest-dev \
+    etcd-server etcd-client && \
     rm -rf /var/lib/apt/lists/*
 
 # Install DOCA for proper rdma-core with Data Direct support
@@ -49,6 +54,60 @@ RUN git clone --depth 1 --branch v1.20.0 https://github.com/openucx/ucx.git /tmp
     make -j$(nproc) && make install && \
     ldconfig && \
     rm -rf /tmp/ucx
+
+# Build Abseil (required by gRPC and etcd-cpp-apiv3)
+WORKDIR /workspace
+RUN git clone https://github.com/abseil/abseil-cpp.git && \
+    cd abseil-cpp && \
+    git fetch --depth 1 origin ${ABSL_TAG} && \
+    git checkout ${ABSL_TAG} && \
+    mkdir -p build && cd build && \
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=ON \
+        -DABSL_PROPAGATE_CXX_STD=ON \
+        -DABSL_ENABLE_INSTALL=ON && \
+    make -j$(nproc) && make install && \
+    ldconfig && \
+    rm -rf /workspace/abseil-cpp
+
+# Build gRPC (required by etcd-cpp-apiv3)
+RUN git clone --recurse-submodules -b ${GRPC_TAG} --depth 1 --shallow-submodules \
+      https://github.com/grpc/grpc /workspace/grpc && \
+    cd /workspace/grpc && \
+    mkdir -p cmake/build && cd cmake/build && \
+    export CMAKE_PREFIX_PATH="/usr/local${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" && \
+    export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/${ARCH}-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" && \
+    cmake ../.. \
+        -DgRPC_INSTALL=ON \
+        -DgRPC_BUILD_TESTS=OFF \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_PREFIX_PATH=/usr/local \
+        -Dabsl_DIR=/usr/local/lib/cmake/absl \
+        -DgRPC_SSL_PROVIDER=package \
+        -DgRPC_ABSL_PROVIDER=package \
+        -DgRPC_PROTOBUF_PROVIDER=module \
+        -DgRPC_ZLIB_PROVIDER=package && \
+    make -j$(nproc) && make install && \
+    ldconfig && \
+    rm -rf /workspace/grpc
+
+# Build etcd-cpp-apiv3 (required for nixlbench multi-node coordination)
+RUN git clone --depth 1 https://github.com/etcd-cpp-apiv3/etcd-cpp-apiv3.git /workspace/etcd-cpp && \
+    cd /workspace/etcd-cpp && \
+    sed -i '/^find_dependency(cpprestsdk)$/d' etcd-cpp-api-config.in.cmake && \
+    mkdir build && cd build && \
+    cmake .. -DBUILD_ETCD_CORE_ONLY=ON -DCMAKE_BUILD_TYPE=Release \
+             -DETCD_CMAKE_CXX_STANDARD=17 -DCMAKE_PREFIX_PATH=/usr/local && \
+    make -j$(nproc) && make install && \
+    ldconfig && \
+    rm -rf /workspace/etcd-cpp
+
+ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 
 # Clone NIXL and build with UCX plugin only
 RUN git clone --depth 1 https://github.com/ai-dynamo/nixl.git /workspace/nixl
