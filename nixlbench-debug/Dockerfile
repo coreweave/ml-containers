@@ -13,7 +13,8 @@ ARG ARCH="aarch64"
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install \
     ninja-build meson cmake build-essential pkg-config \
     libgflags-dev libnuma-dev autotools-dev automake libtool \
-    libz-dev flex hwloc libhwloc-dev git wget && \
+    libz-dev flex hwloc libhwloc-dev git wget \
+    pybind11-dev python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Install DOCA for proper rdma-core with Data Direct support
