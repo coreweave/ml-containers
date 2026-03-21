@@ -6,7 +6,7 @@ ARG BUILD_TORCH_VERSION="2.10.0"
 ARG BUILD_TORCH_VISION_VERSION="0.25.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.10.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="b10f436aa28ec8d885eb0d9bf134c320ffb6353d"
-ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
+ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
 ARG BUILD_FLASH_ATTN_3_VERSION="1ceaa984b2f348caea18b39a98458d33b4ea7a09"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
@@ -590,12 +590,8 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     cd flash-attention && \
     for EXT_DIR in $(realpath -s -e \
       . \
-      csrc/ft_attention \
       csrc/fused_dense_lib \
-      csrc/fused_softmax \
-      csrc/layer_norm \
-      csrc/rotary \
-      csrc/xentropy); \
+      csrc/layer_norm); \
     do /build/build-wheel.sh "$EXT_DIR" || exit 1; done
 
 FROM flash-attn-builder-base AS flash-attn-3-builder
