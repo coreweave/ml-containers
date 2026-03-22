@@ -29,7 +29,6 @@ on:
 
 
 jobs:
-  # Not running this build during CUDA 13 testing
   get-config:
     name: Get torch:nccl Config
     uses: ./.github/workflows/read-configuration.yml

@@ -21,7 +21,6 @@ on:
 
 
 jobs:
-  # Not running this build during CUDA 13 testing
   get-config:
     name: Get torch:base Config
     uses: ./.github/workflows/read-configuration.yml
