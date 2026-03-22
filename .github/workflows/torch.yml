@@ -81,6 +81,7 @@ jobs:
     with:
       image-name: ${{ inputs.image-name || 'torch' }}
       folder: torch
+      dedicated-buildkit: true
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |

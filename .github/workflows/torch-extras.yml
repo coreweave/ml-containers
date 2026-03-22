@@ -152,6 +152,7 @@ jobs:
     with:
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
+      dedicated-buildkit: true
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
@@ -169,6 +170,7 @@ jobs:
     with:
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
+      dedicated-buildkit: true
       tag-suffix: ${{ matrix.bases.tag }}
       build-args: |
         BASE_IMAGE=${{ matrix.bases.image }}

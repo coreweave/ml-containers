@@ -56,6 +56,8 @@ RUN export \
       ninja-build && \
     apt-get clean
 
+RUN python3 -m pip install --no-cache-dir -U pip 'setuptools<82' wheel packaging
+
 # Install the cuDNN dev package for building Apex
 # The cuDNN runtime is installed in the base torch image
 COPY --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
@@ -74,15 +76,16 @@ RUN apt-get -qq update && apt-get -qq install -y \
     python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
 # Update compiler (GCC) and linker (LLD) versions
-# gfortran-11 is just for compiler_wrapper.f95
+# gfortran-13 is just for compiler_wrapper.f95
 RUN LLVM_VERSION='18' && \
+    add-apt-repository -n ppa:ubuntu-toolchain-r/test && \
     apt-get -qq update && apt-get -qq install --no-install-recommends -y \
-      gcc-11 g++-11 gfortran-11 "lld-$LLVM_VERSION" && \
+      gcc-13 g++-13 gfortran-13 "lld-$LLVM_VERSION" && \
     apt-get clean && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
     update-alternatives --install \
-      /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
+      /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1
 
 RUN mkdir /wheels /build
@@ -157,8 +160,7 @@ ARG DEEPSPEED_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    python3 -m pip install -U --no-cache-dir \
-      setuptools wheel pip py-cpuinfo && \
+    python3 -m pip install -U --no-cache-dir py-cpuinfo && \
     if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
       # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
       # requirement for C++17 (as of DeepSpeed 0.10.1).
@@ -210,8 +212,6 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 # in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    python3 -m pip install -U --no-cache-dir \
-      packaging setuptools wheel pip && \
     CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     CHECK_VERSION() { \
       dpkg-query --status "$1" 2>/dev/null \
@@ -264,8 +264,6 @@ ARG XFORMERS_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    python3 -m pip install -U --no-cache-dir \
-      setuptools wheel pip && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS=1 \
       PYTHONUNBUFFERED=1 \

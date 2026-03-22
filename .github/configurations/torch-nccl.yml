@@ -1,9 +1,9 @@
-cuda: [ 12.9.1, 12.8.1 ]
+cuda: [ 12.9.1 ]
 os: [ ubuntu22.04 ]
 abi: [ 1 ]
 include:
   - torch: 2.10.0
     vision: 0.25.0
     audio: 2.10.0
-    nccl: 2.29.2-1
-    nccl-tests-hash: 'd73ec07'
+    nccl: 2.29.7-1
+    nccl-tests-hash: '7112046'

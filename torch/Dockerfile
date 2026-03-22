@@ -6,7 +6,7 @@ ARG BUILD_TORCH_VERSION="2.10.0"
 ARG BUILD_TORCH_VISION_VERSION="0.25.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.10.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="2.4"
-ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
+ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
 ARG BUILD_FLASH_ATTN_3_VERSION="b36ad4ef767d2d5536ff8af2e3f720ae4eba731c"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
@@ -151,7 +151,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
       libomp5 libpng-dev libjpeg-dev pkg-config python3-distutils \
       build-essential ninja-build && \
     apt-get clean && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' wheel packaging build && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
@@ -212,14 +212,14 @@ RUN LLVM_VERSION='18' && \
         apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
         | sed -e '/connection timed out/{p; Q1}' && \
         apt-get -qq install --no-install-recommends -y \
-          gcc-11 g++-11 gfortran-11 \
+          gcc-13 g++-13 gfortran-13 \
           "lld-$LLVM_VERSION" "libomp-$LLVM_VERSION-dev" && \
         apt-get clean; \
     } && \
     { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
-    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     if [ "$(uname -m)" != 'aarch64' ]; then \
       update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1; \
     fi && \
@@ -446,9 +446,6 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
 SHELL ["/bin/sh", "-c"]
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
 
-RUN python3 -m pip install -U --no-cache-dir \
-      packaging setuptools wheel pip
-
 FROM builder-base AS torchvision-builder
 RUN rm ./dist/*
 
@@ -578,12 +575,8 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     cd flash-attention && \
     for EXT_DIR in $(realpath -s -e \
       . \
-      csrc/ft_attention \
       csrc/fused_dense_lib \
-      csrc/fused_softmax \
-      csrc/layer_norm \
-      csrc/rotary \
-      csrc/xentropy); \
+      csrc/layer_norm); \
     do /build/fa-build.sh "$EXT_DIR" || exit 1; done
 
 FROM flash-attn-builder-base AS flash-attn-3-builder
@@ -641,7 +634,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
     apt-get clean && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
