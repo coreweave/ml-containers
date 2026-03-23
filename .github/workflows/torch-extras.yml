@@ -150,6 +150,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
+      dedicated-buildkit: true
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ inputs.tag }}
@@ -167,6 +168,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
+      dedicated-buildkit: true
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ matrix.bases.tag }}

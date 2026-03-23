@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.7
-ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.9.1-devel-ubuntu22.04"
-ARG FINAL_BASE_IMAGE="nvidia/cuda:12.9.1-base-ubuntu22.04"
+ARG BUILDER_BASE_IMAGE="nvidia/cuda:13.2.0-devel-ubuntu22.04"
+ARG FINAL_BASE_IMAGE="nvidia/cuda:13.2.0-base-ubuntu22.04"
 
 ARG BUILD_TORCH_VERSION="2.10.0"
 ARG BUILD_TORCH_VISION_VERSION="0.25.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.10.0"
-ARG BUILD_TRANSFORMERENGINE_VERSION="2.4"
-ARG BUILD_FLASH_ATTN_VERSION="2.7.4.post1"
-ARG BUILD_FLASH_ATTN_3_VERSION="b36ad4ef767d2d5536ff8af2e3f720ae4eba731c"
+ARG BUILD_TRANSFORMERENGINE_VERSION="b10f436aa28ec8d885eb0d9bf134c320ffb6353d"
+ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
+ARG BUILD_FLASH_ATTN_3_VERSION="1ceaa984b2f348caea18b39a98458d33b4ea7a09"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
@@ -55,6 +55,8 @@ RUN ./clone.sh pytorch/pytorch pytorch "${BUILD_TORCH_VERSION}" && \
       | git -C pytorch apply; \
     elif [ "${BUILD_TORCH_VERSION}" = '2.7.1' ]; then \
       git -C pytorch cherry-pick -n b74be524547f7f025066f19eda3b53a887c244ba; \
+    elif [ "${BUILD_TORCH_VERSION}" = '2.9.1' ]; then \
+      git -C pytorch cherry-pick -n a20afb61007a94f5c28294e9ae20043657152ef6; \
     fi && \
     rm -rf pytorch/.git
 
@@ -91,7 +93,8 @@ FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
-      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c; \
+      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c && \
+      git -C flash-attention cherry-pick -n afc97c60f799e470886c154e3473df938f8fa93d; \
     else \
       mkdir flash-attention; \
     fi
@@ -151,7 +154,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
       libomp5 libpng-dev libjpeg-dev pkg-config python3-distutils \
       build-essential ninja-build && \
     apt-get clean && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' wheel packaging build && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
@@ -203,6 +206,10 @@ ENV CCACHE_DIR=/ccache \
     CMAKE_CXX_COMPILER_LAUNCHER=ccache \
     CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
+# Suppress less-relevant-to-us warnings from the packages being built
+ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \
+    CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
+
 # Update compiler (GCC) and linker (LLD) versions
 RUN LLVM_VERSION='18' && \
     CODENAME="$(lsb_release -cs)" && \
@@ -212,14 +219,14 @@ RUN LLVM_VERSION='18' && \
         apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
         | sed -e '/connection timed out/{p; Q1}' && \
         apt-get -qq install --no-install-recommends -y \
-          gcc-11 g++-11 gfortran-11 \
+          gcc-13 g++-13 gfortran-13 \
           "lld-$LLVM_VERSION" "libomp-$LLVM_VERSION-dev" && \
         apt-get clean; \
     } && \
     { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 11 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 11 && \
-    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-11 11 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     if [ "$(uname -m)" != 'aarch64' ]; then \
       update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1; \
     fi && \
@@ -313,6 +320,17 @@ COPY <<-"EOT" /build/storage-info.sh
 EOT
 RUN chmod 755 /build/storage-info.sh
 
+COPY <<-"EOT" /build/build-wheel.sh
+	#!/bin/bash
+	set -eo pipefail
+	if [ -n "$1" ]; then cd "$1"; fi
+	echo "Building $(realpath -s .)"
+	python3 -m build -wvxno /build/dist 2>&1 \
+	| grep -Ev --line-buffered \
+	  '^(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:)|bytes spill stores'
+EOT
+RUN chmod 755 /build/build-wheel.sh
+
 ## Build torch
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
     pip3 install --no-cache-dir --upgrade numpy && \
@@ -332,21 +350,20 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
     if [ "$BUILD_TRITON" = '1' ]; then \
       pip3 install --no-cache-dir pybind11 lit && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
-      DIST_DIR="$(realpath -e ./dist)" && \
       if [ -f 'triton/python/setup.py' ]; then \
-        cd triton/python; \
+        /build/build-wheel.sh triton/python; \
       else \
-        cd triton; \
+        /build/build-wheel.sh triton; \
       fi && \
-      python3 -m pip wheel -w "${DIST_DIR}/" --no-build-isolation --no-deps -vv . && \
-      pip3 install --no-cache-dir "${DIST_DIR}"/*.whl; \
+      pip3 install --no-cache-dir dist/*.whl; \
     fi
 
 ARG BUILD_TORCH_VERSION
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
-# Filter out the 10.0 & 12.0 arches on CUDA versions != 12.8 and != 12.9
+# Filter out the 10.0 & 12.0 arches on CUDA versions < 12.8
 ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0 12.0/}||${TORCH_CUDA_ARCH_LIST}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#13.?.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
@@ -354,21 +371,31 @@ ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 RUN printf 'Arch: %s\nTORCH_CUDA_ARCH_LIST=%s\n' "$(uname -m)" "${TORCH_CUDA_ARCH_LIST}"
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
-# Add sm_100a & sm_120a builds if NV_CUDA_LIB_VERSION matches 12.[89].*
+# Add sm_100a & sm_120a builds unless NV_CUDA_LIB_VERSION matches 12.[0-7].*
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
-    case "${NV_CUDA_LIB_VERSION}" in 12.[89].*) \
+    case "${NV_CUDA_LIB_VERSION}" in 12.[0-7].*) ;; *) \
       FLAGS="${FLAGS}$( \
-        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a \
+        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a 103a 103a \
       )" ;; \
     esac && \
-    echo "-Wno-deprecated-gpu-targets -diag-suppress 191,186,177${FLAGS:+ $FLAGS}" > /build/nvcc.conf
+    { printf '%s' \
+      "-Wno-deprecated-gpu-targets" \
+      " -diag-suppress 191,186,177" \
+      " -Xcompiler -Wno-sign-compare" \
+      ",-Wno-deprecated-declarations" \
+      ",-Wno-unused-parameter" \
+      ",-Wno-unused-variable" \
+      ",-Wno-unused-result" \
+      "${FLAGS:+ $FLAGS}" && echo; \
+    } > /build/nvcc.conf
 
 COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
-    CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py'
+    CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py' \
+    CUDACXX='/build/nvcc-wrapper.py'
 # Filter these codes because we already build for the architecture-specific
 # versions of them instead.
-ENV NVCC_WRAPPER_FILTER_CODES='sm_90;sm_100;sm_120;compute_90;compute_100'
+ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;compute_75;compute_90;compute_100'
 
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
@@ -441,13 +468,9 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     PYTORCH_BUILD_VERSION="$(../version-string.sh "$TORCH_VERSION")" \
     PYTORCH_BUILD_NUMBER=0 \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    python3 setup.py bdist_wheel --dist-dir ../dist 2>&1 \
-    | grep -Ev --line-buffered '^(ptxas /tmp/|copying .+/|creating build/)'
+    /build/build-wheel.sh
 SHELL ["/bin/sh", "-c"]
 RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
-
-RUN python3 -m pip install -U --no-cache-dir \
-      packaging setuptools wheel pip
 
 FROM builder-base AS torchvision-builder
 RUN rm ./dist/*
@@ -487,7 +510,7 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     CXX=c++ \
     BUILD_VERSION="$(../version-string.sh "$TORCH_VISION_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    python3 setup.py bdist_wheel --dist-dir ../dist
+    /build/build-wheel.sh
 
 FROM builder-base AS torchaudio-builder
 RUN rm ./dist/*
@@ -527,7 +550,7 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     CXX=c++ \
     BUILD_VERSION="$(../version-string.sh "$TORCH_AUDIO_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    python3 setup.py bdist_wheel --dist-dir ../dist
+    /build/build-wheel.sh
 
 FROM builder-base AS transformerengine-builder
 RUN rm ./dist/*
@@ -546,24 +569,13 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     case "${CUDA_VERSION}" in 12.[0123456].*) \
       export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
     esac && \
-    cd TransformerEngine && \
-    python3 setup.py bdist_wheel --dist-dir /build/dist
+    /build/build-wheel.sh TransformerEngine
 
 FROM builder-base AS flash-attn-builder-base
 RUN rm ./dist/*
 ENV PYTHONUNBUFFERED=1
 ENV FLASH_ATTENTION_FORCE_BUILD=TRUE
 ARG BUILD_FLASH_ATTN_MAX_JOBS=""
-
-COPY <<-"EOT" /build/fa-build.sh
-	#!/bin/bash
-	set -eo pipefail;
-	if [ -n "$1" ]; then cd "$1"; fi;
-	echo "Flash Attention build: building $(realpath -s .)";
-	python3 setup.py bdist_wheel --dist-dir /build/dist \
-	| grep -Ev --line-buffered '^ptxas (/tmp/|(info|warning)\s*:)|bytes spill stores';
-EOT
-RUN chmod 755 /build/fa-build.sh
 
 FROM flash-attn-builder-base AS flash-attn-builder
 
@@ -578,13 +590,9 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     cd flash-attention && \
     for EXT_DIR in $(realpath -s -e \
       . \
-      csrc/ft_attention \
       csrc/fused_dense_lib \
-      csrc/fused_softmax \
-      csrc/layer_norm \
-      csrc/rotary \
-      csrc/xentropy); \
-    do /build/fa-build.sh "$EXT_DIR" || exit 1; done
+      csrc/layer_norm); \
+    do /build/build-wheel.sh "$EXT_DIR" || exit 1; done
 
 FROM flash-attn-builder-base AS flash-attn-3-builder
 
@@ -593,6 +601,8 @@ FROM flash-attn-builder-base AS flash-attn-3-builder
 RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
 ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-3}"
 
+ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;compute_70;compute_75'
+ENV FLASH_ATTN_CUDA_ARCHS='80;90;100;120'
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
@@ -604,16 +614,20 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    if [ "$(uname -m)" = 'aarch64' ]; then \
-      export FLASH_ATTENTION_DISABLE_SM80=TRUE; \
-    else \
+    NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xfatbin -compress-all -Xfatbin -compress-mode=size" && \
+    if [ "$(uname -m)" != "aarch64" ]; then \
+      export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }-mcmodel=medium" && \
       NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:+$NVCC_APPEND_FLAGS }-Xcompiler -mcmodel=medium"; \
+    else \
+      export NVCC_WRAPPER_ATTEMPTS=2; \
     fi && \
+    NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_100a,code=sm_100a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
-      's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
+      -e 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
+      -e 's@code=sm_80@code=[sm_80,sm_120]@' \
       flash-attention/hopper/setup.py && \
-    NVCC_THREADS=4 /build/fa-build.sh flash-attention/hopper
+    NVCC_THREADS=4 /build/build-wheel.sh flash-attention/hopper
 
 FROM builder-base AS builder
 COPY --link --from=torchaudio-builder /build/dist/ /build/dist/
@@ -641,7 +655,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
     apt-get clean && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip && \
+    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
@@ -680,9 +694,10 @@ ARG BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
-# Filter out the 10.0 & 12.0 arches on CUDA versions != 12.8 and != 12.9
+# Filter out the 10.0 & 12.0 arches on CUDA versions < 12.8
 ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0 12.0/}||${TORCH_CUDA_ARCH_LIST}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#13.?.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
@@ -753,11 +768,11 @@ RUN <<-"EOT" python3
 	    raise SystemExit("flash_attn_interface path is not a file")
 
 	d = root / "flash_attn_3"
-	if d.exists():
-	    raise SystemExit(f'"{d}" already exists')
+	d.mkdir(mode=0o755, parents=False, exist_ok=True)
 
-	d.mkdir(mode=0o755, parents=False, exist_ok=False)
 	new = d / p.name
+	if new.exists():
+	    raise SystemExit(f'"{new}" already exists')
 	new.symlink_to(p)
 	print(f"Created new symlink at {new}")
 

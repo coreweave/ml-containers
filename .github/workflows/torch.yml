@@ -79,6 +79,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
+      dedicated-buildkit: true
       image-name: ${{ inputs.image-name || 'torch' }}
       folder: torch
       tag-suffix: ${{ inputs.tag }}
