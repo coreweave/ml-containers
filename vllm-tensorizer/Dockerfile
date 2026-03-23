@@ -1,5 +1,5 @@
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:3ef0aa1-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.7-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:3ef0aa1-nccl-cuda12.9.1-ubuntu22.04-nccl2.27.7-1-torch2.8.0-vision0.23.0-audio2.8.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1"
 
 FROM scratch AS freezer
 WORKDIR /
@@ -15,7 +15,7 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       python3-pip git ninja-build cmake && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging setuptools wheel setuptools_scm regex
+    pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
 # Create the /wheels directory
 WORKDIR /wheels
@@ -48,6 +48,13 @@ RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
       'NVCC_WRAPPER_FILTER_CODES="$(cat /opt/filter_codes.txt)"' \
     | install -m 500 /dev/stdin /opt/arch_flags.sh
 
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      '. /opt/arch_flags.sh' \
+      'export PIP_NO_CACHE_DIR=off PIP_CONSTRAINT=/opt/constraints.txt PIP_BUILD_CONSTRAINT=/opt/constraints.txt' \
+      'exec python3 -m build -o /wheels -w -n "${@:-./}"' \
+    | install -m 500 /dev/stdin /opt/build.sh
+
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
 ARG VLLM_COMMIT
@@ -72,7 +79,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
-ARG LMCACHE_COMMIT='v0.3.2'
+ARG LMCACHE_COMMIT
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/LMCache/LMCache && \
     git -C LMCache checkout "${LMCACHE_COMMIT}"
@@ -87,7 +94,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='7b6b5563b9d4c1ae07ffbce7f78ad3ac9204827c'
+ARG DEEPGEMM_COMMIT='477618cd51baffca09c4b0b87e97c03fe827ef03'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/deepseek-ai/DeepGEMM && \
     cd DeepGEMM && \
@@ -100,7 +107,7 @@ FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     . /opt/arch_flags.sh && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
-    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' && \
+    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
     if [ -f 'use_existing_torch.py' ]; then \
       python3 use_existing_torch.py; \
     else \
@@ -111,10 +118,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     USE_CUDNN=1 USE_CUSPARSELT=1 \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
-      python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
+      /opt/build.sh
 
 WORKDIR /wheels
 
@@ -123,18 +128,20 @@ FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
-    sed -i 's@torch\.cuda\.get_device_capability()@(12, 0)@' flashinfer/comm/trtllm_ar.py && \
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip install --no-cache-dir \
-      requests pynvml ninja \
+      requests nvidia-ml-py ninja tqdm filelock \
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
-      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" && \
-    python3 -m flashinfer.aot && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" \
+      'apache-tvm-ffi>=0.1,<0.2' && \
+    export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
+      FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
+      FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
+    for DIR in . flashinfer-cubin flashinfer-jit-cache; do ( \
+      cd "${DIR}" && \
+      /opt/build.sh; \
+    ); done
 
 WORKDIR /wheels
 
@@ -143,14 +150,13 @@ FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/workspace,rw \
     . /opt/arch_flags.sh && \
-    python3 -m pip install --no-cache-dir 'xxhash==3.5.0' 'setuptools_scm>=8' && \
+    python3 -m pip install --no-cache-dir \
+    'setuptools>=77.0.3,<81.0.0' \
+    'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
 
 
 FROM builder-base AS infinistore-builder
@@ -165,33 +171,59 @@ RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target
       pkg-config && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson pybind11 && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
 
 FROM builder-base AS deepgemm-builder
 RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/workspace,rw \
     . /opt/arch_flags.sh && \
-    python3 -m pip wheel -w /wheels \
-      -v --no-cache-dir --no-build-isolation --no-deps \
-      -c /opt/constraints.txt \
-      ./
+    /opt/build.sh
+
+FROM builder-base AS nixl-builder
+RUN apt-get -qq update && \
+    apt-get -q install --no-install-recommends --no-upgrade -y \
+      build-essential pkg-config && \
+    apt-get clean && \
+    python3 -m pip install --no-cache-dir meson ninja pybind11 cmake
+
+ARG NIXL_TAG='0.2.0'
+ARG NIXL_UCX_HOME='/opt/hpcx/ucx'
+
+RUN mkdir /tmp/nixl && \
+    cd /tmp/nixl && \
+    wget "https://github.com/ai-dynamo/nixl/archive/refs/tags/${NIXL_TAG}.tar.gz" -qO- \
+    | tar --strip-components=1 -xzf - && \
+    [ -d "${NIXL_UCX_HOME}" ] && \
+    CUDA_TARGET="$(find /usr/local/cuda/targets -mindepth 1 -maxdepth 1 -type d | head -1)" && \
+    meson setup build --prefix=/opt/nixl \
+      -Ducx_path="${NIXL_UCX_HOME}" \
+      -Dgds_path="${CUDA_TARGET}" \
+      -Dcudapath_inc="${CUDA_TARGET}/include" \
+      -Dcudapath_lib="${CUDA_TARGET}/lib" \
+      -Dcudapath_stub="${CUDA_TARGET}/lib/stubs" && \
+    cd build && \
+    ninja && \
+    ninja install && \
+    cd ../.. && \
+    rm -r /tmp/nixl && \
+    echo '/opt/nixl/lib/python3/dist-packages' > /usr/lib/python3/dist-packages/nixl.pth
 
 FROM ${FINAL_BASE_IMAGE} AS base
 
 WORKDIR /workspace
 
-RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 && apt-get clean
+RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && apt-get clean
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
-    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt
+    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
+    echo 'click != 8.3.0' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
+    python3 -m pip uninstall -y pynvml && \
+    python3 -m pip install --no-cache-dir nvidia-ml-py
 
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
@@ -203,6 +235,9 @@ RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
+COPY --link --from=nixl-builder /opt/nixl /opt/nixl
+COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib/python3/dist-packages/nixl.pth
+
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
 
@@ -212,8 +247,8 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.46.1'; \
     fi && \
     python3 -m pip install --no-cache-dir \
-      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm==0.9.10' \
-      boto3 runai-model-streamer runai-model-streamer[s3] -c /tmp/constraints.txt && \
+      accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
+      'runai-model-streamer[s3,gcs]>=0.15.3' -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
 EXPOSE 8080
