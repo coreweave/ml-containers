@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.2
 
 ARG BASE_IMAGE
-ARG DEEPSPEED_VERSION="0.14.4"
+ARG DEEPSPEED_VERSION="0.18.8"
 ARG APEX_COMMIT="5c8860f1dc79f9edc3c1ba4050fe841207834564"
 ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
@@ -170,6 +170,11 @@ ARG DEEPSPEED_VERSION
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     python3 -m pip install -U --no-cache-dir py-cpuinfo && \
+    # BuildKit builders have no GPU, so without this override DeepSpeed's
+    # auto-detection would record accelerator_name='cpu' in the package's
+    # git_version_info_installed.py, causing AOT-compiled ops to be skipped
+    # at runtime in favour of JIT compilation.
+    export DS_ACCELERATOR='cuda' && \
     if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
       # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
       # requirement for C++17 (as of DeepSpeed 0.10.1).
