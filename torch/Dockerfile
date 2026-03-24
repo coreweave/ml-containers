@@ -536,6 +536,7 @@ RUN pip3 install --no-cache-dir --upgrade \
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
     --mount=type=cache,target=/ccache \
+    export KMP_AFFINITY=disabled && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
