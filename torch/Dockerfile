@@ -222,7 +222,7 @@ ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-poi
     CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
 
 # Update compiler (GCC) and linker (LLD) versions
-RUN LLVM_VERSION='18' && \
+RUN LLVM_VERSION='20' && \
     CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
@@ -701,7 +701,7 @@ RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
       apt-get clean; \
     fi
 
-RUN LLVM_VERSION='18' && \
+RUN LLVM_VERSION='20' && \
     CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
