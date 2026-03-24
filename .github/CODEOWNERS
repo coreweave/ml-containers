@@ -1,0 +1,4 @@
+# Inference specific
+/vllm-tensorizer/ @coreweave/inference
+/.github/configurations/vllm-tensorizer.yml @coreweave/inference
+/.github/workflows/vllm-tensorizer.yml @coreweave/inference
