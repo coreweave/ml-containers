@@ -91,7 +91,9 @@ RUN git -C TransformerEngine apply -v --stat --apply /git/te-fa3-api-compat.patc
 
 FROM downloader-base AS flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
-RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}"
+# Cherry-pick a patch for FA2 to coexist with FA4, cf. flash-attention#2331
+RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}" && \
+    git -C flash-attention cherry-pick -n 4219765dfdd8913bfe26134f748dd5ffcedd3c39
 
 FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
@@ -716,6 +718,7 @@ RUN CUDA_MAJOR_VERSION="$(echo "$CUDA_VERSION" | cut -d. -f1)" && \
     CUDART_VERSION_SPEC="${NV_CUDA_CUDART_VERSION:+=$NV_CUDA_CUDART_VERSION}" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
+      cuda-nvcc-${CUDA_PACKAGE_VERSION} \
       libcurand-${CUDA_PACKAGE_VERSION} \
       libcufft-${CUDA_PACKAGE_VERSION} \
       libcublas-${CUDA_PACKAGE_VERSION} \
@@ -744,6 +747,11 @@ WORKDIR /usr/src/app
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
     pip3 install --no-cache-dir -U numpy packaging && \
     pip3 install --no-cache-dir -U ./*.whl
+
+# Install FA4.
+# FA4 is installed as a pure Python wheel that JIT-compiles device code
+# with the CUTLASS DSL. JIT compilation requires ptxas at runtime.
+RUN pip3 install --no-cache-dir 'flash-attn-4>=4.0.0b5'
 
 # Make a symlink to flash-attn v3 where TransformerEngine expects it,
 # and modify the installation record so that pip uninstall knows how to
