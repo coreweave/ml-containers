@@ -5,7 +5,7 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:13.2.0-base-ubuntu22.04"
 ARG BUILD_TORCH_VERSION="2.11.0"
 ARG BUILD_TORCH_VISION_VERSION="0.26.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.11.0"
-ARG BUILD_TRANSFORMERENGINE_VERSION="b10f436aa28ec8d885eb0d9bf134c320ffb6353d"
+ARG BUILD_TRANSFORMERENGINE_VERSION="2.12"
 ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
 ARG BUILD_FLASH_ATTN_3_VERSION="1ceaa984b2f348caea18b39a98458d33b4ea7a09"
 ARG BUILD_TRITON_VERSION=""
@@ -84,6 +84,10 @@ RUN if grep -qF '#include <float.h>' \
 FROM downloader-base AS transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
 RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
+# Make TE compatible with both the FA3 beta and the official
+# flash-attn-3 3.0.0 wheels. See te-fa3-api-compat.patch for details.
+COPY te-fa3-api-compat.patch /git/te-fa3-api-compat.patch
+RUN git -C TransformerEngine apply -v --stat --apply /git/te-fa3-api-compat.patch
 
 FROM downloader-base AS flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
