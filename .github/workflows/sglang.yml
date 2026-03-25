@@ -16,6 +16,9 @@ on:
       - ".github/workflows/sglang.yml"
       - ".github/workflows/build.yml"
 
+concurrency:
+  group: sglang-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -24,7 +27,9 @@ jobs:
     with:
       image-name: sglang
       folder: sglang
-      tag-suffix: ${{ inputs.tag || '386fabe-nccl-cuda12.8.0-ubuntu22.04-nccl2.25.1-1-torch2.6.0-vision0.21.0-audio2.6.0-abi1' }}
+      dedicated-buildkit: true
+      tag-suffix: ${{ inputs.tag || '69f6eda-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1' }}
       build-args: |
-        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/torch-extras:es-actions-386fabe-nccl-cuda12.8.0-ubuntu22.04-nccl2.25.1-1-torch2.6.0-vision0.21.0-audio2.6.0-abi1'}}
-        ${{ inputs.base-image && 'BASE_IMAGE=' }}${{ inputs.base-image}}
+        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/torch-extras:69f6eda-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'}}
+        BUILDER_IMAGE=${{ inputs.builder-image || '' }}
+        BUILD_CCACHE_SIZE=5Gi
