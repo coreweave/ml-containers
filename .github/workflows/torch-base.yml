@@ -19,6 +19,9 @@ on:
       - ".github/workflows/torch.yml"
       - ".github/workflows/build.yml"
 
+concurrency:
+  group: torch-base-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   get-config:
