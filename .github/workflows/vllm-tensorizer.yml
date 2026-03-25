@@ -6,6 +6,9 @@ on:
       - ".github/workflows/vllm-tensorizer.yml"
       - ".github/workflows/build.yml"
 
+concurrency:
+  group: vllm-tensorizer-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   get-config:
@@ -30,3 +33,4 @@ jobs:
         LMCACHE_COMMIT=${{ matrix.lmcache-commit }}
         BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
         FINAL_BASE_IMAGE=${{ matrix.final-base-image }}
+        BUILD_CCACHE_SIZE=5Gi

@@ -1,5 +1,7 @@
+# syntax=docker/dockerfile:1.7
 ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1"
 ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1"
+ARG BUILD_CCACHE_SIZE="2Gi"
 
 FROM scratch AS freezer
 WORKDIR /
@@ -16,6 +18,26 @@ RUN apt-get -qq update && \
       python3-pip git ninja-build cmake && \
     apt-get clean && \
     pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
+
+ARG BUILD_CCACHE_SIZE
+RUN mkdir /tmp/ccache-install && \
+    cd /tmp/ccache-install && \
+    CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2.tar.xz' && \
+    wget -qO - "$CCACHE_URL" | tar --strip-components 1 -xJf - && \
+    mkdir build && \
+    cd build && \
+    cmake -B. -S.. -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build . --config Release && \
+    make install && \
+    cd ../.. && \
+    rm -rf /tmp/ccache-install && \
+    ccache -M "${BUILD_CCACHE_SIZE}" && \
+    ccache -F 0
+
+ENV CCACHE_DIR=/ccache \
+    CMAKE_C_COMPILER_LAUNCHER=ccache \
+    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
 # Create the /wheels directory
 WORKDIR /wheels
@@ -105,6 +127,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=cache,target=/ccache \
     . /opt/arch_flags.sh && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
@@ -126,6 +149,7 @@ WORKDIR /wheels
 
 FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
+    --mount=type=cache,target=/ccache \
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     [ -n "${CUDA_VERSION}" ] && \
@@ -163,6 +187,7 @@ FROM builder-base AS infinistore-builder
 # InfiniStore is required when installing LMCache
 # It must also be built from source as it also doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target=/workspace,rw \
+    --mount=type=cache,target=/ccache \
     apt-get -qq update && \
     apt-get -q install --no-install-recommends --no-upgrade -y \
       libuv1-dev libflatbuffers-dev libspdlog-dev \
@@ -175,6 +200,7 @@ RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target
 
 FROM builder-base AS deepgemm-builder
 RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/workspace,rw \
+    --mount=type=cache,target=/ccache \
     . /opt/arch_flags.sh && \
     /opt/build.sh
 
