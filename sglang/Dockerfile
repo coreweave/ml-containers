@@ -84,13 +84,26 @@ FROM ${BUILDER_IMAGE} AS builder-base
 
 RUN ldconfig
 
-ARG BUILD_CCACHE_SIZE
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-      python3-pip git ninja-build cmake kmod ccache && \
+      python3-pip git ninja-build kmod && \
     apt-get clean && \
     pip3 install -U --no-cache-dir \
-      pip packaging 'setuptools>=77.0.3,<81.0.0' wheel build pybind11 && \
+      pip packaging 'setuptools>=77.0.3,<81.0.0' wheel build pybind11 \
+      'cmake==3.31.6'
+
+ARG BUILD_CCACHE_SIZE
+RUN mkdir /tmp/ccache-install && \
+    cd /tmp/ccache-install && \
+    CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2.tar.xz' && \
+    wget -qO - "$CCACHE_URL" | tar --strip-components 1 -xJf - && \
+    mkdir build && \
+    cd build && \
+    cmake -B. -S.. -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build . --config Release && \
+    make install && \
+    cd ../.. && \
+    rm -rf /tmp/ccache-install && \
     ccache -M "${BUILD_CCACHE_SIZE}" && \
     ccache -F 0
 
