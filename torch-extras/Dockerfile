@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.2
+# syntax=docker/dockerfile:1.7
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.14.4"
@@ -7,6 +7,7 @@ ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
 ARG XFORMERS_VERSION="0.0.31.post1"
 ARG BUILD_MAX_JOBS=""
+ARG BUILD_CCACHE_SIZE="2Gi"
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -60,7 +61,7 @@ RUN python3 -m pip install --no-cache-dir -U pip 'setuptools<82' wheel packaging
 
 # Install the cuDNN dev package for building Apex
 # The cuDNN runtime is installed in the base torch image
-COPY --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 RUN /tmp/install_cudnn.sh "${CUDA_VERSION}" dev && \
     rm /tmp/install_cudnn.sh
 
@@ -74,6 +75,26 @@ RUN apt-get -qq update && apt-get -qq install -y \
     apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir 'cmake==3.31.6'
+
+ARG BUILD_CCACHE_SIZE
+RUN mkdir /tmp/ccache-install && \
+    cd /tmp/ccache-install && \
+    CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2.tar.xz' && \
+    wget -qO - "$CCACHE_URL" | tar --strip-components 1 -xJf - && \
+    mkdir build && \
+    cd build && \
+    cmake -B. -S.. -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build . --config Release && \
+    make install && \
+    cd ../.. && \
+    rm -rf /tmp/ccache-install && \
+    ccache -M "${BUILD_CCACHE_SIZE}" && \
+    ccache -F 0
+
+ENV CCACHE_DIR=/ccache \
+    CMAKE_C_COMPILER_LAUNCHER=ccache \
+    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
 # Update compiler (GCC) and linker (LLD) versions
 # gfortran-13 is just for compiler_wrapper.f95
@@ -96,7 +117,7 @@ WORKDIR /build
 # used on the builder machine.
 # The compiler wrapper normalizes -march=native to -march=skylake
 # along with a couple other transformations before invoking GCC.
-COPY compiler_wrapper.f95 .
+COPY --link compiler_wrapper.f95 .
 ARG AMD64_NATIVE_ARCH="skylake"
 ARG ARM64_NATIVE_ARCH="armv8.5-a+nopredres"
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
@@ -108,8 +129,8 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
     fi && \
     gfortran -ffree-line-length-512 -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
-COPY --chmod=755 effective_cpu_count.sh .
-COPY --chmod=755 scale.sh .
+COPY --link --chmod=755 effective_cpu_count.sh .
+COPY --link --chmod=755 scale.sh .
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
@@ -135,6 +156,7 @@ FROM builder-base as deepspeed-builder
 
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST
 RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=ds-kernels/,rw \
+    --mount=type=cache,target=/ccache \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     cd ds-kernels && \
     export CUDA_ARCH_LIST="${DEEPSPEED_KERNELS_CUDA_ARCH_LIST}" && \
@@ -168,7 +190,8 @@ ARG DS_BUILD_AIO="1"
 ARG DEEPSPEED_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+RUN --mount=type=cache,target=/ccache \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     python3 -m pip install -U --no-cache-dir py-cpuinfo && \
     if python3 -m pip show torch | grep 'Version: 2\.[1-9]' > /dev/null; then \
       # DeepSpeed's AIO extension is incompatible with PyTorch 2.1.x's
@@ -220,6 +243,7 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 # --distributed_adam, --distributed_lamb, and --group_norm aren't documented
 # in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
+    --mount=type=cache,target=/ccache \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     CHECK_VERSION() { \
@@ -272,7 +296,8 @@ FROM builder-base as xformers-builder
 ARG XFORMERS_VERSION
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+RUN --mount=type=cache,target=/ccache \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS=1 \
       PYTHONUNBUFFERED=1 \
