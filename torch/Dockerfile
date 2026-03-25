@@ -175,6 +175,10 @@ RUN CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     apt-get -qq install --no-upgrade -y \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} && \
+    { if [ ! -d /opt/nccl-tests ]; then \
+      NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
+      apt-get -qq install --no-upgrade -y \
+        "libnccl2=${NCCL_PACKAGE_VERSION}" "libnccl-dev=${NCCL_PACKAGE_VERSION}"; fi; } && \
     /tmp/install_cudnn.sh "${CUDA_VERSION}" dev && \
     rm /tmp/install_cudnn.sh && \
     apt-get clean
