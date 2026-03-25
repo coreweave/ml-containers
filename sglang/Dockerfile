@@ -89,8 +89,18 @@ RUN apt-get -qq update && \
       python3-pip git ninja-build kmod && \
     apt-get clean && \
     pip3 install -U --no-cache-dir \
-      pip packaging 'setuptools>=77.0.3,<81.0.0' wheel build pybind11 \
-      'cmake==3.31.6'
+      pip packaging 'setuptools>=77.0.3,<81.0.0' wheel build pybind11
+
+# Add Kitware's apt repository to get a newer version of CMake
+RUN apt-get -qq update && apt-get -qq install -y \
+      software-properties-common lsb-release && \
+    { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
+    | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
+    apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
+    apt-get -qq update && \
+    apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
+    apt-get clean && \
+    python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
 ARG BUILD_CCACHE_SIZE
 RUN mkdir /tmp/ccache-install && \
