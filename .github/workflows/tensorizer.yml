@@ -9,7 +9,6 @@ on:
     paths:
       - "tensorizer/**"
       - ".github/workflows/tensorizer.yml"
-      - ".github/workflows/build.yml"
 
 
 jobs:
