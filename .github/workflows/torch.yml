@@ -32,6 +32,10 @@ on:
       cache-key:
         required: false
         type: string
+      buildkit-index:
+        required: false
+        type: number
+        default: 0
 
   workflow_dispatch:
     inputs:
@@ -72,6 +76,11 @@ on:
         description: "Whether to build and push a torch-extras container as well"
         type: boolean
         default: false
+      buildkit-index:
+        required: false
+        description: "Index of the dedicated BuildKit endpoint pair to use (0, 1, ...). -1 uses shared consumer endpoints."
+        type: number
+        default: 0
 
 jobs:
   build:
@@ -79,13 +88,13 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
-      dedicated-buildkit: true
+      buildkit-index: ${{ inputs.buildkit-index }}
       image-name: ${{ inputs.image-name || 'torch' }}
       folder: torch
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
-        BUILD_CCACHE_SIZE=5Gi
+        BUILD_CCACHE_SIZE=50Gi
         BUILDER_BASE_IMAGE=${{ inputs.builder-base-image }}
         FINAL_BASE_IMAGE=${{ inputs.base-image }}
         BUILD_TORCH_VERSION=${{ inputs.torch-version }}
@@ -103,3 +112,4 @@ jobs:
       base-image: ${{ needs.build.outputs.tags }}
       image-name: ${{ inputs.image-name && format('{0}-extras', inputs.image-name) || '' }}
       cache-key: ${{ inputs.cache-key }}
+      buildkit-index: ${{ inputs.buildkit-index }}

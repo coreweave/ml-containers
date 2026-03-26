@@ -154,15 +154,26 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 ARG BUILD_CCACHE_SIZE="1Gi"
 
-# ninja-build, ccache, and lld are optional but improve the build
-RUN apt-get -qq update && apt-get -qq install -y \
-      libncurses5 python3 python3-pip git apt-utils ssh ca-certificates \
-      libomp5 libpng-dev libjpeg-dev pkg-config python3-distutils \
+# ninja-build, ccache, and lld are optional but improve the build.
+# Remove PEP 668 marker since containers are often single-purpose
+# and thus do not inherently need to be pushed into venv isolation.
+RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+      PACKAGES='libncurses5 python3-pip python3-distutils'; \
+    else \
+      PACKAGES='libncurses6 python3-dev'; \
+    fi && \
+    apt-get -qq update && apt-get -qq install -y \
+      $PACKAGES python3 git apt-utils ssh ca-certificates \
+      libomp5 libpng-dev libjpeg-dev pkg-config \
       build-essential ninja-build && \
     apt-get clean && \
+    rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
+    if ! command -v pip3 >/dev/null 2>&1; then \
+      wget -qO- 'https://bootstrap.pypa.io/get-pip.py' | /usr/bin/python3; \
+    fi && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' wheel packaging build && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
+    update-alternatives --install /usr/bin/pip pip "$(command -v pip3)" 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
 
@@ -224,8 +235,10 @@ RUN LLVM_VERSION='18' && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
     SETUP_TOOLCHAIN() { \
-        apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
-        | sed -e '/connection timed out/{p; Q1}' && \
+        if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+          apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
+          | sed -e '/connection timed out/{p; Q1}'; \
+        fi && \
         apt-get -qq install --no-install-recommends -y \
           gcc-13 g++-13 gfortran-13 \
           "lld-$LLVM_VERSION" "libomp-$LLVM_VERSION-dev" && \
@@ -656,29 +669,45 @@ ENV TORCH_CUDA_ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}"
 FROM final-${TARGETARCH}
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install core packages
-RUN apt-get -qq update && apt-get -qq install -y \
-      libncurses5 python3 python3-pip python3-distutils \
+# Install core packages.
+# Remove PEP 668 marker since containers are often single-purpose
+# and thus do not inherently need to be pushed into venv isolation.
+RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+      PACKAGES='libncurses5 python3-pip python3-distutils'; \
+    else \
+      PACKAGES='libncurses6 python3-dev'; \
+    fi && \
+    apt-get -qq update && apt-get -qq install -y \
+      $PACKAGES python3 gcc \
       libomp5 libpng16-16 libjpeg-turbo8 libsodium23 \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
     apt-get clean && \
+    rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
+    if ! command -v pip3 >/dev/null 2>&1; then \
+      wget -qO- 'https://bootstrap.pypa.io/get-pip.py' | /usr/bin/python3; \
+    fi && \
     /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
+    update-alternatives --install /usr/bin/pip pip "$(command -v pip3)" 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
 
 RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
         software-properties-common lsb-release && \
-    SETUP_LIBSTDCXX() { \
-        apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
-        | sed -e '/connection timed out/{p; Q1}' && \
-        apt-get -qq install -y --no-install-recommends libstdc++6 && \
-        apt-get clean; \
-    } && \
-    { SETUP_LIBSTDCXX || { sleep "$(shuf -i10-20 -n1)" && SETUP_LIBSTDCXX; }; }
+    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+      SETUP_LIBSTDCXX() { \
+          apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
+          | sed -e '/connection timed out/{p; Q1}' && \
+          apt-get -qq install -y --no-install-recommends libstdc++6 && \
+          apt-get clean; \
+      } && \
+      { SETUP_LIBSTDCXX || { sleep "$(shuf -i10-20 -n1)" && SETUP_LIBSTDCXX; }; }; \
+    else \
+      apt-get -qq install -y --no-install-recommends libstdc++6 && \
+      apt-get clean; \
+    fi
 
 RUN LLVM_VERSION='18' && \
     CODENAME="$(lsb_release -cs)" && \

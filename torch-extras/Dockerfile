@@ -78,7 +78,9 @@ RUN apt-get -qq update && apt-get -qq install -y \
 # Update compiler (GCC) and linker (LLD) versions
 # gfortran-13 is just for compiler_wrapper.f95
 RUN LLVM_VERSION='18' && \
-    add-apt-repository -n ppa:ubuntu-toolchain-r/test && \
+    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+      add-apt-repository -n ppa:ubuntu-toolchain-r/test; \
+    fi && \
     apt-get -qq update && apt-get -qq install --no-install-recommends -y \
       gcc-13 g++-13 gfortran-13 "lld-$LLVM_VERSION" && \
     apt-get clean && \
