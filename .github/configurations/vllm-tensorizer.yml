@@ -5,6 +5,6 @@ flashinfer-commit:
 lmcache-commit:
   - 'v0.4.1'
 builder-base-image:
-  - 'ghcr.io/coreweave/ml-containers/torch:1a21fa8-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1'
+  - 'ghcr.io/coreweave/ml-containers/torch:es-cuda-13-dev-4ae9dbb-nccl-cuda13.1.0-ubuntu22.04-nccl2.29.2-1-torch2.9.1-vision0.24.1-audio2.9.1-abi1'
 final-base-image:
-  - 'ghcr.io/coreweave/ml-containers/torch:1a21fa8-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1'
+  - 'ghcr.io/coreweave/ml-containers/torch:es-cuda-13-dev-4ae9dbb-nccl-cuda13.1.0-ubuntu22.04-nccl2.29.2-1-torch2.9.1-vision0.24.1-audio2.9.1-abi1'
