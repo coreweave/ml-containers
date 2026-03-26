@@ -25,7 +25,6 @@ on:
       - ".github/configurations/torch-nccl.yml"
       - ".github/workflows/torch-nccl.yml"
       - ".github/workflows/torch.yml"
-      - ".github/workflows/build.yml"
 
 
 jobs:

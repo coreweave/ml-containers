@@ -54,9 +54,9 @@ jobs:
       tags: ${{ steps.meta.outputs.tags }}
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Fetch BuildKit Client Certs
-        uses: dopplerhq/secrets-fetch-action@v1.2.0
+        uses: dopplerhq/secrets-fetch-action@v2.0.0
         id: client-certs
         with:
           doppler-token: ${{ secrets.ORG_BUILDKIT_CLIENT_TOKEN }}
@@ -84,7 +84,7 @@ jobs:
           echo "amd64=${!AMD64}" >> "$GITHUB_OUTPUT"
           echo "arm64=${!ARM64}" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3.7.1
+        uses: docker/setup-buildx-action@v4.0.0
         with:
           driver: remote
           endpoint: ${{ steps.buildkit.outputs.amd64 }}
@@ -116,7 +116,7 @@ jobs:
           echo "CACHE_KEY=${{ inputs.image-name }}-${{ inputs.cache-key }}" >> $GITHUB_ENV
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v5.5.1
+        uses: docker/metadata-action@v6.0.0
         with:
           images: ${{ env.REGISTRY }}/${{ inputs.image-name }}
           tags: |
@@ -130,7 +130,7 @@ jobs:
           | install -m400 /dev/stdin ~/.docker/config.json
       - name: Build and push Docker image
         id: docker-build
-        uses: docker/build-push-action@v6.9.0
+        uses: docker/build-push-action@v7.0.0
         with:
           context: ${{ inputs.folder }}
           build-args: |-
@@ -151,7 +151,7 @@ jobs:
           filterOutClosed: true
       - name: Comment
         if: steps.PR.outputs.number
-        uses: peter-evans/create-or-update-comment@v2.1.0
+        uses: peter-evans/create-or-update-comment@v5.0.0
         with:
           issue-number: ${{ steps.PR.outputs.number }}
           body: >

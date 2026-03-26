@@ -17,7 +17,6 @@ on:
       - ".github/configurations/torch-base.yml"
       - ".github/workflows/torch-base.yml"
       - ".github/workflows/torch.yml"
-      - ".github/workflows/build.yml"
 
 
 jobs:

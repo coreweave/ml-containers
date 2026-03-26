@@ -4,7 +4,6 @@ on:
     paths:
       - "cuda-ssh/**"
       - ".github/workflows/cuda-ssh.yml"
-      - ".github/workflows/build.yml"
 
 
 jobs:

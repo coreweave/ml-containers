@@ -53,7 +53,6 @@ on:
     paths:
       - "torch-extras/**"
       - ".github/workflows/torch-extras.yml"
-      - ".github/workflows/build.yml"
 
 
 jobs:
