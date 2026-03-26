@@ -19,6 +19,10 @@ on:
       cache-key:
         required: false
         type: string
+      buildkit-index:
+        required: false
+        type: number
+        default: 0
 
   workflow_dispatch:
     inputs:
@@ -39,6 +43,11 @@ on:
         description: "Build from one specific image rather than the most recent releases from the main branch"
         type: boolean
         default: true
+      buildkit-index:
+        required: false
+        description: "Index of the dedicated BuildKit endpoint pair to use (0, 1, ...). -1 uses shared consumer endpoints."
+        type: number
+        default: 0
 
   push:
     paths:
@@ -150,7 +159,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
-      dedicated-buildkit: true
+      buildkit-index: ${{ inputs.buildkit-index }}
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ inputs.tag }}
@@ -168,7 +177,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
-      dedicated-buildkit: true
+      buildkit-index: ${{ inputs.buildkit-index }}
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ matrix.bases.tag }}

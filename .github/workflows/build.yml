@@ -24,11 +24,11 @@ on:
         description: "Platforms for which to build (default: linux/amd64,linux/arm64)"
         type: string
         default: linux/amd64,linux/arm64
-      dedicated-buildkit:
+      buildkit-index:
         required: false
-        description: "Instead of shared consumer endpoints, use dedicated BuildKit endpoints (BUILDKIT_DEDICATED_0) backed by high-memory-limit worker pods to prevent OOMs during large builds."
-        type: boolean
-        default: false
+        description: "Index of the dedicated BuildKit endpoint pair to use (0, 1, ...). -1 uses shared consumer endpoints."
+        type: number
+        default: -1
     outputs:
       outcome:
         description: "The outcome of the build"
@@ -63,14 +63,34 @@ jobs:
           doppler-project: ${{ secrets.BUILDKIT_CONSUMER_DOPPLER_PROJECT }}
           doppler-config: prod
           inject-env-vars: false
+      - name: Resolve BuildKit endpoints
+        id: buildkit
+        env:
+          BUILDKIT_CONSUMER_AMD64_ENDPOINT: ${{ secrets.BUILDKIT_CONSUMER_AMD64_ENDPOINT }}
+          BUILDKIT_CONSUMER_ARM64_ENDPOINT: ${{ secrets.BUILDKIT_CONSUMER_ARM64_ENDPOINT }}
+          BUILDKIT_DEDICATED_0_AMD64_ENDPOINT: ${{ secrets.BUILDKIT_DEDICATED_0_AMD64_ENDPOINT }}
+          BUILDKIT_DEDICATED_0_ARM64_ENDPOINT: ${{ secrets.BUILDKIT_DEDICATED_0_ARM64_ENDPOINT }}
+          BUILDKIT_DEDICATED_1_AMD64_ENDPOINT: ${{ secrets.BUILDKIT_DEDICATED_1_AMD64_ENDPOINT }}
+          BUILDKIT_DEDICATED_1_ARM64_ENDPOINT: ${{ secrets.BUILDKIT_DEDICATED_1_ARM64_ENDPOINT }}
+        run: |
+          INDEX="${{ inputs.buildkit-index }}"
+          if [ "$INDEX" -ge 0 ] 2>/dev/null; then
+            PREFIX="BUILDKIT_DEDICATED_${INDEX}"
+          else
+            PREFIX="BUILDKIT_CONSUMER"
+          fi
+          AMD64="${PREFIX}_AMD64_ENDPOINT"
+          ARM64="${PREFIX}_ARM64_ENDPOINT"
+          echo "amd64=${!AMD64}" >> "$GITHUB_OUTPUT"
+          echo "arm64=${!ARM64}" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3.7.1
         with:
           driver: remote
-          endpoint: ${{ inputs.dedicated-buildkit && secrets.BUILDKIT_DEDICATED_0_AMD64_ENDPOINT || secrets.BUILDKIT_CONSUMER_AMD64_ENDPOINT }}
+          endpoint: ${{ steps.buildkit.outputs.amd64 }}
           platforms: linux/amd64
           append: |
-            - endpoint: ${{ inputs.dedicated-buildkit && secrets.BUILDKIT_DEDICATED_0_ARM64_ENDPOINT || secrets.BUILDKIT_CONSUMER_ARM64_ENDPOINT }}
+            - endpoint: ${{ steps.buildkit.outputs.arm64 }}
               platforms: linux/arm64
         env:
           BUILDER_NODE_0_AUTH_TLS_CACERT: ${{ steps.client-certs.outputs.TLS_CACERT }}
