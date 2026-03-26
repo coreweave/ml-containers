@@ -782,7 +782,7 @@ RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
 # Install FA4.
 # FA4 is installed as a pure Python wheel that JIT-compiles device code
 # with the CUTLASS DSL. JIT compilation requires ptxas at runtime.
-RUN pip3 install --no-cache-dir 'flash-attn-4>=4.0.0b5'
+RUN pip3 install --no-cache-dir 'flash-attn-4==4.0.0b5'
 
 # Make a symlink to flash-attn v3 where TransformerEngine expects it,
 # and modify the installation record so that pip uninstall knows how to
