@@ -5,7 +5,7 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:13.2.0-base-ubuntu22.04"
 ARG BUILD_TORCH_VERSION="2.11.0"
 ARG BUILD_TORCH_VISION_VERSION="0.26.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.11.0"
-ARG BUILD_TRANSFORMERENGINE_VERSION="b10f436aa28ec8d885eb0d9bf134c320ffb6353d"
+ARG BUILD_TRANSFORMERENGINE_VERSION="2.12"
 ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
 ARG BUILD_FLASH_ATTN_3_VERSION="1ceaa984b2f348caea18b39a98458d33b4ea7a09"
 ARG BUILD_TRITON_VERSION=""
@@ -84,10 +84,16 @@ RUN if grep -qF '#include <float.h>' \
 FROM downloader-base AS transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
 RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
+# Make TE compatible with both the FA3 beta and the official
+# flash-attn-3 3.0.0 wheels. See te-fa3-api-compat.patch for details.
+COPY te-fa3-api-compat.patch /git/te-fa3-api-compat.patch
+RUN git -C TransformerEngine apply -v --stat --apply /git/te-fa3-api-compat.patch
 
 FROM downloader-base AS flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
-RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}"
+# Cherry-pick a patch for FA2 to coexist with FA4, cf. flash-attention#2331
+RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}" && \
+    git -C flash-attention cherry-pick -n 4219765dfdd8913bfe26134f748dd5ffcedd3c39
 
 FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
@@ -173,15 +179,17 @@ RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
 
 COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 
-RUN export \
-      CUDA_MAJOR_VERSION=$(echo "$CUDA_VERSION" | cut -d. -f1) \
-      CUDA_MINOR_VERSION=$(echo "$CUDA_VERSION" | cut -d. -f2) && \
-    export \
-      CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
+RUN CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
+    CUDA_MINOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f2) && \
+    CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
       cuda-nvtx-${CUDA_PACKAGE_VERSION} \
       cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION} && \
+    { if [ ! -d /opt/nccl-tests ]; then \
+      NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
+      apt-get -qq install --no-upgrade -y \
+        "libnccl2=${NCCL_PACKAGE_VERSION}" "libnccl-dev=${NCCL_PACKAGE_VERSION}"; fi; } && \
     /tmp/install_cudnn.sh "${CUDA_VERSION}" dev && \
     rm /tmp/install_cudnn.sh && \
     apt-get clean
@@ -735,12 +743,13 @@ COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
 # - Don't mess with libnccl2 when using nccl-tests as a base,
 #   checked via the existence of the directory "/opt/nccl-tests".
-RUN CUDA_MAJOR_VERSION="$(echo "$CUDA_VERSION" | cut -d. -f1)" && \
-    CUDA_MINOR_VERSION="$(echo "$CUDA_VERSION" | cut -d. -f2)" && \
+RUN CUDA_MAJOR_VERSION="$(echo "${CUDA_VERSION}" | cut -d. -f1)" && \
+    CUDA_MINOR_VERSION="$(echo "${CUDA_VERSION}" | cut -d. -f2)" && \
     CUDA_PACKAGE_VERSION="${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION}" && \
     CUDART_VERSION_SPEC="${NV_CUDA_CUDART_VERSION:+=$NV_CUDA_CUDART_VERSION}" && \
     apt-get -qq update && \
     apt-get -qq install --no-upgrade -y \
+      cuda-nvcc-${CUDA_PACKAGE_VERSION} \
       libcurand-${CUDA_PACKAGE_VERSION} \
       libcufft-${CUDA_PACKAGE_VERSION} \
       libcublas-${CUDA_PACKAGE_VERSION} \
@@ -752,12 +761,12 @@ RUN CUDA_MAJOR_VERSION="$(echo "$CUDA_VERSION" | cut -d. -f1)" && \
       cuda-cupti-${CUDA_PACKAGE_VERSION} \
       libnvjpeg-${CUDA_PACKAGE_VERSION} \
       libnvtoolsext1 && \
-    { if [ "$CUDA_MAJOR_VERSION" -ge 12 ]; then \
+    { if [ "${CUDA_MAJOR_VERSION}" -ge 12 ]; then \
       apt-get -qq install --no-upgrade -y libnvjitlink-${CUDA_PACKAGE_VERSION}; fi; } && \
     { if [ ! -d /opt/nccl-tests ]; then \
       NCCL_PACKAGE_VERSION="2.*+cuda${CUDA_MAJOR_VERSION}.${CUDA_MINOR_VERSION}" && \
-      apt-get -qq install --no-upgrade -y "libnccl2=$NCCL_PACKAGE_VERSION"; fi; } && \
-    /tmp/install_cudnn.sh "$CUDA_VERSION" runtime && \
+      apt-get -qq install --no-upgrade -y "libnccl2=${NCCL_PACKAGE_VERSION}"; fi; } && \
+    /tmp/install_cudnn.sh "${CUDA_VERSION}" runtime && \
     rm /tmp/install_cudnn.sh && \
     apt-get clean && \
     ldconfig
@@ -769,6 +778,11 @@ WORKDIR /usr/src/app
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
     pip3 install --no-cache-dir -U numpy packaging && \
     pip3 install --no-cache-dir -U ./*.whl
+
+# Install FA4.
+# FA4 is installed as a pure Python wheel that JIT-compiles device code
+# with the CUTLASS DSL. JIT compilation requires ptxas at runtime.
+RUN pip3 install --no-cache-dir 'flash-attn-4==4.0.0b5'
 
 # Make a symlink to flash-attn v3 where TransformerEngine expects it,
 # and modify the installation record so that pip uninstall knows how to

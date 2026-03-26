@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CoreWeave <>
+Date: Tue, 24 Mar 2026 15:26:31 -0500
+Subject: [PATCH] Make TE v2.12 compatible with official flash-attn-3 3.0.0
+ wheels
+
+Inspired by NVIDIA/TransformerEngine#2704 (merged to main as 34a6c0a5a3,
+labeled for v2.14.0), but takes a different approach.
+
+Fixes two FA3 compatibility issues:
+1. TE imports FA3 as flash_attn_3.flash_attn_interface, but the official
+   flash-attn-3 wheel installs flash_attn_interface as a top-level
+   module. We add a fallback import path.
+2. FA3 3.0.0 registers ops via torch.library (CustomOpDef) and changed
+   the window_size tuple to separate window_size_left / window_size_right
+   params, plus renamed causal to is_causal in the backward pass. We
+   detect CustomOpDef at import time and shim the old calling convention.
+
+Rather than patching every call site in context_parallel.py (which has
+diverged significantly between v2.12 and main), this wraps
+_flash_attn_fwd_v3 and _flash_attn_bwd_v3 at import time in backends.py.
+Works with both old (source-built) and new (official wheel) FA3. All TE
+call sites pass window_size and causal as kwargs, so the kwargs-only
+shim is sufficient.
+---
+ .../dot_product_attention/backends.py         | 58 ++++++++++++++++---
+ 1 file changed, 49 insertions(+), 9 deletions(-)
+
+diff --git a/transformer_engine/pytorch/attention/dot_product_attention/backends.py b/transformer_engine/pytorch/attention/dot_product_attention/backends.py
+index aa6c063..4996bf8 100644
+--- a/transformer_engine/pytorch/attention/dot_product_attention/backends.py
++++ b/transformer_engine/pytorch/attention/dot_product_attention/backends.py
+@@ -138,15 +138,55 @@ except PackageNotFoundError:
+     flash_attn_with_kvcache_v3 = None
+     # pass  # only print warning if use_flash_attention_3 = True in get_attention_backend
+ else:
+-    from flash_attn_3.flash_attn_interface import flash_attn_func as flash_attn_func_v3
+-    from flash_attn_3.flash_attn_interface import (
+-        flash_attn_varlen_func as flash_attn_varlen_func_v3,
+-    )
+-    from flash_attn_3.flash_attn_interface import (
+-        flash_attn_with_kvcache as flash_attn_with_kvcache_v3,
+-    )
+-    from flash_attn_3.flash_attn_interface import _flash_attn_forward as _flash_attn_fwd_v3
+-    from flash_attn_3.flash_attn_interface import _flash_attn_backward as _flash_attn_bwd_v3
++    # TE expects flash_attn_3.flash_attn_interface, but the official flash-attn-3
++    # wheel installs flash_attn_interface as a top-level module.
++    try:
++        from flash_attn_3.flash_attn_interface import flash_attn_func as flash_attn_func_v3
++        from flash_attn_3.flash_attn_interface import (
++            flash_attn_varlen_func as flash_attn_varlen_func_v3,
++        )
++        from flash_attn_3.flash_attn_interface import (
++            flash_attn_with_kvcache as flash_attn_with_kvcache_v3,
++        )
++        from flash_attn_3.flash_attn_interface import _flash_attn_forward as _flash_attn_fwd_v3
++        from flash_attn_3.flash_attn_interface import _flash_attn_backward as _flash_attn_bwd_v3
++    except (ImportError, ModuleNotFoundError):
++        from flash_attn_interface import flash_attn_func as flash_attn_func_v3
++        from flash_attn_interface import (
++            flash_attn_varlen_func as flash_attn_varlen_func_v3,
++        )
++        from flash_attn_interface import (
++            flash_attn_with_kvcache as flash_attn_with_kvcache_v3,
++        )
++        from flash_attn_interface import _flash_attn_forward as _flash_attn_fwd_v3
++        from flash_attn_interface import _flash_attn_backward as _flash_attn_bwd_v3
++
++    # FA3 3.0.0+ registers ops via torch.library (CustomOpDef), replaced
++    # the single window_size tuple with window_size_left / window_size_right,
++    # and renamed causal to is_causal in the backward pass. Shim the old
++    # calling convention so TE's call sites still work.
++    if hasattr(_flash_attn_fwd_v3, "_schema"):
++        _orig_fwd_v3 = _flash_attn_fwd_v3
++        _orig_bwd_v3 = _flash_attn_bwd_v3
++
++        def _flash_attn_fwd_v3(*args, **kwargs):
++            ws = kwargs.pop("window_size", None)
++            if ws is not None:
++                kwargs.setdefault("window_size_left", ws[0])
++                kwargs.setdefault("window_size_right", ws[1])
++            return _orig_fwd_v3(*args, **kwargs)
++        _flash_attn_fwd_v3.__wrapped__ = _orig_fwd_v3
++
++        def _flash_attn_bwd_v3(*args, **kwargs):
++            ws = kwargs.pop("window_size", None)
++            if ws is not None:
++                kwargs.setdefault("window_size_left", ws[0])
++                kwargs.setdefault("window_size_right", ws[1])
++            causal = kwargs.pop("causal", None)
++            if causal is not None:
++                kwargs.setdefault("is_causal", causal)
++            return _orig_bwd_v3(*args, **kwargs)
++        _flash_attn_bwd_v3.__wrapped__ = _orig_bwd_v3
+ 
+     fa_utils.set_flash_attention_3_params()
+ 
+-- 
+2.34.1
+
