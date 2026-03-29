@@ -176,7 +176,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
-      buildkit-index: ${{ inputs.buildkit-index }}
+      buildkit-index: ${{ inputs.buildkit-index || 0 }}
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       tag-suffix: ${{ matrix.bases.tag }}
