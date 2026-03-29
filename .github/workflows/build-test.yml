@@ -18,3 +18,5 @@ jobs:
     with:
       image-name: build-test
       folder: build-test
+      build-args: |
+        BUILD_TEST_ARG=Example
