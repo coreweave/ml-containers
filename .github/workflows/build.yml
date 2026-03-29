@@ -131,6 +131,9 @@ jobs:
       - name: Build and push Docker image
         id: docker-build
         uses: docker/build-push-action@v7.0.0
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: ${{ inputs.folder }}
           build-args: |-
