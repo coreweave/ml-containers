@@ -19,6 +19,10 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
 
+# Port of NVIDIA/apex#1985 to fix compilation with PyTorch > v2.11
+RUN sed -i 's@\blerp\b@_lerp@g' \
+      apex/apex/contrib/csrc/optimizers/multi_tensor_distopt_adam_kernel.cu
+
 
 FROM alpine/git:2.36.3 as ds-kernels-downloader
 WORKDIR /git
