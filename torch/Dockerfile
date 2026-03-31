@@ -8,6 +8,7 @@ ARG BUILD_TORCH_AUDIO_VERSION="2.11.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="2.12"
 ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
 ARG BUILD_FLASH_ATTN_3_VERSION="1ceaa984b2f348caea18b39a98458d33b4ea7a09"
+ARG BUILD_FLASH_ATTN_4_VERSION="e065bf1ba1091040eeaa9328846c3bd31c718543"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
@@ -782,7 +783,17 @@ RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
 # Install FA4.
 # FA4 is installed as a pure Python wheel that JIT-compiles device code
 # with the CUTLASS DSL. JIT compilation requires ptxas at runtime.
-RUN pip3 install --no-cache-dir 'flash-attn-4==4.0.0b5'
+ARG BUILD_FLASH_ATTN_4_VERSION
+RUN if [ -z "${BUILD_FLASH_ATTN_4_VERSION}" ]; then exit 0; fi && \
+    if [ "${CUDA_VERSION%%.*}" -ge 13 ]; \
+      then EXTRA='[cu13]'; \
+      else EXTRA=''; \
+    fi && \
+    FA4_PACKAGE="$( \
+      printf 'flash-attn-4%s @ git+https://github.com/Dao-AILab/flash-attention.git@%s#subdirectory=flash_attn/cute' \
+        "${EXTRA}" "${BUILD_FLASH_ATTN_4_VERSION}"; \
+    )" && \
+    pip3 install --no-cache-dir "${FA4_PACKAGE}"
 
 # Make a symlink to flash-attn v3 where TransformerEngine expects it,
 # and modify the installation record so that pip uninstall knows how to
