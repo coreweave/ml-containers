@@ -20,15 +20,14 @@ RUN apt-get -qq update && \
 
 # sccache config file (object storage backend, local disk cache)
 COPY sccache.toml /etc/sccache.toml
-ENV SCCACHE_CONF=/etc/sccache.toml \
-    SCCACHE_LOG=debug \
-    SCCACHE_ERROR_LOG=/build/sccache.log
+ENV SCCACHE_CONF=/etc/sccache.toml
 
 # C/C++ compiler launchers (CUDA is handled inside nvcc-wrapper)
 ENV CMAKE_C_COMPILER_LAUNCHER=sccache \
     CMAKE_CXX_COMPILER_LAUNCHER=sccache
 
 COPY --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+COPY --chmod=755 sccache-start.sh /build/sccache-start.sh
 COPY test.cu /build/test.cu
 WORKDIR /build
 
@@ -43,17 +42,16 @@ RUN --mount=type=secret,id=s3_access_key_id \
     --mount=type=secret,id=s3_secret_access_key \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
-    { echo "=== Build 1 (expect cache miss) ===" && \
-    /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu; \
-    echo "wrapper exit: $?, test.o exists: $(ls -la test.o 2>&1)" && \
+    . /build/sccache-start.sh && \
+    echo "=== Build 1 (expect cache miss) ===" && \
+    /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
     nvcc -o test test.o && \
     sccache --show-stats && \
     echo "=== Build 2 (expect cache hit) ===" && \
     rm -f test test.o && \
     /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
     nvcc -o test test.o && \
-    sccache --show-stats; } || \
-    { echo "=== sccache server log ===" && cat /build/sccache.log; false; }
+    sccache --show-stats
 
 # Install PyTorch (from pip, not from source; just testing sccache here, not torch)
 RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu129
@@ -73,6 +71,7 @@ RUN --mount=type=secret,id=s3_access_key_id \
     --mount=type=secret,id=s3_secret_access_key \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
+    . /build/sccache-start.sh && \
     export TORCH_CUDA_ARCH_LIST="8.0;9.0" \
            XFORMERS_DISABLE_FLASH_ATTN=1 \
            MAX_JOBS=4 \
@@ -80,12 +79,11 @@ RUN --mount=type=secret,id=s3_access_key_id \
            LAMP=FRIEND \
            COW=MOO \
            CIRNO=STRONGEST && \
-    { echo "=== xformers build ===" && \
+    echo "=== xformers build ===" && \
     pip3 wheel -w /build/dist -v --no-cache-dir --no-build-isolation --no-deps \
       /build/xformers/ 2> \
     >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2) && \
-    sccache --show-stats; } || \
-    { echo "=== sccache server log ===" && cat /build/sccache.log; false; }
+    sccache --show-stats
 SHELL ["/bin/sh", "-c"]
 
 # Final image

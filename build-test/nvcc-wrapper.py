@@ -49,75 +49,22 @@ _SCCACHE_ENV_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
     "SCCACHE_CONF", "SCCACHE_DIR", "SCCACHE_CACHE_SIZE",
     "SCCACHE_LOG", "SCCACHE_ERROR_LOG",
     "SCCACHE_C_CUSTOM_CACHE_BUSTER",
+    "SCCACHE_SERVER_PORT", "SCCACHE_IDLE_TIMEOUT",
     # System
     "PATH", "HOME", "TMPDIR",
     "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
 })
 
-def _init_sccache() -> dict[str, str] | None:
-    """Ensure the sccache server is running with S3 credentials, then
-    return a sanitized env (without credentials) for compiler calls."""
+def _build_sccache_env() -> dict[str, str] | None:
+    """Build a sanitized env for sccache compiler calls.
+    The server must be started separately (e.g. via sccache-start.sh)."""
     if not SCCACHE_PATH:
         return None
     if (os.getenv("NVCC_WRAPPER_DISABLE_SCCACHE") or "0") != "0":
         return None
+    return {k: v for k, v in os.environ.items() if k in _SCCACHE_ENV_ALLOWLIST}
 
-    clean_env = {k: v for k, v in os.environ.items() if k in _SCCACHE_ENV_ALLOWLIST}
-
-    # Build a server env with S3 credentials from BuildKit secrets
-    server_env = dict(clean_env)
-    _secrets = {
-        "AWS_ACCESS_KEY_ID": "/run/secrets/s3_access_key_id",
-        "AWS_SECRET_ACCESS_KEY": "/run/secrets/s3_secret_access_key",
-    }
-    if not any(os.getenv(k) for k in _secrets):
-        for _env, _path in _secrets.items():
-            try:
-                server_env[_env] = open(_path).read().strip()
-            except FileNotFoundError:
-                pass
-    else:
-        for k in _secrets:
-            if k in os.environ:
-                server_env[k] = os.environ[k]
-
-    def _server_running() -> bool:
-        """Check if the sccache server is reachable."""
-        import socket
-        try:
-            with socket.create_connection(("127.0.0.1", 4226), timeout=1):
-                return True
-        except (ConnectionRefusedError, OSError):
-            return False
-
-    def _log(msg: str) -> None:
-        print(f"NVCC wrapper: sccache: {msg}", file=sys.stderr, flush=True)
-
-    _log(f"server running (pre-lock): {_server_running()}")
-
-    import fcntl
-    with open("/dev/shm/sccache_server.lock", "w") as lock_fd:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        running = _server_running()
-        _log(f"server running (post-lock): {running}")
-        if not running:
-            result = subprocess.run(
-                [SCCACHE_PATH, "--start-server"],
-                env=server_env,
-                capture_output=True,
-            )
-            if result.returncode != 0:
-                _log(f"start-server failed (rc={result.returncode})")
-                raise SystemExit(
-                    "NVCC wrapper: fatal: sccache server failed to start"
-                )
-            _log("server started")
-        else:
-            _log("server already running, skipping start")
-
-    return clean_env
-
-SCCACHE_ENV: Final[dict[str, str] | None] = _init_sccache()
+SCCACHE_ENV: Final[dict[str, str] | None] = _build_sccache_env()
 
 WRAPPER_ATTEMPTS: Final[int] = int(os.getenv("NVCC_WRAPPER_ATTEMPTS") or 10)
 if WRAPPER_ATTEMPTS < 1:
