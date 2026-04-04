@@ -24,8 +24,8 @@ COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --chmod=755 sccache-start.sh /opt/sccache-start.sh
 COPY --link --chmod=755 sccache.sh /opt/sccache.sh
 COPY --link sccache.toml /etc/sccache.toml
-ENV SCCACHE_CONF=/etc/sccache.toml \
-    SCCACHE_S3_KEY_PREFIX=sccache/ml-containers/build-test/
+RUN sed -Ei 's@^(key_prefix.*)misc@\1build-test@' /etc/sccache.toml
+ENV SCCACHE_CONF=/etc/sccache.toml
 
 # C/C++ compiler launchers (CUDA is handled inside nvcc-wrapper)
 ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
