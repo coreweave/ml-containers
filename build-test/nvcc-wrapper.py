@@ -81,20 +81,39 @@ def _init_sccache() -> dict[str, str] | None:
             if k in os.environ:
                 server_env[k] = os.environ[k]
 
-    # Start the server with credentials, holding a file lock to
-    # prevent parallel wrapper invocations from racing on startup.
+    def _server_running() -> bool:
+        """Check if the sccache server is reachable."""
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", 4226), timeout=1):
+                return True
+        except (ConnectionRefusedError, OSError):
+            return False
+
+    def _log(msg: str) -> None:
+        print(f"NVCC wrapper: sccache: {msg}", file=sys.stderr, flush=True)
+
+    _log(f"server running (pre-lock): {_server_running()}")
+
     import fcntl
     with open("/dev/shm/sccache_server.lock", "w") as lock_fd:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        result = subprocess.run(
-            [SCCACHE_PATH, "--start-server"],
-            env=server_env,
-            capture_output=True,
-        )
-        if result.returncode != 0 and b"Address in use" not in result.stderr:
-            raise SystemExit(
-                "NVCC wrapper: fatal: sccache server failed to start"
+        running = _server_running()
+        _log(f"server running (post-lock): {running}")
+        if not running:
+            result = subprocess.run(
+                [SCCACHE_PATH, "--start-server"],
+                env=server_env,
+                capture_output=True,
             )
+            if result.returncode != 0:
+                _log(f"start-server failed (rc={result.returncode})")
+                raise SystemExit(
+                    "NVCC wrapper: fatal: sccache server failed to start"
+                )
+            _log("server started")
+        else:
+            _log("server already running, skipping start")
 
     return clean_env
 
