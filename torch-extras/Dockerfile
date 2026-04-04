@@ -64,7 +64,7 @@ RUN python3 -m pip install --no-cache-dir -U pip 'setuptools<82' wheel packaging
 
 # Install the cuDNN dev package for building Apex
 # The cuDNN runtime is installed in the base torch image
-COPY --from=torch-common --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+COPY --link --from=torch-common --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 RUN /tmp/install_cudnn.sh "${CUDA_VERSION}" dev && \
     rm /tmp/install_cudnn.sh
 
@@ -102,7 +102,7 @@ WORKDIR /build
 # used on the builder machine.
 # The compiler wrapper normalizes -march=native to -march=skylake
 # along with a couple other transformations before invoking GCC.
-COPY --from=torch-common --link compiler_wrapper.f95 .
+COPY --link --from=torch-common compiler_wrapper.f95 .
 ARG AMD64_NATIVE_ARCH="skylake"
 ARG ARM64_NATIVE_ARCH="armv8.5-a+nopredres"
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
@@ -114,8 +114,8 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
     fi && \
     gfortran -ffree-line-length-512 -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
 
-COPY --from=torch-common --link --chmod=755 effective_cpu_count.sh .
-COPY --from=torch-common --link --chmod=755 scale.sh .
+COPY --link --from=torch-common --chmod=755 effective_cpu_count.sh .
+COPY --link --from=torch-common --chmod=755 scale.sh .
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \

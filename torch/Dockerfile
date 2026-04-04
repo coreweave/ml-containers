@@ -178,7 +178,7 @@ RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
 
-COPY --from=torch-common --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+COPY --link --from=torch-common --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 
 RUN CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     CUDA_MINOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f2) && \
@@ -299,9 +299,9 @@ ENV C_INCLUDE_PATH="${AOCL_BASE}/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}" \
 FROM builder-base-${TARGETARCH} AS builder-base
 RUN mkdir /build /build/dist
 WORKDIR /build
-COPY --from=torch-common --link --chmod=755 effective_cpu_count.sh .
-COPY --from=torch-common --link --chmod=755 scale.sh .
-COPY --from=torch-common --link compiler_wrapper.f95 .
+COPY --link --from=torch-common --chmod=755 effective_cpu_count.sh .
+COPY --link --from=torch-common --chmod=755 scale.sh .
+COPY --link --from=torch-common compiler_wrapper.f95 .
 ARG AMD64_NATIVE_ARCH="skylake"
 ARG ARM64_NATIVE_ARCH="armv8.5-a+nopredres"
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
@@ -411,7 +411,7 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
       "${FLAGS:+ $FLAGS}" && echo; \
     } > /build/nvcc.conf
 
-COPY --from=torch-common --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+COPY --link --from=torch-common --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
     CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py' \
     CUDACXX='/build/nvcc-wrapper.py'
@@ -740,7 +740,7 @@ ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 
-COPY --from=torch-common --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+COPY --link --from=torch-common --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
 # - Don't mess with libnccl2 when using nccl-tests as a base,
 #   checked via the existence of the directory "/opt/nccl-tests".
