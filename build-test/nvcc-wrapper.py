@@ -37,23 +37,28 @@ SCCACHE_PATH: Final[str | None] = shutil.which("sccache")
 # When invoking sccache, pass only known-safe environment variables
 # to avoid leaking anything in sccache's error output (which dumps
 # the full subprocess env on fatal errors).
+# fmt: off
 _SCCACHE_ENV_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
     # nvcc
     "NVCC_APPEND_FLAGS", "NVCC_PREPEND_FLAGS", "NVCC_CCBIN",
-    # Host compiler / linker (nvcc delegates to these)
+    # Host compiler / linker
     "CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS",
     "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH",
-    "LIBRARY_PATH", "LD_LIBRARY_PATH", "LD_PRELOAD",
-    "GCC_EXEC_PREFIX", "DEPENDENCIES_OUTPUT", "SUNPRO_DEPENDENCIES",
+    "COMPILER_PATH", "GCC_EXEC_PREFIX",
+    "LIBRARY_PATH", "LD_LIBRARY_PATH", "LD_RUN_PATH", "LD_PRELOAD",
+    "DEPENDENCIES_OUTPUT", "SUNPRO_DEPENDENCIES",
+    "SOURCE_DATE_EPOCH",
     # sccache
     "SCCACHE_CONF", "SCCACHE_DIR", "SCCACHE_CACHE_SIZE",
     "SCCACHE_LOG", "SCCACHE_ERROR_LOG",
-    "SCCACHE_C_CUSTOM_CACHE_BUSTER",
-    "SCCACHE_SERVER_PORT", "SCCACHE_IDLE_TIMEOUT",
+    "SCCACHE_C_CUSTOM_CACHE_BUSTER", "SCCACHE_RECACHE",
+    "SCCACHE_SERVER_PORT", "SCCACHE_SERVER_UDS", "SCCACHE_IDLE_TIMEOUT",
     # System
-    "PATH", "HOME", "TMPDIR",
+    "PATH", "HOME", "TMPDIR", "TMP", "TEMP",
     "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
 })
+# fmt: on
+
 
 def _build_sccache_env() -> dict[str, str] | None:
     """Build a sanitized env for sccache compiler calls.
@@ -62,7 +67,10 @@ def _build_sccache_env() -> dict[str, str] | None:
         return None
     if (os.getenv("NVCC_WRAPPER_DISABLE_SCCACHE") or "0") != "0":
         return None
-    return {k: v for k, v in os.environ.items() if k in _SCCACHE_ENV_ALLOWLIST}
+    env = {k: v for k, v in os.environ.items() if k in _SCCACHE_ENV_ALLOWLIST}
+    env["SCCACHE_START_SERVER"] = "0"
+    return env
+
 
 SCCACHE_ENV: Final[dict[str, str] | None] = _build_sccache_env()
 
