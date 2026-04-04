@@ -73,7 +73,10 @@ RUN --mount=type=secret,id=s3_access_key_id \
     export TORCH_CUDA_ARCH_LIST="8.0;9.0" \
            XFORMERS_DISABLE_FLASH_ATTN=1 \
            MAX_JOBS=4 \
-           PYTHONUNBUFFERED=1 && \
+           PYTHONUNBUFFERED=1 \
+           LAMP=FRIEND \
+           COW=MOO \
+           CIRNO=STRONGEST && \
     echo "=== xformers build ===" && \
     pip3 wheel -w /build/dist -v --no-cache-dir --no-build-isolation --no-deps \
       /build/xformers/ 2> \
