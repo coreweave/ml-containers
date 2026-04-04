@@ -2,29 +2,33 @@
 
 # sccache integration test with CUDA compilation and object storage backend.
 
+ARG SCCACHE_VERSION="0.14.0"
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:12.9.1-devel-ubuntu22.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:12.9.1-base-ubuntu22.04"
+
+FROM alpine/curl:8.17.0 AS sccache-downloader
+ARG SCCACHE_VERSION
+RUN ARCH=$(uname -m) && \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
+    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
+    chmod 755 /opt/sccache
 
 FROM ${BUILDER_BASE_IMAGE} AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install sccache
-ARG SCCACHE_VERSION="0.14.0"
 RUN apt-get -qq update && \
     apt-get -qq install --no-install-recommends -y curl python3 python3-pip build-essential ninja-build && \
-    apt-get clean && \
-    ARCH=$(uname -m) && \
-    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
-    | tar xz --strip-components=1 -C /usr/local/bin/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
-    sccache --version
+    apt-get clean
+
+COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 
 # sccache config file (object storage backend, local disk cache)
-COPY sccache.toml /etc/sccache.toml
+COPY --link sccache.toml /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
 
 # C/C++ compiler launchers (CUDA is handled inside nvcc-wrapper)
-ENV CMAKE_C_COMPILER_LAUNCHER=sccache \
-    CMAKE_CXX_COMPILER_LAUNCHER=sccache
+ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache \
+    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache
 
 COPY --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 COPY --chmod=755 sccache-start.sh /build/sccache-start.sh
@@ -46,7 +50,7 @@ RUN --mount=type=secret,id=s3_access_key_id \
     echo "=== Build 1 (expect cache miss) ===" && \
     /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
     nvcc -o test test.o && \
-    sccache --show-stats && \
+    /opt/sccache --show-stats && \
     echo "=== Build 2 (expect cache hit) ===" && \
     rm -f test test.o && \
     /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \

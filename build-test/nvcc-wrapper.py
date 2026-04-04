@@ -32,7 +32,7 @@ NVCC_PATH: Final[str] = shutil.which("nvcc")
 if NVCC_PATH is None:
     raise SystemExit("NVCC wrapper: fatal: nvcc binary not found")
 
-SCCACHE_PATH: Final[str | None] = shutil.which("sccache")
+SCCACHE_PATH: Final[str | None] = "/opt/sccache" if os.path.isfile("/opt/sccache") else None
 
 # When invoking sccache, pass only known-safe environment variables
 # to avoid leaking anything in sccache's error output (which dumps

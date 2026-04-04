@@ -38,7 +38,7 @@ export SCCACHE_IDLE_TIMEOUT
     AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/s3_secret_access_key) && \
     export AWS_SECRET_ACCESS_KEY
   fi && \
-  sccache --start-server
+  /opt/sccache --start-server
 ) || { echo 'sccache-start: fatal: server failed to start' >&2; return 1; }
 
 # Stop the server when the step finishes, showing stats on success
@@ -46,9 +46,9 @@ _sccache_cleanup() {
   _rc="$?"
   if [ "${_rc}" -eq 0 ]; then
     echo 'sccache stats:'
-    sccache --show-stats | sed 's@^@  @'
+    /opt/sccache --show-stats | sed 's@^@  @'
   fi
-  sccache --stop-server || echo 'sccache-start: warning: failed to stop server' >&2
+  /opt/sccache --stop-server || echo 'sccache-start: warning: failed to stop server' >&2
   exit "${_rc}"
 }
 trap _sccache_cleanup EXIT
