@@ -44,7 +44,8 @@ RUN --mount=type=secret,id=s3_access_key_id \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     { echo "=== Build 1 (expect cache miss) ===" && \
-    /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
+    /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu; \
+    echo "wrapper exit: $?, test.o exists: $(ls -la test.o 2>&1)" && \
     nvcc -o test test.o && \
     sccache --show-stats && \
     echo "=== Build 2 (expect cache hit) ===" && \
