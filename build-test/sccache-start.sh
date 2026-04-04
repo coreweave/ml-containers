@@ -41,7 +41,16 @@ export SCCACHE_IDLE_TIMEOUT
   sccache --start-server
 ) || { echo 'sccache-start: fatal: server failed to start' >&2; return 1; }
 
-# Stop the server when the step finishes
-trap 'sccache --stop-server 2>/dev/null || true' EXIT
+# Stop the server when the step finishes, showing stats on success
+_sccache_cleanup() {
+  _rc="$?"
+  if [ "${_rc}" -eq 0 ]; then
+    echo 'sccache stats:'
+    sccache --show-stats | sed 's@^@  @'
+  fi
+  sccache --stop-server || echo 'sccache-start: warning: failed to stop server' >&2
+  exit "${_rc}"
+}
+trap _sccache_cleanup EXIT
 
 printf 'sccache server started on port %d\n' "${SCCACHE_SERVER_PORT}"

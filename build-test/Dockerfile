@@ -50,8 +50,7 @@ RUN --mount=type=secret,id=s3_access_key_id \
     echo "=== Build 2 (expect cache hit) ===" && \
     rm -f test test.o && \
     /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
-    nvcc -o test test.o && \
-    sccache --show-stats
+    nvcc -o test test.o
 
 # Install PyTorch (from pip, not from source; just testing sccache here, not torch)
 RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu129
@@ -83,8 +82,7 @@ RUN --mount=type=secret,id=s3_access_key_id \
     echo "=== xformers build ===" && \
     pip3 wheel -w /build/dist -v --no-cache-dir --no-build-isolation --no-deps \
       /build/xformers/ 2> \
-    >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2) && \
-    sccache --show-stats
+    >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
 SHELL ["/bin/sh", "-c"]
 
 # Final image
