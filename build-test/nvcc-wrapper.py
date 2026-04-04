@@ -81,17 +81,20 @@ def _init_sccache() -> dict[str, str] | None:
             if k in os.environ:
                 server_env[k] = os.environ[k]
 
-    # Start the server with credentials. If it's already running
-    # (exit code 1, "Address in use"), that's fine.
-    result = subprocess.run(
-        [SCCACHE_PATH, "--start-server"],
-        env=server_env,
-        capture_output=True,
-    )
-    if result.returncode != 0 and b"Address in use" not in result.stderr:
-        raise SystemExit(
-            "NVCC wrapper: fatal: sccache server failed to start"
+    # Start the server with credentials, holding a file lock to
+    # prevent parallel wrapper invocations from racing on startup.
+    import fcntl
+    with open("/dev/shm/sccache_server.lock", "w") as lock_fd:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        result = subprocess.run(
+            [SCCACHE_PATH, "--start-server"],
+            env=server_env,
+            capture_output=True,
         )
+        if result.returncode != 0 and b"Address in use" not in result.stderr:
+            raise SystemExit(
+                "NVCC wrapper: fatal: sccache server failed to start"
+            )
 
     return clean_env
 
