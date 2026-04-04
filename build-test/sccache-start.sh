@@ -44,11 +44,11 @@ export SCCACHE_IDLE_TIMEOUT
 # Stop the server when the step finishes, showing stats on success
 _sccache_cleanup() {
   _rc="$?"
-  if [ "${_rc}" -eq 0 ]; then
-    echo 'sccache stats:'
-    /opt/sccache --show-stats | sed 's@^@  @'
-  fi
-  /opt/sccache --stop-server || echo 'sccache-start: warning: failed to stop server' >&2
+  echo 'sccache info:'
+  {
+    /opt/sccache --stop-server || \
+    echo '  sccache-start: warning: failed to stop server' >&2
+  } | sed 's@^@  @'
   exit "${_rc}"
 }
 trap _sccache_cleanup EXIT
