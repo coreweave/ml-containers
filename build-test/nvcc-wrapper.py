@@ -67,6 +67,11 @@ def _build_sccache_env() -> dict[str, str] | None:
         return None
     if (os.getenv("NVCC_WRAPPER_DISABLE_SCCACHE") or "0") != "0":
         return None
+    # Skip sccache if no server port is set, which would mean that
+    # sccache-start.sh hasn't been sourced, and thus there is no server
+    # to talk to.
+    if not os.getenv("SCCACHE_SERVER_PORT"):
+        return None
     env = {k: v for k, v in os.environ.items() if k in _SCCACHE_ENV_ALLOWLIST}
     env["SCCACHE_START_SERVER"] = "0"
     return env
