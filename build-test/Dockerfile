@@ -39,8 +39,7 @@ ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
 # Runs twice in the same step to verify in-build cache hits.
 RUN --mount=type=secret,id=s3_access_key_id \
     --mount=type=secret,id=s3_secret_access_key \
-    --mount=type=cache,target=/sccache \
-    rm -rf /sccache/* && \
+    --mount=type=tmpfs,target=/sccache \
     echo "=== Build 1 (expect cache miss) ===" && \
     /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
     nvcc -o test test.o && \
@@ -68,8 +67,7 @@ RUN mkdir /build/dist
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=secret,id=s3_access_key_id \
     --mount=type=secret,id=s3_secret_access_key \
-    --mount=type=cache,target=/sccache \
-    rm -rf /sccache/* && \
+    --mount=type=tmpfs,target=/sccache \
     export TORCH_CUDA_ARCH_LIST="8.0;9.0" \
            XFORMERS_DISABLE_FLASH_ATTN=1 \
            MAX_JOBS=4 \
