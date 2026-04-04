@@ -1,11 +1,7 @@
 #!/bin/sh
 # Start an sccache server with S3 credentials on a random port.
 # Source this script to set SCCACHE_SERVER_PORT and register a
-# cleanup trap:
-#
-#   . /build/sccache-start.sh
-#
-# The server will be stopped automatically when the shell exits.
+# cleanup trap. The server will be stopped when the shell exits.
 
 SCCACHE_SERVER_PORT="$(
   port_in_use() {

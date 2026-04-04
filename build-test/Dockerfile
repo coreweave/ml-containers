@@ -21,18 +21,18 @@ RUN apt-get -qq update && \
     apt-get clean
 
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
-
-# sccache config file (object storage backend, local disk cache)
+COPY --link --chmod=755 sccache-start.sh /opt/sccache-start.sh
+COPY --link --chmod=755 sccache.sh /opt/sccache.sh
 COPY --link sccache.toml /etc/sccache.toml
-ENV SCCACHE_CONF=/etc/sccache.toml
+ENV SCCACHE_CONF=/etc/sccache.toml \
+    SCCACHE_S3_KEY_PREFIX=sccache/ml-containers/build-test/
 
 # C/C++ compiler launchers (CUDA is handled inside nvcc-wrapper)
-ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache \
-    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache
+ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
+    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh
 
-COPY --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
-COPY --chmod=755 sccache-start.sh /build/sccache-start.sh
-COPY test.cu /build/test.cu
+COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+COPY --link test.cu /build/test.cu
 WORKDIR /build
 
 ENV NVCC_APPEND_FLAGS="-gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_90,code=sm_90"
@@ -46,7 +46,7 @@ RUN --mount=type=secret,id=s3_access_key_id \
     --mount=type=secret,id=s3_secret_access_key \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
-    . /build/sccache-start.sh && \
+    . /opt/sccache-start.sh && \
     echo "=== Build 1 (expect cache miss) ===" && \
     /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
     nvcc -o test test.o && \
@@ -74,7 +74,7 @@ RUN --mount=type=secret,id=s3_access_key_id \
     --mount=type=secret,id=s3_secret_access_key \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
-    . /build/sccache-start.sh && \
+    . /opt/sccache-start.sh && \
     export TORCH_CUDA_ARCH_LIST="8.0;9.0" \
            XFORMERS_DISABLE_FLASH_ATTN=1 \
            MAX_JOBS=4 \

@@ -32,52 +32,10 @@ NVCC_PATH: Final[str] = shutil.which("nvcc")
 if NVCC_PATH is None:
     raise SystemExit("NVCC wrapper: fatal: nvcc binary not found")
 
-SCCACHE_PATH: Final[str | None] = "/opt/sccache" if os.path.isfile("/opt/sccache") else None
-
-# When invoking sccache, pass only known-safe environment variables
-# to avoid leaking anything in sccache's error output (which dumps
-# the full subprocess env on fatal errors).
-# fmt: off
-_SCCACHE_ENV_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
-    # nvcc
-    "NVCC_APPEND_FLAGS", "NVCC_PREPEND_FLAGS", "NVCC_CCBIN",
-    # Host compiler / linker
-    "CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS",
-    "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH",
-    "COMPILER_PATH", "GCC_EXEC_PREFIX",
-    "LIBRARY_PATH", "LD_LIBRARY_PATH", "LD_RUN_PATH", "LD_PRELOAD",
-    "DEPENDENCIES_OUTPUT", "SUNPRO_DEPENDENCIES",
-    "SOURCE_DATE_EPOCH",
-    # sccache
-    "SCCACHE_CONF", "SCCACHE_DIR", "SCCACHE_CACHE_SIZE",
-    "SCCACHE_LOG", "SCCACHE_ERROR_LOG",
-    "SCCACHE_C_CUSTOM_CACHE_BUSTER", "SCCACHE_RECACHE",
-    "SCCACHE_SERVER_PORT", "SCCACHE_SERVER_UDS", "SCCACHE_IDLE_TIMEOUT",
-    # System
-    "PATH", "HOME", "TMPDIR", "TMP", "TEMP",
-    "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
-})
-# fmt: on
-
-
-def _build_sccache_env() -> dict[str, str] | None:
-    """Build a sanitized env for sccache compiler calls.
-    The server must be started separately (e.g. via sccache-start.sh)."""
-    if not SCCACHE_PATH:
-        return None
-    if (os.getenv("NVCC_WRAPPER_DISABLE_SCCACHE") or "0") != "0":
-        return None
-    # Skip sccache if no server port is set, which would mean that
-    # sccache-start.sh hasn't been sourced, and thus there is no server
-    # to talk to.
-    if not os.getenv("SCCACHE_SERVER_PORT"):
-        return None
-    env = {k: v for k, v in os.environ.items() if k in _SCCACHE_ENV_ALLOWLIST}
-    env["SCCACHE_START_SERVER"] = "0"
-    return env
-
-
-SCCACHE_ENV: Final[dict[str, str] | None] = _build_sccache_env()
+# If sccache.sh is available, use it to wrap nvcc invocations.
+# sccache.sh handles env sanitization and sccache server communication,
+# or falls back to regular compilation if sccache is disabled or unavailable.
+SCCACHE_SH: Final[str | None] = "/opt/sccache.sh" if os.path.isfile("/opt/sccache.sh") else None
 
 WRAPPER_ATTEMPTS: Final[int] = int(os.getenv("NVCC_WRAPPER_ATTEMPTS") or 10)
 if WRAPPER_ATTEMPTS < 1:
@@ -118,9 +76,9 @@ async def main(args) -> int:
             if attempt == WRAPPER_ATTEMPTS:
                 print("NVCC wrapper: warning: Final attempt; appending --ptxas-options=--opt-level=0")
                 args.append("--ptxas-options=--opt-level=0")
-        cmd = (SCCACHE_PATH, NVCC_PATH, *args) if SCCACHE_PATH else (NVCC_PATH, *args)
+        cmd = (SCCACHE_SH, NVCC_PATH, *args) if SCCACHE_SH else (NVCC_PATH, *args)
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=SCCACHE_ENV
+            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         restart_signals: tuple = await asyncio.gather(
             monitor_stream(proc.stdout, sys.stdout.buffer),
