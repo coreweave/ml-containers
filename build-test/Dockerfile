@@ -78,7 +78,8 @@ RUN --mount=type=secret,id=s3_access_key_id \
            PYTHONUNBUFFERED=1 \
            LAMP=FRIEND \
            COW=MOO \
-           CIRNO=STRONGEST && \
+           CIRNO=STRONGEST \
+           YEE=HAW && \
     echo "=== xformers build ===" && \
     pip3 wheel -w /build/dist -v --no-cache-dir --no-build-isolation --no-deps \
       /build/xformers/ 2> \
