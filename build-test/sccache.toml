@@ -1,0 +1,11 @@
+[cache.s3]
+bucket = "ml-dev-ci-cache"
+endpoint = "cwobject.com"
+region = "auto"
+use_ssl = true
+key_prefix = "sccache/ml-containers/build-test/"
+no_credentials = false
+enable_virtual_host_style = true
+
+[cache.disk]
+dir = "/sccache"

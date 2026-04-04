@@ -141,6 +141,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          secrets: |
+            s3_access_key_id=${{ secrets.SCCACHE_S3_ACCESS_KEY_ID }}
+            s3_secret_access_key=${{ secrets.SCCACHE_S3_SECRET_ACCESS_KEY }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }}
           cache-to: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }},mode=max
           platforms: ${{ inputs.platforms }}
