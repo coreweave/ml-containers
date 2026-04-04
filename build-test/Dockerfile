@@ -20,7 +20,9 @@ RUN apt-get -qq update && \
 
 # sccache config file (object storage backend, local disk cache)
 COPY sccache.toml /etc/sccache.toml
-ENV SCCACHE_CONF=/etc/sccache.toml
+ENV SCCACHE_CONF=/etc/sccache.toml \
+    SCCACHE_LOG=debug \
+    SCCACHE_ERROR_LOG=/build/sccache.log
 
 # C/C++ compiler launchers (CUDA is handled inside nvcc-wrapper)
 ENV CMAKE_C_COMPILER_LAUNCHER=sccache \
@@ -41,7 +43,7 @@ RUN --mount=type=secret,id=s3_access_key_id \
     --mount=type=secret,id=s3_secret_access_key \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
-    echo "=== Build 1 (expect cache miss) ===" && \
+    { echo "=== Build 1 (expect cache miss) ===" && \
     /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
     nvcc -o test test.o && \
     sccache --show-stats && \
@@ -49,7 +51,8 @@ RUN --mount=type=secret,id=s3_access_key_id \
     rm -f test test.o && \
     /build/nvcc-wrapper.py -O2 -Xcompiler -fPIC -c -o test.o test.cu && \
     nvcc -o test test.o && \
-    sccache --show-stats
+    sccache --show-stats; } || \
+    { echo "=== sccache server log ===" && cat /build/sccache.log; false; }
 
 # Install PyTorch (from pip, not from source; just testing sccache here, not torch)
 RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu129
@@ -76,11 +79,12 @@ RUN --mount=type=secret,id=s3_access_key_id \
            LAMP=FRIEND \
            COW=MOO \
            CIRNO=STRONGEST && \
-    echo "=== xformers build ===" && \
+    { echo "=== xformers build ===" && \
     pip3 wheel -w /build/dist -v --no-cache-dir --no-build-isolation --no-deps \
       /build/xformers/ 2> \
     >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2) && \
-    sccache --show-stats
+    sccache --show-stats; } || \
+    { echo "=== sccache server log ===" && cat /build/sccache.log; false; }
 SHELL ["/bin/sh", "-c"]
 
 # Final image
