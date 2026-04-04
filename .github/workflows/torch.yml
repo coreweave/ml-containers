@@ -91,6 +91,7 @@ jobs:
       buildkit-index: ${{ inputs.buildkit-index }}
       image-name: ${{ inputs.image-name || 'torch' }}
       folder: torch
+      build-contexts: torch-common=torch-common
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |

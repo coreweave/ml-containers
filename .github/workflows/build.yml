@@ -24,6 +24,10 @@ on:
         description: "Platforms for which to build (default: linux/amd64,linux/arm64)"
         type: string
         default: linux/amd64,linux/arm64
+      build-contexts:
+        required: false
+        description: "Additional named build context directories (e.g. 'common=common')"
+        type: string
       buildkit-index:
         required: false
         description: "Index of the dedicated BuildKit endpoint pair to use (0, 1, ...). -1 uses shared consumer endpoints."
@@ -136,6 +140,7 @@ jobs:
           DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: ${{ inputs.folder }}
+          build-contexts: ${{ inputs.build-contexts }}
           build-args: |-
             ${{ inputs.build-args }}
           push: true
