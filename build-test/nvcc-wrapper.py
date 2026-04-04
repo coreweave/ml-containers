@@ -34,22 +34,68 @@ if NVCC_PATH is None:
 
 SCCACHE_PATH: Final[str | None] = shutil.which("sccache")
 
-# Load S3 credentials from BuildKit secrets for sccache,
-# unless any are already set or explicitly disabled.
-if (
-    SCCACHE_PATH
-    and (os.getenv("NVCC_WRAPPER_DISABLE_SCCACHE") or "0") == "0"
-):
-    _SECRETS = {
+# When invoking sccache, pass only known-safe environment variables
+# to avoid leaking anything in sccache's error output (which dumps
+# the full subprocess env on fatal errors).
+_SCCACHE_ENV_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
+    # nvcc
+    "NVCC_APPEND_FLAGS", "NVCC_PREPEND_FLAGS", "NVCC_CCBIN",
+    # Host compiler / linker (nvcc delegates to these)
+    "CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS",
+    "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH",
+    "LIBRARY_PATH", "LD_LIBRARY_PATH", "LD_PRELOAD",
+    "GCC_EXEC_PREFIX", "DEPENDENCIES_OUTPUT", "SUNPRO_DEPENDENCIES",
+    # sccache
+    "SCCACHE_CONF", "SCCACHE_DIR", "SCCACHE_CACHE_SIZE",
+    "SCCACHE_LOG", "SCCACHE_ERROR_LOG",
+    "SCCACHE_C_CUSTOM_CACHE_BUSTER",
+    # System
+    "PATH", "HOME", "TMPDIR",
+    "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
+})
+
+def _init_sccache() -> dict[str, str] | None:
+    """Ensure the sccache server is running with S3 credentials, then
+    return a sanitized env (without credentials) for compiler calls."""
+    if not SCCACHE_PATH:
+        return None
+    if (os.getenv("NVCC_WRAPPER_DISABLE_SCCACHE") or "0") != "0":
+        return None
+
+    clean_env = {k: v for k, v in os.environ.items() if k in _SCCACHE_ENV_ALLOWLIST}
+
+    # Build a server env with S3 credentials from BuildKit secrets
+    server_env = dict(clean_env)
+    _secrets = {
         "AWS_ACCESS_KEY_ID": "/run/secrets/s3_access_key_id",
         "AWS_SECRET_ACCESS_KEY": "/run/secrets/s3_secret_access_key",
     }
-    if not any(os.getenv(env) for env in _SECRETS):
-        for _env, _path in _SECRETS.items():
+    if not any(os.getenv(k) for k in _secrets):
+        for _env, _path in _secrets.items():
             try:
-                os.environ[_env] = open(_path).read().strip()
+                server_env[_env] = open(_path).read().strip()
             except FileNotFoundError:
                 pass
+    else:
+        for k in _secrets:
+            if k in os.environ:
+                server_env[k] = os.environ[k]
+
+    # Start the server with credentials. If it's already running
+    # (exit code 1, "Address in use"), that's fine.
+    result = subprocess.run(
+        [SCCACHE_PATH, "--start-server"],
+        env=server_env,
+        capture_output=True,
+    )
+    if result.returncode != 0 and b"Address in use" not in result.stderr:
+        raise SystemExit(
+            "NVCC wrapper: fatal: sccache server failed to start"
+        )
+
+    return clean_env
+
+SCCACHE_ENV: Final[dict[str, str] | None] = _init_sccache()
 
 WRAPPER_ATTEMPTS: Final[int] = int(os.getenv("NVCC_WRAPPER_ATTEMPTS") or 10)
 if WRAPPER_ATTEMPTS < 1:
@@ -92,7 +138,7 @@ async def main(args) -> int:
                 args.append("--ptxas-options=--opt-level=0")
         cmd = (SCCACHE_PATH, NVCC_PATH, *args) if SCCACHE_PATH else (NVCC_PATH, *args)
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=SCCACHE_ENV
         )
         restart_signals: tuple = await asyncio.gather(
             monitor_stream(proc.stdout, sys.stdout.buffer),
