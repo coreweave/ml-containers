@@ -217,17 +217,15 @@ RUN apt-get -qq update && apt-get -qq install -y \
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache-start.sh /opt/sccache-start.sh
 COPY --link --from=common --chmod=755 sccache.sh /opt/sccache.sh
+COPY --link --from=common sccache.cmake /opt/sccache.cmake
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1torch@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
 
 # Build-time environment variables
 ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
-    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh
-
-# This manually replicates some settings that torch uses for cache-friendliness when it auto-detects sccache
-# See: https://github.com/pytorch/pytorch/blob/v2.11.0/cmake/Dependencies.cmake#L68-L74
-ENV CMAKE_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF'
+    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh \
+    CMAKE_ARGS='-C /opt/sccache.cmake'
 
 # Suppress less-relevant-to-us warnings from the packages being built
 ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \

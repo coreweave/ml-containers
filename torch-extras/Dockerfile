@@ -145,11 +145,13 @@ COPY --link --from=torch-common --chmod=755 scale.sh .
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache-start.sh /opt/sccache-start.sh
 COPY --link --from=common --chmod=755 sccache.sh /opt/sccache.sh
+COPY --link --from=common sccache.cmake /opt/sccache.cmake
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1torch-extras@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
 ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
-    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh
+    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh \
+    CMAKE_ARGS='-C /opt/sccache.cmake'
 
 COPY --link --from=torch-common --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
