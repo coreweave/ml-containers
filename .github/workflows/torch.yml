@@ -91,11 +91,12 @@ jobs:
       buildkit-index: ${{ inputs.buildkit-index }}
       image-name: ${{ inputs.image-name || 'torch' }}
       folder: torch
-      build-contexts: torch-common=torch-common
+      build-contexts: |
+        torch-common=torch-common
+        common=common
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
-        BUILD_CCACHE_SIZE=50Gi
         BUILDER_BASE_IMAGE=${{ inputs.builder-base-image }}
         FINAL_BASE_IMAGE=${{ inputs.base-image }}
         BUILD_TORCH_VERSION=${{ inputs.torch-version }}

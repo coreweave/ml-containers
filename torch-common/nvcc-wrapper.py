@@ -32,6 +32,11 @@ NVCC_PATH: Final[str] = shutil.which("nvcc")
 if NVCC_PATH is None:
     raise SystemExit("NVCC wrapper: fatal: nvcc binary not found")
 
+# If sccache.sh is available, use it to wrap nvcc invocations.
+# sccache.sh handles env sanitization and sccache server communication,
+# or falls back to regular compilation if sccache is disabled or unavailable.
+SCCACHE_SH: Final[str | None] = "/opt/sccache.sh" if os.path.isfile("/opt/sccache.sh") else None
+
 WRAPPER_ATTEMPTS: Final[int] = int(os.getenv("NVCC_WRAPPER_ATTEMPTS") or 10)
 if WRAPPER_ATTEMPTS < 1:
     raise SystemExit("NVCC wrapper: fatal: invalid value for NVCC_WRAPPER_ATTEMPTS")
@@ -71,8 +76,9 @@ async def main(args) -> int:
             if attempt == WRAPPER_ATTEMPTS:
                 print("NVCC wrapper: warning: Final attempt; appending --ptxas-options=--opt-level=0")
                 args.append("--ptxas-options=--opt-level=0")
+        cmd = (SCCACHE_SH, NVCC_PATH, *args) if SCCACHE_SH else (NVCC_PATH, *args)
         proc = await asyncio.create_subprocess_exec(
-            NVCC_PATH, *args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         restart_signals: tuple = await asyncio.gather(
             monitor_stream(proc.stdout, sys.stdout.buffer),
