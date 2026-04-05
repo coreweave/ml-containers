@@ -9,9 +9,13 @@
 
 if [[ ! -x /opt/sccache ]] || \
   [[ ! "${DISABLE_SCCACHE:-0}" = 0 ]] || \
-  [[ -z "${SCCACHE_SERVER_PORT-}" ]]; then
+  [[ -z "${SCCACHE_SERVER_PORT-}" ]] || \
+  [[ -n "${SCCACHE_GUARD-}" ]]; then
   exec -- "$@"
 fi
+
+# Guard against nesting.
+export SCCACHE_GUARD=1
 
 SCCACHE_ENV_ALLOWLIST=(
   # nvcc
@@ -28,6 +32,8 @@ SCCACHE_ENV_ALLOWLIST=(
   'SCCACHE_LOG' 'SCCACHE_ERROR_LOG'
   'SCCACHE_C_CUSTOM_CACHE_BUSTER' 'SCCACHE_RECACHE'
   'SCCACHE_SERVER_PORT' 'SCCACHE_SERVER_UDS' 'SCCACHE_IDLE_TIMEOUT'
+  # State for our own sccache wrapper scripts
+  'SCCACHE_GUARD' 'CC_WRAPPED' 'CXX_WRAPPED'
   # System
   'PATH' 'HOME' 'TMPDIR' 'TMP' 'TEMP'
   'LANG' 'LC_ALL' 'LC_CTYPE' 'LC_MESSAGES'

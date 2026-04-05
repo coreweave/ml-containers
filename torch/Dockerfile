@@ -213,19 +213,24 @@ RUN apt-get -qq update && apt-get -qq install -y \
     apt-get clean && \
     python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
-# sccache setup (off PATH to prevent builds from auto-discovering it)
+# Setup for sccache and its wrappers.
+# Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
-COPY --link --from=common --chmod=755 sccache-start.sh /opt/sccache-start.sh
-COPY --link --from=common --chmod=755 sccache.sh /opt/sccache.sh
+COPY --link --from=common --chmod=755 sccache*.sh /opt/
 COPY --link --from=common sccache.cmake /opt/sccache.cmake
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1torch@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
 
 # Build-time environment variables
-ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
-    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh \
+ENV CC=/opt/sccache-cc.sh \
+    CXX=/opt/sccache-c++.sh \
     CMAKE_ARGS='-C /opt/sccache.cmake'
+
+# Skip nvcc's -MD dependency generation in torch extension builds,
+# which sccache cannot cache. These are always built from scratch,
+# so incremental build dependency tracking has no value anyway.
+ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 # Suppress less-relevant-to-us warnings from the packages being built
 ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \
@@ -249,6 +254,8 @@ RUN LLVM_VERSION='18' && \
     { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 1 && \
+    update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 1 && \
     update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     if [ "$(uname -m)" != 'aarch64' ]; then \
       update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1; \
@@ -472,9 +479,6 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     ./storage-info.sh . && \
     cd pytorch && \
     ../storage-info.sh . && \
-    mkdir build && \
-    ln -s /usr/bin/cc build/cc && \
-    ln -s /usr/bin/c++ build/c++ && \
     if [ "$(uname -m)" = 'aarch64' ]; then \
       export USE_PRIORITIZED_TEXT_FOR_LD=1; \
     fi && \
@@ -488,11 +492,8 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     USE_CUDNN=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
-    CUDA_HOST_COMPILER=cc \
     USE_CUDA=1 \
     USE_NNPACK=1 \
-    CC=cc \
-    CXX=c++ \
     USE_BLAS=1 \
     USE_LAPACK=1 \
     WITH_BLAS=FLAME \
@@ -523,9 +524,6 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd vision && \
-    mkdir build && \
-    ln -s /usr/bin/cc build/cc && \
-    ln -s /usr/bin/c++ build/c++ && \
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
@@ -537,12 +535,9 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
-    CUDA_HOST_COMPILER=cc \
     USE_CUDA=1 \
     FORCE_CUDA=1 \
     USE_NNPACK=1 \
-    CC=cc \
-    CXX=c++ \
     BUILD_VERSION="$(../version-string.sh "$TORCH_VISION_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     /build/build-wheel.sh
@@ -567,9 +562,6 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd audio && \
-    mkdir build && \
-    ln -s /usr/bin/cc build/cc && \
-    ln -s /usr/bin/c++ build/c++ && \
     { if [ -d /opt/nccl-tests ]; then \
       export \
         USE_DISTRIBUTED=1 \
@@ -581,12 +573,9 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     USE_OPENCV=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
-    CUDA_HOST_COMPILER=cc \
     USE_CUDA=1 \
     FORCE_CUDA=1 \
     USE_NNPACK=1 \
-    CC=cc \
-    CXX=c++ \
     BUILD_VERSION="$(../version-string.sh "$TORCH_AUDIO_VERSION")" \
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     /build/build-wheel.sh
@@ -629,7 +618,7 @@ RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,tar
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
-    export CC=$(realpath -e ./compiler) \
+    export CC_WRAPPED=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
@@ -661,7 +650,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     if [ ! -d flash-attention/hopper ]; then \
       echo "Not compiling flash-attn v3" && exit 0; \
     fi && \
-    export CC=$(realpath -e ./compiler) \
+    export CC_WRAPPED=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \

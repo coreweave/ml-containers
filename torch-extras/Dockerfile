@@ -114,6 +114,8 @@ RUN LLVM_VERSION='18' && \
     apt-get clean && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 1 && \
+    update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 1 && \
     update-alternatives --install \
       /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1
@@ -141,17 +143,23 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
 COPY --link --from=torch-common --chmod=755 effective_cpu_count.sh .
 COPY --link --from=torch-common --chmod=755 scale.sh .
 
-# sccache setup (off PATH to prevent builds from auto-discovering it)
+# Setup for sccache and its wrappers.
+# Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
-COPY --link --from=common --chmod=755 sccache-start.sh /opt/sccache-start.sh
-COPY --link --from=common --chmod=755 sccache.sh /opt/sccache.sh
+COPY --link --from=common --chmod=755 sccache*.sh /opt/
 COPY --link --from=common sccache.cmake /opt/sccache.cmake
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1torch-extras@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
-ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
-    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh \
+
+ENV CC=/opt/sccache-cc.sh \
+    CXX=/opt/sccache-c++.sh \
     CMAKE_ARGS='-C /opt/sccache.cmake'
+
+# Skip nvcc's -MD dependency generation in torch extension builds,
+# which sccache cannot cache. These are always built from scratch,
+# so incremental build dependency tracking has no value anyway.
+ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 COPY --link --from=torch-common --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
@@ -260,7 +268,7 @@ RUN --mount=type=bind,from=deepspeed-downloader,source=/git/deepspeed,target=dee
         DS_BUILD_AIO; \
       do if [[ -z ${!VAR} ]]; then unset ${VAR}; fi; done; \
     } && \
-    CC=$(realpath -e ./compiler) \
+    CC_WRAPPED=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
       cd deepspeed && \
       python3 -m pip wheel -w /wheels \
@@ -299,7 +307,7 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
       :; \
     )" && \
-    export CC=$(realpath -e ./compiler) && \
+    export CC_WRAPPED=$(realpath -e ./compiler) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)}" && \
     printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
@@ -344,7 +352,7 @@ RUN --mount=type=bind,from=xformers-downloader,source=/git/xformers,target=xform
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    CC=$(realpath -e ./compiler) \
+    CC_WRAPPED=$(realpath -e ./compiler) \
       MAX_JOBS=1 \
       PYTHONUNBUFFERED=1 \
       XFORMERS_DISABLE_FLASH_ATTN=1 \
