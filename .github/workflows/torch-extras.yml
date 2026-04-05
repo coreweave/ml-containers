@@ -52,6 +52,7 @@ on:
   push:
     paths:
       - "torch-extras/**"
+      - "torch-common/**"
       - ".github/workflows/torch-extras.yml"
 
 

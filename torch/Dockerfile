@@ -18,7 +18,16 @@ ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
 
+ARG SCCACHE_VERSION="0.14.0"
+
 # region Downloads
+
+FROM alpine/curl:8.17.0 AS sccache-downloader
+ARG SCCACHE_VERSION
+RUN ARCH=$(uname -m) && \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
+    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
+    chmod 755 /opt/sccache
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
@@ -153,9 +162,7 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
 FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
 ENV DEBIAN_FRONTEND=noninteractive
 
-ARG BUILD_CCACHE_SIZE="1Gi"
-
-# ninja-build, ccache, and lld are optional but improve the build.
+# ninja-build and lld are optional but improve the build.
 # Remove PEP 668 marker since containers are often single-purpose
 # and thus do not inherently need to be pushed into venv isolation.
 RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
@@ -206,25 +213,17 @@ RUN apt-get -qq update && apt-get -qq install -y \
     apt-get clean && \
     python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
-RUN mkdir /tmp/ccache-install && \
-    cd /tmp/ccache-install && \
-    CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2.tar.xz' && \
-    wget -qO - "$CCACHE_URL" | tar --strip-components 1 -xJf - && \
-    mkdir build && \
-    cd build && \
-    cmake -B. -S.. -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build . --config Release && \
-    make install && \
-    cd ../.. && \
-    rm -rf /tmp/ccache-install && \
-    ccache -M "${BUILD_CCACHE_SIZE}" && \
-    ccache -F 0
+# sccache setup (off PATH to prevent builds from auto-discovering it)
+COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
+COPY --link --from=common --chmod=755 sccache-start.sh /opt/sccache-start.sh
+COPY --link --from=common --chmod=755 sccache.sh /opt/sccache.sh
+COPY --link --from=common sccache.toml /etc/sccache.toml
+RUN sed -Ei 's@^(key_prefix.*)misc@\1torch@' /etc/sccache.toml
+ENV SCCACHE_CONF=/etc/sccache.toml
 
 # Build-time environment variables
-ENV CCACHE_DIR=/ccache \
-    CMAKE_C_COMPILER_LAUNCHER=ccache \
-    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
-    CMAKE_CUDA_COMPILER_LAUNCHER=ccache
+ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
+    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh
 
 # Suppress less-relevant-to-us warnings from the packages being built
 ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \
@@ -368,7 +367,11 @@ ENV CMAKE_PREFIX_PATH=/usr/bin/ \
 ARG BUILD_TRITON
 ARG BUILD_MAX_JOBS=""
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     if [ "$BUILD_TRITON" = '1' ]; then \
       pip3 install --no-cache-dir pybind11 lit && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
@@ -448,7 +451,11 @@ ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;comput
 ARG BUILD_CXX11_ABI=""
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
@@ -504,7 +511,11 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
@@ -544,7 +555,11 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
@@ -582,7 +597,11 @@ ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$MAX_JOBS}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
@@ -603,7 +622,11 @@ FROM flash-attn-builder-base AS flash-attn-builder
 
 # Build flash-attn
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export CC=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
@@ -628,7 +651,11 @@ ENV FLASH_ATTN_CUDA_ARCHS='80;90;100;120'
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     if [ ! -d flash-attention/hopper ]; then \
       echo "Not compiling flash-attn v3" && exit 0; \
     fi && \
