@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.2
+# syntax=docker/dockerfile:1.7
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.18.8"
@@ -7,6 +7,30 @@ ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
 ARG XFORMERS_VERSION="0.0.35"
 ARG BUILD_MAX_JOBS=""
+ARG SCCACHE_VERSION="0.14.0"
+
+FROM alpine/curl:8.17.0 AS sccache-downloader
+ARG SCCACHE_VERSION
+RUN ARCH=$(uname -m) && \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
+    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
+    chmod 755 /opt/sccache
+
+FROM alpine/git:2.36.3 as xformers-downloader
+WORKDIR /git
+ARG XFORMERS_VERSION
+RUN git clone --filter=blob:none --depth 1 --recurse-submodules --shallow-submodules \
+      -b "v${XFORMERS_VERSION}" \
+      https://github.com/facebookresearch/xformers && \
+    rm -rf xformers/.git
+
+FROM alpine/git:2.36.3 as deepspeed-downloader
+WORKDIR /git
+ARG DEEPSPEED_VERSION
+RUN git clone --filter=blob:none --depth 1 \
+      -b "v${DEEPSPEED_VERSION}" \
+      https://github.com/microsoft/DeepSpeed deepspeed && \
+    rm -rf deepspeed/.git
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -117,6 +141,21 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
 COPY --link --from=torch-common --chmod=755 effective_cpu_count.sh .
 COPY --link --from=torch-common --chmod=755 scale.sh .
 
+# sccache setup (off PATH to prevent builds from auto-discovering it)
+COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
+COPY --link --from=common --chmod=755 sccache-start.sh /opt/sccache-start.sh
+COPY --link --from=common --chmod=755 sccache.sh /opt/sccache.sh
+COPY --link --from=common sccache.toml /etc/sccache.toml
+RUN sed -Ei 's@^(key_prefix.*)misc@\1torch-extras@' /etc/sccache.toml
+ENV SCCACHE_CONF=/etc/sccache.toml
+ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
+    CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh
+
+COPY --link --from=torch-common --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
+    CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py' \
+    CUDACXX='/build/nvcc-wrapper.py'
+
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[0-7].*) ;; *) \
@@ -141,6 +180,11 @@ FROM builder-base as deepspeed-builder
 
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST
 RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=ds-kernels/,rw \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     cd ds-kernels && \
     export CUDA_ARCH_LIST="${DEEPSPEED_KERNELS_CUDA_ARCH_LIST}" && \
@@ -171,10 +215,14 @@ ARG DS_BUILD_STOCHASTIC_TRANSFORMER="1"
 ARG DS_BUILD_UTILS="1"
 ARG DS_BUILD_AIO="1"
 
-ARG DEEPSPEED_VERSION
-
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+RUN --mount=type=bind,from=deepspeed-downloader,source=/git/deepspeed,target=deepspeed/,rw \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     python3 -m pip install -U --no-cache-dir py-cpuinfo && \
     # BuildKit builders have no GPU, so without this override DeepSpeed's
     # auto-detection would record accelerator_name='cpu' in the package's
@@ -212,9 +260,10 @@ RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     } && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
+      cd deepspeed && \
       python3 -m pip wheel -w /wheels \
       --no-cache-dir --no-build-isolation --no-deps -v \
-      deepspeed==${DEEPSPEED_VERSION} && \
+      . && \
     rm ./*
 SHELL ["/bin/sh", "-c"]
 
@@ -231,6 +280,11 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 # --distributed_adam, --distributed_lamb, and --group_norm aren't documented
 # in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     CHECK_VERSION() { \
@@ -280,18 +334,22 @@ WORKDIR /wheels
 
 FROM builder-base as xformers-builder
 
-ARG XFORMERS_VERSION
-
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+RUN --mount=type=bind,from=xformers-downloader,source=/git/xformers,target=xformers/,rw \
+    --mount=type=secret,id=s3_access_key_id \
+    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     CC=$(realpath -e ./compiler) \
       MAX_JOBS=1 \
       PYTHONUNBUFFERED=1 \
       XFORMERS_DISABLE_FLASH_ATTN=1 \
+      cd xformers && \
       python3 -m pip wheel -w /wheels -v \
       --no-cache-dir --no-build-isolation --no-deps \
-      --no-binary=xformers \
-      xformers==${XFORMERS_VERSION} 2> \
+      . 2> \
     >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
 
 SHELL ["/bin/sh", "-c"]
