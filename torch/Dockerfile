@@ -225,6 +225,10 @@ ENV SCCACHE_CONF=/etc/sccache.toml
 ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache.sh \
     CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache.sh
 
+# This manually replicates some settings that torch uses for cache-friendliness when it auto-detects sccache
+# See: https://github.com/pytorch/pytorch/blob/v2.11.0/cmake/Dependencies.cmake#L68-L74
+ENV CMAKE_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF'
+
 # Suppress less-relevant-to-us warnings from the packages being built
 ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \
     CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
