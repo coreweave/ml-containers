@@ -217,15 +217,13 @@ RUN apt-get -qq update && apt-get -qq install -y \
 # Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache*.sh /opt/
-COPY --link --from=common sccache.cmake /opt/sccache.cmake
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1torch@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
 
 # Build-time environment variables
 ENV CC=/opt/sccache-cc.sh \
-    CXX=/opt/sccache-c++.sh \
-    CMAKE_ARGS='-C /opt/sccache.cmake'
+    CXX=/opt/sccache-c++.sh
 
 # Skip nvcc's -MD dependency generation in torch extension builds,
 # which sccache cannot cache. These are always built from scratch,
@@ -431,6 +429,18 @@ ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
 # versions of them instead.
 ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;compute_75;compute_90;compute_100'
 
+# Manually replicate the sccache-friendly settings that PyTorch applies when it
+# auto-detects sccache at configure time. Without sccache on the PATH during the
+# CMake configure step (e.g. when sccache is set manually as a compiler
+# launcher), the auto-detection doesn't fire and nvcc falls back to response
+# files, which cause sccache to consider the call non-cacheable.
+#
+# Upstream reference:
+#   https://github.com/pytorch/pytorch/blob/v2.11.0/cmake/Dependencies.cmake#L68-L74
+ENV CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF \
+    CMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF \
+    CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF
+
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
 # so it uses the system's special NCCL and UCC installations for the build.
@@ -586,6 +596,7 @@ RUN rm ./dist/*
 # Build TransformerEngine
 ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
+ENV NVTE_CMAKE_EXTRA_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF'
 
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
     --mount=type=secret,id=s3_access_key_id \
