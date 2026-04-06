@@ -534,22 +534,9 @@ RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=visi
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd vision && \
-    { if [ -d /opt/nccl-tests ]; then \
-      export \
-        USE_DISTRIBUTED=1 \
-        USE_NCCL=1 USE_SYSTEM_NCCL=1 \
-        UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
-        USE_NCCL_WITH_UCC=1 \
-        USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
-    USE_CUDNN=1 \
-    USE_OPENCV=1 \
-    BUILD_TORCH=ON \
-    BUILD_TEST=0 \
     USE_CUDA=1 \
     FORCE_CUDA=1 \
-    USE_NNPACK=1 \
     BUILD_VERSION="$(../version-string.sh "$TORCH_VISION_VERSION")" \
-    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     /build/build-wheel.sh
 
 FROM builder-base AS torchaudio-builder
@@ -572,22 +559,9 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd audio && \
-    { if [ -d /opt/nccl-tests ]; then \
-      export \
-        USE_DISTRIBUTED=1 \
-        USE_NCCL=1 USE_SYSTEM_NCCL=1 \
-        UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
-        USE_NCCL_WITH_UCC=1 \
-        USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
-    USE_CUDNN=1 \
-    USE_OPENCV=1 \
-    BUILD_TORCH=ON \
-    BUILD_TEST=0 \
     USE_CUDA=1 \
     FORCE_CUDA=1 \
-    USE_NNPACK=1 \
     BUILD_VERSION="$(../version-string.sh "$TORCH_AUDIO_VERSION")" \
-    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     /build/build-wheel.sh
 
 FROM builder-base AS transformerengine-builder
