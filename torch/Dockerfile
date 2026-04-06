@@ -374,8 +374,8 @@ ENV CMAKE_PREFIX_PATH=/usr/bin/ \
 ARG BUILD_TRITON
 ARG BUILD_MAX_JOBS=""
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -470,8 +470,8 @@ ENV CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF \
 ARG BUILD_CXX11_ABI=""
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -524,8 +524,8 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -549,8 +549,8 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -573,8 +573,8 @@ ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 ENV NVTE_CMAKE_EXTRA_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF'
 
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -598,8 +598,8 @@ FROM flash-attn-builder-base AS flash-attn-builder
 
 # Build flash-attn
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -627,8 +627,8 @@ ENV FLASH_ATTN_CUDA_ARCHS='80;90;100;120'
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
