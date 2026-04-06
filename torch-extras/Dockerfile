@@ -147,14 +147,12 @@ COPY --link --from=torch-common --chmod=755 scale.sh .
 # Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache*.sh /opt/
-COPY --link --from=common sccache.cmake /opt/sccache.cmake
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1torch-extras@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
 
 ENV CC=/opt/sccache-cc.sh \
-    CXX=/opt/sccache-c++.sh \
-    CMAKE_ARGS='-C /opt/sccache.cmake'
+    CXX=/opt/sccache-c++.sh
 
 # Skip nvcc's -MD dependency generation in torch extension builds,
 # which sccache cannot cache. These are always built from scratch,
