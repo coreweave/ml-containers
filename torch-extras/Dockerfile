@@ -188,8 +188,8 @@ FROM builder-base as deepspeed-builder
 
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST
 RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=ds-kernels/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -225,8 +225,8 @@ ARG DS_BUILD_AIO="1"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=deepspeed-downloader,source=/git/deepspeed,target=deepspeed/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -288,8 +288,8 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 # --distributed_adam, --distributed_lamb, and --group_norm aren't documented
 # in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
@@ -344,8 +344,8 @@ FROM builder-base as xformers-builder
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=xformers-downloader,source=/git/xformers,target=xformers/,rw \
-    --mount=type=secret,id=s3_access_key_id \
-    --mount=type=secret,id=s3_secret_access_key \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \

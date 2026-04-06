@@ -30,19 +30,22 @@ for _sccache_attempt in $(seq 5); do
   )" || return 1
   export SCCACHE_SERVER_PORT
 
-  # Start the server in a subshell with credentials so they
-  # keep out of the outer shell's environment.
+  : "${AWS_ACCESS_KEY_ID:?} ${AWS_SECRET_ACCESS_KEY:?}"
+
+  # Start the server with credentials from the environment,
+  # then unset them so nothing later in the step can read them.
   # Capture stderr to check for port conflicts while still emitting it.
-  _sccache_stderr="$( {
-    if [ -f /run/secrets/s3_access_key_id ] && [ -f /run/secrets/s3_secret_access_key ]; then
-      AWS_ACCESS_KEY_ID=$(cat /run/secrets/s3_access_key_id) && \
-      export AWS_ACCESS_KEY_ID && \
-      AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/s3_secret_access_key) && \
-      export AWS_SECRET_ACCESS_KEY
-    fi && \
-    /opt/sccache --start-server
-  } 3>&2 2>&1 1>&3 3>&- )" 2>&1  # Golly, we're dancing out here
+  _sccache_stderr="$(
+    /opt/sccache --start-server 3>&2 2>&1 1>&3 3>&-
+  )" 2>&1  # Golly, these file descriptors are really dancing out here.
   _sccache_rc="$?"
+  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+
+  # Shouldn't be necessary, but just to make sure that BuildKit isn't weird.
+  if [ -n "${AWS_ACCESS_KEY_ID}${AWS_SECRET_ACCESS_KEY}" ]; then
+    echo 'sccache-start: failed to drop credentials' >&2
+    return 1
+  fi
 
   if [ -n "${_sccache_stderr}" ]; then
     printf '%s\n' "${_sccache_stderr}" >&2
