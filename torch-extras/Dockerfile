@@ -173,7 +173,7 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     esac && \
     { printf '%s' \
       "-Wno-deprecated-gpu-targets" \
-      " -diag-suppress 191,186,177" \
+      " --diag-suppress=191,186,177" \
       " -Xcompiler -Wno-sign-compare" \
       ",-Wno-deprecated-declarations" \
       ",-Wno-unused-parameter" \
