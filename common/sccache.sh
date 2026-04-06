@@ -9,7 +9,7 @@
 
 if [[ ! -x /opt/sccache ]] || \
   [[ ! "${DISABLE_SCCACHE:-0}" = 0 ]] || \
-  [[ -z "${SCCACHE_SERVER_PORT-}" ]] || \
+  [[ -z "${SCCACHE_SERVER_PORT-}${SCCACHE_SERVER_UDS-}" ]] || \
   [[ -n "${SCCACHE_GUARD-}" ]]; then
   exec -- "$@"
 fi
