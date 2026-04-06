@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.10
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.18.8"
