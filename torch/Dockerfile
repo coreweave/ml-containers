@@ -631,6 +631,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
+    export SCCACHE_RECACHE=1 && \
     . /opt/sccache-start.sh && \
     if [ ! -d flash-attention/hopper ]; then \
       echo "Not compiling flash-attn v3" && exit 0; \
