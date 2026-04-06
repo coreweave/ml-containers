@@ -649,9 +649,9 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     fi && \
     NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_100a,code=sm_100a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
-    sed -i \
-      -e 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
-      -e 's@code=sm_80@code=[sm_80,sm_120]@' \
+    sed -i 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
+      flash-attention/hopper/setup.py && \
+    sed -Ei 's@(\s+cuda_post_cflags_sm80(_sm90)? = .*)$@\1 + '"['-gencode', 'arch=compute_120f,code=sm_120f']"'@' \
       flash-attention/hopper/setup.py && \
     NVCC_THREADS=4 /build/build-wheel.sh flash-attention/hopper
 
