@@ -7,7 +7,7 @@ ARG BUILD_TORCH_VISION_VERSION="0.26.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.11.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="2.12"
 ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
-ARG BUILD_FLASH_ATTN_3_VERSION="1ceaa984b2f348caea18b39a98458d33b4ea7a09"
+ARG BUILD_FLASH_ATTN_3_VERSION="15270e66dc88d70d08f6ba6003eb17e7307149b0"
 ARG BUILD_FLASH_ATTN_4_VERSION="e065bf1ba1091040eeaa9328846c3bd31c718543"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
@@ -109,8 +109,8 @@ FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
-      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c && \
-      git -C flash-attention cherry-pick -n afc97c60f799e470886c154e3473df938f8fa93d; \
+      git -C flash-attention/csrc/cutlass fetch origin +refs/tags/v4.4.2:refs/tags/v4.4.2 && \
+      git -C flash-attention/csrc/cutlass checkout v4.4.2; \
     else \
       mkdir flash-attention; \
     fi
@@ -649,7 +649,13 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     fi && \
     NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_100a,code=sm_100a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
-    sed -i 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
+    sed -i \
+      -e 's@bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")@bare_metal_version < Version("12.8")@' \
+      -e 's@"--resource-usage",@# "--resource-usage",@' \
+      -e 's@, "-DPy_LIMITED_API=0x03090000"@@' \
+      -e 's@py_limited_api=True,@py_limited_api=False,@' \
+      -e 's@"py_limited_api": "cp39"@@' \
+      -e 's@subprocess\.run.*git.*submodule.*update.*cutlass.*$@pass@' \
       flash-attention/hopper/setup.py && \
     sed -Ei 's@(\s+cuda_post_cflags_sm80(_sm90)? = .*)$@\1 + '"['-gencode', 'arch=compute_120f,code=sm_120f']"'@' \
       flash-attention/hopper/setup.py && \
