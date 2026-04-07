@@ -139,6 +139,7 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
       AVX='WRAPPER_AVX="AVX256"'; \
     fi && \
     gfortran -ffree-line-length-512 -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
+ENV CC_WRAPPED="/build/compiler"
 
 COPY --link --from=torch-common --chmod=755 effective_cpu_count.sh .
 COPY --link --from=torch-common --chmod=755 scale.sh .
@@ -183,6 +184,15 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     } > /build/nvcc.conf
 ARG BUILD_MAX_JOBS
 
+COPY <<-"EOT" /build/build-wheel.sh
+	#!/bin/bash
+	set -eo pipefail
+	python3 -m pip wheel -w /wheels \
+	  --no-cache-dir --no-build-isolation --no-deps -v "$@" 2>&1 \
+	| grep -Ev --line-buffered \
+	  '^(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:)|bytes spill stores'
+EOT
+RUN chmod 755 /build/build-wheel.sh
 
 FROM builder-base as deepspeed-builder
 
@@ -197,8 +207,7 @@ RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=d
     cd ds-kernels && \
     export CUDA_ARCH_LIST="${DEEPSPEED_KERNELS_CUDA_ARCH_LIST}" && \
     echo "CUDA_ARCH_LIST: ${CUDA_ARCH_LIST}" && \
-    python3 -m pip wheel -w /wheels \
-      --no-cache-dir --no-build-isolation --no-deps . && \
+    /build/build-wheel.sh . && \
     python3 -m pip install /wheels/*.whl
 
 # DeepSpeed build flags
@@ -266,13 +275,9 @@ RUN --mount=type=bind,from=deepspeed-downloader,source=/git/deepspeed,target=dee
         DS_BUILD_AIO; \
       do if [[ -z ${!VAR} ]]; then unset ${VAR}; fi; done; \
     } && \
-    CC_WRAPPED=$(realpath -e ./compiler) \
-      MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
-      cd deepspeed && \
-      python3 -m pip wheel -w /wheels \
-      --no-cache-dir --no-build-isolation --no-deps -v \
-      . && \
-    rm ./*
+    cd deepspeed && \
+    MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
+      /build/build-wheel.sh .
 SHELL ["/bin/sh", "-c"]
 
 WORKDIR /wheels
@@ -305,7 +310,6 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
       :; \
     )" && \
-    export CC_WRAPPED=$(realpath -e ./compiler) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)}" && \
     printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
@@ -336,7 +340,7 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     ) > ./apex-extensions.conf && \
     echo "Extensions: $(cat ./apex-extensions.conf)" && \
     cd apex && \
-    xargs -a ../apex-extensions.conf python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation --no-deps ./
+    xargs -a ../apex-extensions.conf /build/build-wheel.sh .
 
 WORKDIR /wheels
 
@@ -350,16 +354,9 @@ RUN --mount=type=bind,from=xformers-downloader,source=/git/xformers,target=xform
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    CC_WRAPPED=$(realpath -e ./compiler) \
-      MAX_JOBS=1 \
-      PYTHONUNBUFFERED=1 \
-      XFORMERS_DISABLE_FLASH_ATTN=1 \
-      cd xformers && \
-      python3 -m pip wheel -w /wheels -v \
-      --no-cache-dir --no-build-isolation --no-deps \
-      . 2> \
-    >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
-
+    cd xformers && \
+    MAX_JOBS=1 PYTHONUNBUFFERED=1 XFORMERS_DISABLE_FLASH_ATTN=1 \
+      /build/build-wheel.sh .
 SHELL ["/bin/sh", "-c"]
 
 WORKDIR /build
