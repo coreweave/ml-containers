@@ -578,9 +578,10 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
-    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+    export MAX_JOBS=$(./scale.sh "$(./effective_cpu_count.sh)" 7 32) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$MAX_JOBS}" && \
-    echo "MAX_JOBS: ${MAX_JOBS}" && \
+    export NVTE_BUILD_THREADS_PER_JOB=7 && \
+    echo "MAX_JOBS: ${MAX_JOBS}; NVTE_BUILD_THREADS_PER_JOB: ${NVTE_BUILD_THREADS_PER_JOB}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     case "${CUDA_VERSION}" in 12.[0123456].*) \
