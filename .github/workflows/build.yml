@@ -162,8 +162,15 @@ jobs:
         run: |
           tag_args=()
           while IFS= read -r tag; do
-            [[ -n "$tag" ]] && tag_args+=("-t" "$tag")
+            if [[ -n "$tag" ]]; then
+              tag_args+=('-t' "$tag")
+            fi
           done <<< "$TAGS"
+
+          if [[ "${#tag_args[@]}" -eq 0 ]]; then
+            echo '::error::No tags produced from metadata'
+            exit 1
+          fi
 
           mapfile -d '' -t digest_args < <(
             printf '%s' "$EXPECTED_ARCHES" | jq -j \
