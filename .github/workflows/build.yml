@@ -200,14 +200,19 @@ jobs:
           fi
 
           docker buildx imagetools create "${tag_args[@]}" "${digest_args[@]}"
+
+          DIGEST=$(docker buildx imagetools inspect "${tag_args[1]}" --format '{{println .Manifest.Digest}}')
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
       - name: Gather job summary
         env:
           TAGS: ${{ needs.prepare.outputs.tags }}
+          DIGEST: ${{ steps.push.outputs.digest }}
           BUILD_ARGS: ${{ inputs.build-args }}
         run: |
           {
             printf '## Built image info\n\n' && \
             printf '### Image\n\n```text\n%s\n```\n\n' "${TAGS:-Missing}" && \
+            printf 'Digest: `%s`\n\n' "${DIGEST:-Missing}" && \
             if [ -n "${BUILD_ARGS}" ]; then
               printf '<details>\n<summary><h3>Build args</h3></summary>\n\n```ini\n%s\n```\n\n</details>\n' \
                 "${BUILD_ARGS}";
