@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.platforms.outputs.matrix }}
+      arches: ${{ steps.platforms.outputs.arches }}
       registry: ${{ steps.registry.outputs.value }}
       image: ${{ steps.registry.outputs.image }}
       tags: ${{ steps.meta.outputs.tags }}
@@ -74,7 +75,9 @@ jobs:
             {platform: "linux/amd64", runner: "ml-amd", arch: "amd64"},
             {platform: "linux/arm64", runner: "ml-arm", arch: "arm64"}
           ] | map(select(.platform as $plat | $p | contains($plat)))}')
+          ARCHES=$(printf '%s' "$MATRIX" | jq -c '[.include[].arch]')
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "arches=$ARCHES" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build (${{ matrix.arch }})
@@ -153,6 +156,7 @@ jobs:
         env:
           TAGS: ${{ needs.prepare.outputs.tags }}
           IMAGE: ${{ needs.prepare.outputs.image }}
+          EXPECTED_ARCHES: ${{ needs.prepare.outputs.arches }}
           DIGEST_AMD64: ${{ needs.build.outputs.digest-amd64 }}
           DIGEST_ARM64: ${{ needs.build.outputs.digest-arm64 }}
         run: |
@@ -161,10 +165,24 @@ jobs:
             [[ -n "$tag" ]] && tag_args+=("-t" "$tag")
           done <<< "$TAGS"
 
-          digest_args=()
-          for digest in "$DIGEST_AMD64" "$DIGEST_ARM64"; do
-            [[ -n "$digest" ]] && digest_args+=("$IMAGE@$digest")
-          done
+          mapfile -d '' -t digest_args < <(
+            printf '%s' "$EXPECTED_ARCHES" | jq -j \
+              --arg image "$IMAGE" \
+              --arg amd64 "$DIGEST_AMD64" \
+              --arg arm64 "$DIGEST_ARM64" '
+              {amd64: $amd64, arm64: $arm64} as $d |
+              .[] |
+              if $d[.] == "" then
+                error("Missing digest for expected architecture: \(.)")
+              else
+                "\($image)@\($d[.])\u0000"
+              end'
+          )
+
+          if [[ "${#digest_args[@]}" -eq 0 ]]; then
+            echo "::error::No digest arguments produced. Expected architectures: $EXPECTED_ARCHES"
+            exit 1
+          fi
 
           docker buildx imagetools create "${tag_args[@]}" "${digest_args[@]}"
       - name: Gather job summary
