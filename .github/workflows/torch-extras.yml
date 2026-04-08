@@ -165,6 +165,7 @@ jobs:
       build-contexts: |
         torch-common=torch-common
         common=common
+      object-storage-secrets: true
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
@@ -186,6 +187,7 @@ jobs:
       build-contexts: |
         torch-common=torch-common
         common=common
+      object-storage-secrets: true
       tag-suffix: ${{ matrix.bases.tag }}
       build-args: |
         BASE_IMAGE=${{ matrix.bases.image }}

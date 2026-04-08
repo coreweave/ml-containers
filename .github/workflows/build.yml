@@ -28,6 +28,11 @@ on:
         required: false
         description: "Additional named build context directories (e.g. 'common=common')"
         type: string
+      object-storage-secrets:
+        required: false
+        description: "Pass object storage credentials as build secrets"
+        type: boolean
+        default: false
       buildkit-index:
         required: false
         description: "Index of the dedicated BuildKit endpoint pair to use (0, 1, ...). -1 uses shared consumer endpoints."
@@ -147,8 +152,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           secrets: |
-            s3_access_key_id=${{ secrets.SCCACHE_S3_ACCESS_KEY_ID }}
-            s3_secret_access_key=${{ secrets.SCCACHE_S3_SECRET_ACCESS_KEY }}
+            ${{ inputs.object-storage-secrets && format('s3_access_key_id={0}', secrets.SCCACHE_S3_ACCESS_KEY_ID) || '' }}
+            ${{ inputs.object-storage-secrets && format('s3_secret_access_key={0}', secrets.SCCACHE_S3_SECRET_ACCESS_KEY) || '' }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }}
           cache-to: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }},mode=max
           platforms: ${{ inputs.platforms }}

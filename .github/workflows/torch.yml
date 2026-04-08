@@ -94,6 +94,7 @@ jobs:
       build-contexts: |
         torch-common=torch-common
         common=common
+      object-storage-secrets: true
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
