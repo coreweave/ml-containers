@@ -73,7 +73,7 @@ jobs:
           MATRIX=$(jq -nc --arg p "$PLATFORMS" '{include: [
             {platform: "linux/amd64", runner: "ml-amd", arch: "amd64"},
             {platform: "linux/arm64", runner: "ml-arm", arch: "arm64"}
-          ] | map(select($p | contains(.platform)))}')
+          ] | map(select(.platform as $plat | $p | contains($plat)))}')
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
   build:
