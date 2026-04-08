@@ -26,109 +26,105 @@ on:
         default: linux/amd64,linux/arm64
       buildkit-index:
         required: false
-        description: "Index of the dedicated BuildKit endpoint pair to use (0, 1, ...). -1 uses shared consumer endpoints."
+        description: "Deprecated — ignored. Retained for caller compatibility."
         type: number
         default: -1
     outputs:
       outcome:
         description: "The outcome of the build"
-        value: ${{ jobs.build.outputs.outcome }}
+        value: ${{ jobs.merge.outputs.outcome }}
       tags:
         description: "The resulting image tags"
-        value: ${{ jobs.build.outputs.tags }}
+        value: ${{ jobs.merge.outputs.tags }}
       version:
         description: "The resulting image version"
-        value: ${{ jobs.build.outputs.tags }}
+        value: ${{ jobs.merge.outputs.version }}
 
 jobs:
-  build:
-    name: Build Images
-    runs-on: [ cw ]
-    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.9.0'
-    timeout-minutes: 960
-    defaults:
-      run:
-        shell: bash
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
     outputs:
-      outcome: ${{ steps.docker-build.outcome }}
+      matrix: ${{ steps.platforms.outputs.matrix }}
+      registry: ${{ steps.registry.outputs.value }}
+      image: ${{ steps.registry.outputs.image }}
       tags: ${{ steps.meta.outputs.tags }}
       version: ${{ steps.meta.outputs.version }}
+      labels: ${{ steps.meta.outputs.labels }}
+      artifact-key: ${{ steps.artifact.outputs.key }}
     steps:
-      - uses: actions/checkout@v6
-      - name: Fetch BuildKit Client Certs
-        uses: dopplerhq/secrets-fetch-action@v2.0.0
-        id: client-certs
-        with:
-          doppler-token: ${{ secrets.ORG_BUILDKIT_CLIENT_TOKEN }}
-          doppler-project: ${{ secrets.BUILDKIT_CONSUMER_DOPPLER_PROJECT }}
-          doppler-config: prod
-          inject-env-vars: false
-      - name: Resolve BuildKit endpoints
-        id: buildkit
-        env:
-          BUILDKIT_CONSUMER_AMD64_ENDPOINT: ${{ secrets.BUILDKIT_CONSUMER_AMD64_ENDPOINT }}
-          BUILDKIT_CONSUMER_ARM64_ENDPOINT: ${{ secrets.BUILDKIT_CONSUMER_ARM64_ENDPOINT }}
-          BUILDKIT_DEDICATED_0_AMD64_ENDPOINT: ${{ secrets.BUILDKIT_DEDICATED_0_AMD64_ENDPOINT }}
-          BUILDKIT_DEDICATED_0_ARM64_ENDPOINT: ${{ secrets.BUILDKIT_DEDICATED_0_ARM64_ENDPOINT }}
-          BUILDKIT_DEDICATED_1_AMD64_ENDPOINT: ${{ secrets.BUILDKIT_DEDICATED_1_AMD64_ENDPOINT }}
-          BUILDKIT_DEDICATED_1_ARM64_ENDPOINT: ${{ secrets.BUILDKIT_DEDICATED_1_ARM64_ENDPOINT }}
+      - name: Compute registry
+        id: registry
         run: |
-          INDEX="${{ inputs.buildkit-index }}"
-          if [ "$INDEX" -ge 0 ] 2>/dev/null; then
-            PREFIX="BUILDKIT_DEDICATED_${INDEX}"
-          else
-            PREFIX="BUILDKIT_CONSUMER"
-          fi
-          AMD64="${PREFIX}_AMD64_ENDPOINT"
-          ARM64="${PREFIX}_ARM64_ENDPOINT"
-          echo "amd64=${!AMD64}" >> "$GITHUB_OUTPUT"
-          echo "arm64=${!ARM64}" >> "$GITHUB_OUTPUT"
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4.0.0
-        with:
-          driver: remote
-          endpoint: ${{ steps.buildkit.outputs.amd64 }}
-          platforms: linux/amd64
-          append: |
-            - endpoint: ${{ steps.buildkit.outputs.arm64 }}
-              platforms: linux/arm64
-        env:
-          BUILDER_NODE_0_AUTH_TLS_CACERT: ${{ steps.client-certs.outputs.TLS_CACERT }}
-          BUILDER_NODE_0_AUTH_TLS_CERT: ${{ steps.client-certs.outputs.TLS_CERT }}
-          BUILDER_NODE_0_AUTH_TLS_KEY: ${{ steps.client-certs.outputs.TLS_KEY }}
-          BUILDER_NODE_1_AUTH_TLS_CACERT: ${{ steps.client-certs.outputs.TLS_CACERT }}
-          BUILDER_NODE_1_AUTH_TLS_CERT: ${{ steps.client-certs.outputs.TLS_CERT }}
-          BUILDER_NODE_1_AUTH_TLS_KEY: ${{ steps.client-certs.outputs.TLS_KEY }}
-      - name: Get base registry
-        run: |
-          echo "REGISTRY=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+          echo "value=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/${{ inputs.image-name }}" >> "$GITHUB_OUTPUT"
       - name: Set tag prefix
         if: github.ref_name != 'main'
-        run: |
-          echo "TAG_PREFIX=${{ github.ref_name }}-" >> $GITHUB_ENV
+        run: echo "TAG_PREFIX=${{ github.ref_name }}-" >> $GITHUB_ENV
       - name: Set tag suffix
         if: inputs.tag-suffix != ''
-        run: |
-          echo "TAG_SUFFIX=-${{ inputs.tag-suffix }}" >> $GITHUB_ENV
-      - name: Set cache key
-        if: inputs.cache-key != ''
-        run: |
-          echo "CACHE_KEY=${{ inputs.image-name }}-${{ inputs.cache-key }}" >> $GITHUB_ENV
+        run: echo "TAG_SUFFIX=-${{ inputs.tag-suffix }}" >> $GITHUB_ENV
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v6.0.0
         with:
-          images: ${{ env.REGISTRY }}/${{ inputs.image-name }}
+          images: ${{ steps.registry.outputs.image }}
           tags: |
             type=sha,prefix=${{ env.TAG_PREFIX }},suffix=${{ env.TAG_SUFFIX }},format=short
-      - name: Initialize registry credentials file
-        env:
-          USER: ${{ github.actor }}
-          PASS: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute artifact key
+        id: artifact
         run: |
-          jq -n '.auths."ghcr.io" = { username: env.USER, password: env.PASS }' \
-          | install -m400 /dev/stdin ~/.docker/config.json
-      - name: Build and push Docker image
+          KEY="${{ inputs.image-name }}"
+          [ -z "${{ inputs.tag-suffix }}" ] || KEY="${KEY}-${{ inputs.tag-suffix }}"
+          echo "key=${KEY}" >> "$GITHUB_OUTPUT"
+      - name: Build platform matrix
+        id: platforms
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          declare -A RUNNERS=( ["linux/amd64"]="ml-amd" ["linux/arm64"]="ml-arm" )
+          ITEMS=()
+          IFS=',' read -ra PLATS <<< "$PLATFORMS"
+          for p in "${PLATS[@]}"; do
+            p="$(echo "$p" | xargs)"
+            RUNNER="${RUNNERS[$p]}"
+            [ -n "$RUNNER" ] || { echo "::error::Unsupported platform: $p"; exit 1; }
+            ITEMS+=("{\"platform\":\"$p\",\"runner\":\"$RUNNER\",\"arch\":\"${p#linux/}\"}")
+          done
+          IFS=','
+          echo "matrix={\"include\":[${ITEMS[*]}]}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 960
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.0.0
+        with:
+          driver: remote
+          endpoint: unix:///run/buildkit/buildkitd.sock
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute cache key
+        id: cache
+        run: |
+          KEY="${{ inputs.image-name }}"
+          [ -z "${{ inputs.cache-key }}" ] || KEY="${KEY}-${{ inputs.cache-key }}"
+          echo "ref=${{ needs.prepare.outputs.registry }}/buildcache:${KEY}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+      - name: Build and push by digest
         id: docker-build
         uses: docker/build-push-action@v7.0.0
         env:
@@ -138,26 +134,67 @@ jobs:
           context: ${{ inputs.folder }}
           build-args: |-
             ${{ inputs.build-args }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/buildcache:${{ env.CACHE_KEY || inputs.image-name }},mode=max
-          platforms: ${{ inputs.platforms }}
-      - name: Clear registry credentials
-        if: always()
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,"name=${{ needs.prepare.outputs.image }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
+          cache-to: type=registry,ref=${{ steps.cache.outputs.ref }},mode=max
+      - name: Export digest
         run: |
-          rm -f ~/.docker/config.json && [ ! -e ~/.docker/config.json ]
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.docker-build.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ needs.prepare.outputs.artifact-key }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Merge Manifests
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      outcome: ${{ steps.push.outcome }}
+      tags: ${{ needs.prepare.outputs.tags }}
+      version: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ needs.prepare.outputs.artifact-key }}-*
+          merge-multiple: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.0.0
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create manifest list and push
+        id: push
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+          IMAGE: ${{ needs.prepare.outputs.image }}
+        run: |
+          TAG_ARGS=$(echo "$TAGS" | xargs -I {} echo "-t {}" | tr '\n' ' ')
+          DIGEST_ARGS=$(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools create $TAG_ARGS $DIGEST_ARGS
       - name: Gather job summary
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-          DIGEST: ${{ steps.docker-build.outputs.digest }}
+          TAGS: ${{ needs.prepare.outputs.tags }}
           BUILD_ARGS: ${{ inputs.build-args }}
         run: |
           {
             printf '## Built image info\n\n' && \
             printf '### Image\n\n```text\n%s\n```\n\n' "${TAGS:-Missing}" && \
-            printf 'Digest: `%s`\n\n' "${DIGEST:-Missing}" && \
             if [ -n "${BUILD_ARGS}" ]; then
               printf '<details>\n<summary><h3>Build args</h3></summary>\n\n```ini\n%s\n```\n\n</details>\n' \
                 "${BUILD_ARGS}";
@@ -173,7 +210,7 @@ jobs:
         with:
           issue-number: ${{ steps.PR.outputs.number }}
           body: >
-            @${{ github.triggering_actor }} Build complete, ${{ steps.docker-build.outcome }}:
+            @${{ github.triggering_actor }} Build complete, ${{ steps.push.outcome }}:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-            Image: `${{ steps.meta.outputs.tags }}`
+            Image: `${{ needs.prepare.outputs.tags }}`

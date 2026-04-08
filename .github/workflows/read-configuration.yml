@@ -17,8 +17,7 @@ on:
 jobs:
   read-file:
     name: Read Configuration File
-    runs-on: [ cw ]
-    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.4.0'
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
@@ -26,7 +25,7 @@ jobs:
     outputs:
       config: ${{ steps.read.outputs.contents }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Read configuration
         id: read
         env:
