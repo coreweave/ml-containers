@@ -39,6 +39,9 @@ jobs:
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     outputs:
       matrix: ${{ steps.platforms.outputs.matrix }}
       arches: ${{ steps.platforms.outputs.arches }}
