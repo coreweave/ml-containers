@@ -117,9 +117,9 @@ jobs:
       - name: Compute cache key
         id: cache
         run: |
-          KEY="${{ inputs.image-name }}"
+          KEY="${{ matrix.arch }}-${{ inputs.image-name }}"
           [ -z "${{ inputs.cache-key }}" ] || KEY="${KEY}-${{ inputs.cache-key }}"
-          echo "ref=${{ needs.prepare.outputs.registry }}/buildcache:${KEY}-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          echo "ref=${{ needs.prepare.outputs.registry }}/buildcache:${KEY}" >> "$GITHUB_OUTPUT"
       - name: Build and push by digest
         id: docker-build
         uses: docker/build-push-action@v7.0.0
