@@ -77,17 +77,11 @@ jobs:
         env:
           PLATFORMS: ${{ inputs.platforms }}
         run: |
-          declare -A RUNNERS=( ["linux/amd64"]="ml-amd" ["linux/arm64"]="ml-arm" )
-          ITEMS=()
-          IFS=',' read -ra PLATS <<< "$PLATFORMS"
-          for p in "${PLATS[@]}"; do
-            p="$(echo "$p" | xargs)"
-            RUNNER="${RUNNERS[$p]}"
-            [ -n "$RUNNER" ] || { echo "::error::Unsupported platform: $p"; exit 1; }
-            ITEMS+=("{\"platform\":\"$p\",\"runner\":\"$RUNNER\",\"arch\":\"${p#linux/}\"}")
-          done
-          IFS=','
-          echo "matrix={\"include\":[${ITEMS[*]}]}" >> "$GITHUB_OUTPUT"
+          MATRIX=$(jq -nc --arg p "$PLATFORMS" '{include: [
+            {platform: "linux/amd64", runner: "ml-amd", arch: "amd64"},
+            {platform: "linux/arm64", runner: "ml-arm", arch: "arm64"}
+          ] | map(select($p | contains(.platform)))}')
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build (${{ matrix.arch }})
