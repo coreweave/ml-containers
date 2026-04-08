@@ -46,7 +46,6 @@ jobs:
       tags: ${{ steps.meta.outputs.tags }}
       version: ${{ steps.meta.outputs.version }}
       labels: ${{ steps.meta.outputs.labels }}
-      artifact-key: ${{ steps.artifact.outputs.key }}
     steps:
       - name: Compute registry
         id: registry
@@ -66,12 +65,6 @@ jobs:
           images: ${{ steps.registry.outputs.image }}
           tags: |
             type=sha,prefix=${{ env.TAG_PREFIX }},suffix=${{ env.TAG_SUFFIX }},format=short
-      - name: Compute artifact key
-        id: artifact
-        run: |
-          KEY="${{ inputs.image-name }}"
-          [ -z "${{ inputs.tag-suffix }}" ] || KEY="${KEY}-${{ inputs.tag-suffix }}"
-          echo "key=${KEY}" >> "$GITHUB_OUTPUT"
       - name: Build platform matrix
         id: platforms
         env:
@@ -94,6 +87,9 @@ jobs:
     defaults:
       run:
         shell: bash
+    outputs:
+      digest-amd64: ${{ steps.export.outputs.digest-amd64 }}
+      digest-arm64: ${{ steps.export.outputs.digest-arm64 }}
     steps:
       - uses: actions/checkout@v6
       - name: Set up Docker Buildx
@@ -128,17 +124,8 @@ jobs:
           cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
           cache-to: type=registry,ref=${{ steps.cache.outputs.ref }},mode=max
       - name: Export digest
-        run: |
-          mkdir -p "$RUNNER_TEMP/digests"
-          digest="${{ steps.docker-build.outputs.digest }}"
-          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ needs.prepare.outputs.artifact-key }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/*
-          if-no-files-found: error
-          retention-days: 1
+        id: export
+        run: echo "digest-${{ matrix.arch }}=${{ steps.docker-build.outputs.digest }}" >> "$GITHUB_OUTPUT"
 
   merge:
     name: Merge Manifests
@@ -152,12 +139,6 @@ jobs:
       tags: ${{ needs.prepare.outputs.tags }}
       version: ${{ needs.prepare.outputs.version }}
     steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-${{ needs.prepare.outputs.artifact-key }}-*
-          merge-multiple: true
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.0.0
       - name: Log in to GitHub Container Registry
@@ -168,14 +149,23 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Create manifest list and push
         id: push
-        working-directory: ${{ runner.temp }}/digests
         env:
           TAGS: ${{ needs.prepare.outputs.tags }}
           IMAGE: ${{ needs.prepare.outputs.image }}
+          DIGEST_AMD64: ${{ needs.build.outputs.digest-amd64 }}
+          DIGEST_ARM64: ${{ needs.build.outputs.digest-arm64 }}
         run: |
-          TAG_ARGS=$(echo "$TAGS" | xargs -I {} echo "-t {}" | tr '\n' ' ')
-          DIGEST_ARGS=$(printf "${IMAGE}@sha256:%s " *)
-          docker buildx imagetools create $TAG_ARGS $DIGEST_ARGS
+          tag_args=()
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] && tag_args+=("-t" "$tag")
+          done <<< "$TAGS"
+
+          digest_args=()
+          for digest in "$DIGEST_AMD64" "$DIGEST_ARM64"; do
+            [[ -n "$digest" ]] && digest_args+=("$IMAGE@$digest")
+          done
+
+          docker buildx imagetools create "${tag_args[@]}" "${digest_args[@]}"
       - name: Gather job summary
         env:
           TAGS: ${{ needs.prepare.outputs.tags }}
