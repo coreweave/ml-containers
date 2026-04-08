@@ -190,7 +190,7 @@ COPY <<-"EOT" /build/build-wheel.sh
 	python3 -m pip wheel -w /wheels \
 	  --no-cache-dir --no-build-isolation --no-deps -v "$@" 2>&1 \
 	| grep -Ev --line-buffered \
-	  '^(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:)|bytes spill stores'
+	  '^\s*(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:)|bytes spill stores'
 EOT
 RUN chmod 755 /build/build-wheel.sh
 
