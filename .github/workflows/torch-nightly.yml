@@ -120,7 +120,6 @@ jobs:
       additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
       cache-key: base-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
-      buildkit-index: 0
   build-nccl:
     name: Build Nightly torch:nccl
     needs:
@@ -142,4 +141,3 @@ jobs:
       additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
       cache-key: nccl-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
-      buildkit-index: 1

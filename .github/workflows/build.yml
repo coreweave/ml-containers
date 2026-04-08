@@ -24,11 +24,6 @@ on:
         description: "Platforms for which to build (default: linux/amd64,linux/arm64)"
         type: string
         default: linux/amd64,linux/arm64
-      buildkit-index:
-        required: false
-        description: "Deprecated — ignored. Retained for caller compatibility."
-        type: number
-        default: -1
     outputs:
       outcome:
         description: "The outcome of the build"

@@ -44,4 +44,3 @@ jobs:
       additional-build-args: BUILD_CXX11_ABI=${{ matrix.abi }}
       cache-key: base-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
-      buildkit-index: 0
