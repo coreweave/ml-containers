@@ -72,6 +72,7 @@ on:
         description: "Whether to build and push a torch-extras container as well"
         type: boolean
         default: false
+
 jobs:
   build:
     name: Build torch

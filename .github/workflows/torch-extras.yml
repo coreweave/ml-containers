@@ -39,6 +39,7 @@ on:
         description: "Build from one specific image rather than the most recent releases from the main branch"
         type: boolean
         default: true
+
   push:
     paths:
       - "torch-extras/**"
