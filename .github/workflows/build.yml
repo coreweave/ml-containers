@@ -119,6 +119,7 @@ jobs:
           context: ${{ inputs.folder }}
           build-args: |-
             ${{ inputs.build-args }}
+          labels: ${{ needs.prepare.outputs.labels }}
           platforms: ${{ matrix.platform }}
           outputs: type=image,"name=${{ needs.prepare.outputs.image }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
