@@ -74,10 +74,15 @@ jobs:
         env:
           PLATFORMS: ${{ inputs.platforms }}
         run: |
-          MATRIX=$(jq -nc --arg p "$PLATFORMS" '{include: [
-            {platform: "linux/amd64", runner: "ml-amd", arch: "amd64"},
-            {platform: "linux/arm64", runner: "ml-arm", arch: "arm64"}
-          ] | map(select(.platform as $plat | $p | contains($plat)))}')
+          MATRIX=$(
+            jq -nc --arg p "$PLATFORMS" '
+              {
+                include: [
+                  {platform: "linux/amd64", runner: "ml-amd", arch: "amd64"},
+                  {platform: "linux/arm64", runner: "ml-arm", arch: "arm64"}
+                ] | map(select(.platform as $plat | $p | contains($plat)))
+              }'
+          )
           ARCHES=$(printf '%s' "$MATRIX" | jq -c '[.include[].arch]')
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           echo "arches=$ARCHES" >> "$GITHUB_OUTPUT"
