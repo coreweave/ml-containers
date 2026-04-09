@@ -19,10 +19,6 @@ on:
       cache-key:
         required: false
         type: string
-      buildkit-index:
-        required: false
-        type: number
-        default: 0
 
   workflow_dispatch:
     inputs:
@@ -43,11 +39,6 @@ on:
         description: "Build from one specific image rather than the most recent releases from the main branch"
         type: boolean
         default: true
-      buildkit-index:
-        required: false
-        description: "Index of the dedicated BuildKit endpoint pair to use (0, 1, ...). -1 uses shared consumer endpoints."
-        type: number
-        default: 0
 
   push:
     paths:
@@ -60,8 +51,7 @@ jobs:
   get-required-bases:
     name: Get Latest Required Base Images
     if: inputs.skip-bases-check != true
-    runs-on: [ cw ]
-    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.4.0'
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
@@ -108,7 +98,7 @@ jobs:
         id: get-latest
         run: |
           RELEASES="$( \
-            /bin/curl -f -s --oauth2-bearer "$(echo "$BEARER_TOKEN" | base64 -w 0)" \
+            curl -f -s --oauth2-bearer "$(echo "$BEARER_TOKEN" | base64 -w 0)" \
               'https://ghcr.io/v2/coreweave/ml-containers%2Ftorch/tags/list?n=100000' \
             | jq -r '.["tags"][]' \
             | grep -E '^[0-9a-f]{7}-(base|nccl)-' \
@@ -159,7 +149,6 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
-      buildkit-index: ${{ inputs.buildkit-index }}
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       build-contexts: |
@@ -181,7 +170,6 @@ jobs:
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
-      buildkit-index: ${{ inputs.buildkit-index || 0 }}
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
       build-contexts: |

@@ -21,7 +21,6 @@ jobs:
     with:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
-      buildkit-index: 0
       tag-suffix: ${{ matrix.vllm-commit }}
       build-args: |
         VLLM_COMMIT=${{ matrix.vllm-commit }}

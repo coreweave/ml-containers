@@ -18,8 +18,7 @@ jobs:
   get-nightly-info:
     name:
       Get Nightly Info
-    runs-on: [ cw ]
-    container: 'ghcr.io/coreweave/github-actions-images/github-base-runner:v1.9.0'
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
@@ -121,7 +120,6 @@ jobs:
       additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
       cache-key: base-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
-      buildkit-index: 0
   build-nccl:
     name: Build Nightly torch:nccl
     needs:
@@ -143,4 +141,3 @@ jobs:
       additional-build-args: BUILD_TRITON_VERSION=${{ needs.get-nightly-info.outputs.triton-commit }}
       cache-key: nccl-cuda${{ matrix.cuda }}-${{ matrix.os }}
       build-extras: true
-      buildkit-index: 1
