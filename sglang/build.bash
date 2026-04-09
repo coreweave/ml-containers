@@ -43,9 +43,12 @@ sed -Ei \
   python/pyproject.toml
 
 # Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent)
+# Use pip wheel instead of python -m build to skip dep-validation checks that
+# fail with --no-isolation when the base image's torch/setuptools versions
+# don't satisfy scikit-build-core's internally-declared constraints.
 (
 cd sgl-kernel
-_BUILD . |& _LOG sglang.log
+python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
 )
 
 # Build sglang python package
