@@ -19,15 +19,12 @@ if [ -x /wheels/libdecord.so ]; then
   cp /wheels/libdecord.so /usr/local/lib/ && ldconfig
 fi
 
-SGLANG_EXTRA_PIP_DEPENDENCIES=()
-if [ "$(uname -m)" = 'x86_64' ]; then
-  SGLANG_EXTRA_PIP_DEPENDENCIES=('decord' 'xgrammar>=0.1.10')
-fi
 _PIP_INSTALL \
   'aiohttp' 'fastapi' \
   'hf_transfer' 'huggingface_hub' 'interegular' 'modelscope' \
-  'orjson' 'packaging' 'pillow' 'prometheus-client>=0.20.0' \
+  'msgspec' 'orjson' 'packaging' 'pillow' 'prometheus-client>=0.20.0' \
   'psutil' 'pydantic' 'python-multipart' 'pyzmq>=25.1.2' \
-  'torchao>=0.7.0' 'uvicorn' 'uvloop' \
-  'cuda-python' 'outlines>=0.0.44,<0.1.0' \
-  "${SGLANG_EXTRA_PIP_DEPENDENCIES[@]}"
+  'torchao>=0.9.0' 'uvicorn' 'uvloop' \
+  'cuda-python==12.9' 'outlines==0.1.11' \
+  'llguidance>=0.7.11,<0.8.0' \
+  'xgrammar==0.1.32'
