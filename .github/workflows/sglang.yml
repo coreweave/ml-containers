@@ -24,6 +24,7 @@ jobs:
       image-name: sglang
       folder: sglang
       platforms: linux/amd64
+      buildkit-index: 0
       tag-suffix: ${{ inputs.tag || '7d4f07a-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1' }}
       build-args: |
         BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/torch-extras:7d4f07a-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'}}

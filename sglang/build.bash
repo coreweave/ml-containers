@@ -54,8 +54,8 @@ cd sgl-kernel
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 silences the cmake 4.x breakage on any
 # FetchContent sub-project (e.g. dlpack inside mscclpp) that still declares
 # cmake_minimum_required(VERSION < 3.5).
-CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5" \
-CMAKE_BUILD_PARALLEL_LEVEL=8 \
+CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSGL_KERNEL_COMPILE_THREADS=4" \
+CMAKE_BUILD_PARALLEL_LEVEL=4 \
   python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
 )
 
