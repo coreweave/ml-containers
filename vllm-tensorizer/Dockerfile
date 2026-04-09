@@ -130,6 +130,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
+    export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
     if [ -f 'use_existing_torch.py' ]; then \
