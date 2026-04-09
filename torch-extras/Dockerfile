@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.2
+# syntax=docker/dockerfile:1.10
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.18.8"
@@ -7,6 +7,30 @@ ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
 ARG XFORMERS_VERSION="0.0.35"
 ARG BUILD_MAX_JOBS=""
+ARG SCCACHE_VERSION="0.14.0"
+
+FROM alpine/curl:8.17.0 AS sccache-downloader
+ARG SCCACHE_VERSION
+RUN ARCH=$(uname -m) && \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
+    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
+    chmod 755 /opt/sccache
+
+FROM alpine/git:2.36.3 as xformers-downloader
+WORKDIR /git
+ARG XFORMERS_VERSION
+RUN git clone --filter=blob:none --depth 1 --recurse-submodules --shallow-submodules \
+      -b "v${XFORMERS_VERSION}" \
+      https://github.com/facebookresearch/xformers && \
+    rm -rf xformers/.git
+
+FROM alpine/git:2.36.3 as deepspeed-downloader
+WORKDIR /git
+ARG DEEPSPEED_VERSION
+RUN git clone --filter=blob:none --depth 1 \
+      -b "v${DEEPSPEED_VERSION}" \
+      https://github.com/microsoft/DeepSpeed deepspeed && \
+    rm -rf deepspeed/.git
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -64,7 +88,7 @@ RUN python3 -m pip install --no-cache-dir -U pip 'setuptools<82' wheel packaging
 
 # Install the cuDNN dev package for building Apex
 # The cuDNN runtime is installed in the base torch image
-COPY --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+COPY --link --from=torch-common --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 RUN /tmp/install_cudnn.sh "${CUDA_VERSION}" dev && \
     rm /tmp/install_cudnn.sh
 
@@ -90,6 +114,8 @@ RUN LLVM_VERSION='18' && \
     apt-get clean && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 1 && \
+    update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 1 && \
     update-alternatives --install \
       /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1
@@ -102,7 +128,7 @@ WORKDIR /build
 # used on the builder machine.
 # The compiler wrapper normalizes -march=native to -march=skylake
 # along with a couple other transformations before invoking GCC.
-COPY compiler_wrapper.f95 .
+COPY --link --from=torch-common compiler_wrapper.f95 .
 ARG AMD64_NATIVE_ARCH="skylake"
 ARG ARM64_NATIVE_ARCH="armv8.5-a+nopredres"
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
@@ -113,9 +139,31 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
       AVX='WRAPPER_AVX="AVX256"'; \
     fi && \
     gfortran -ffree-line-length-512 -cpp -O3 "-D${NATIVE}" "-D${AVX}" ./compiler_wrapper.f95 -o ./compiler && rm ./compiler_wrapper.f95
+ENV CC_WRAPPED="/build/compiler"
 
-COPY --chmod=755 effective_cpu_count.sh .
-COPY --chmod=755 scale.sh .
+COPY --link --from=torch-common --chmod=755 effective_cpu_count.sh .
+COPY --link --from=torch-common --chmod=755 scale.sh .
+
+# Setup for sccache and its wrappers.
+# Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
+COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
+COPY --link --from=common --chmod=755 sccache*.sh /opt/
+COPY --link --from=common sccache.toml /etc/sccache.toml
+RUN sed -Ei 's@^(key_prefix.*)misc@\1torch-extras@' /etc/sccache.toml
+ENV SCCACHE_CONF=/etc/sccache.toml
+
+ENV CC=/opt/sccache-cc.sh \
+    CXX=/opt/sccache-c++.sh
+
+# Skip nvcc's -MD dependency generation in torch extension builds,
+# which sccache cannot cache. These are always built from scratch,
+# so incremental build dependency tracking has no value anyway.
+ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
+
+COPY --link --from=torch-common --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
+    CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py' \
+    CUDACXX='/build/nvcc-wrapper.py'
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
@@ -126,7 +174,7 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     esac && \
     { printf '%s' \
       "-Wno-deprecated-gpu-targets" \
-      " -diag-suppress 191,186,177" \
+      " --diag-suppress=191,186,177" \
       " -Xcompiler -Wno-sign-compare" \
       ",-Wno-deprecated-declarations" \
       ",-Wno-unused-parameter" \
@@ -136,17 +184,30 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     } > /build/nvcc.conf
 ARG BUILD_MAX_JOBS
 
+COPY <<-"EOT" /build/build-wheel.sh
+	#!/bin/bash
+	set -eo pipefail
+	python3 -m pip wheel -w /wheels \
+	  --no-cache-dir --no-build-isolation --no-deps -v "$@" 2>&1 \
+	| grep -Ev --line-buffered \
+	  '^\s*(ptxas (/tmp/|(info|warning)\s*:)|copying .+/|adding .+/|creating build/|Wrapped header:)|bytes spill stores'
+EOT
+RUN chmod 755 /build/build-wheel.sh
 
 FROM builder-base as deepspeed-builder
 
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST
 RUN --mount=type=bind,from=ds-kernels-downloader,source=/git/ds-kernels,target=ds-kernels/,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     cd ds-kernels && \
     export CUDA_ARCH_LIST="${DEEPSPEED_KERNELS_CUDA_ARCH_LIST}" && \
     echo "CUDA_ARCH_LIST: ${CUDA_ARCH_LIST}" && \
-    python3 -m pip wheel -w /wheels \
-      --no-cache-dir --no-build-isolation --no-deps . && \
+    /build/build-wheel.sh . && \
     python3 -m pip install /wheels/*.whl
 
 # DeepSpeed build flags
@@ -171,10 +232,14 @@ ARG DS_BUILD_STOCHASTIC_TRANSFORMER="1"
 ARG DS_BUILD_UTILS="1"
 ARG DS_BUILD_AIO="1"
 
-ARG DEEPSPEED_VERSION
-
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+RUN --mount=type=bind,from=deepspeed-downloader,source=/git/deepspeed,target=deepspeed/,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     python3 -m pip install -U --no-cache-dir py-cpuinfo && \
     # BuildKit builders have no GPU, so without this override DeepSpeed's
     # auto-detection would record accelerator_name='cpu' in the package's
@@ -210,12 +275,9 @@ RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
         DS_BUILD_AIO; \
       do if [[ -z ${!VAR} ]]; then unset ${VAR}; fi; done; \
     } && \
-    CC=$(realpath -e ./compiler) \
-      MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
-      python3 -m pip wheel -w /wheels \
-      --no-cache-dir --no-build-isolation --no-deps -v \
-      deepspeed==${DEEPSPEED_VERSION} && \
-    rm ./*
+    cd deepspeed && \
+    MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 4 24)}" \
+      /build/build-wheel.sh .
 SHELL ["/bin/sh", "-c"]
 
 WORKDIR /wheels
@@ -231,6 +293,11 @@ RUN LIBNCCL2_VERSION=$(dpkg-query --showformat='${Version}' --show libnccl2) && 
 # --distributed_adam, --distributed_lamb, and --group_norm aren't documented
 # in the Apex README, but are defined in its setup.py config.
 RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     CHECK_VERSION() { \
@@ -243,7 +310,6 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
       CHECK_VERSION "libcudnn9-dev-cuda-${CUDA_MAJOR_VERSION}" || \
       :; \
     )" && \
-    export CC=$(realpath -e ./compiler) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 24)}" && \
     printf -- '--config-settings="--build-option=%s" ' $( \
       echo \
@@ -274,26 +340,23 @@ RUN --mount=type=bind,from=apex-downloader,source=/git/apex,target=apex/,rw \
     ) > ./apex-extensions.conf && \
     echo "Extensions: $(cat ./apex-extensions.conf)" && \
     cd apex && \
-    xargs -a ../apex-extensions.conf python3 -m pip wheel -w /wheels -v --no-cache-dir --no-build-isolation --no-deps ./
+    xargs -a ../apex-extensions.conf /build/build-wheel.sh .
 
 WORKDIR /wheels
 
 FROM builder-base as xformers-builder
 
-ARG XFORMERS_VERSION
-
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
-    CC=$(realpath -e ./compiler) \
-      MAX_JOBS=1 \
-      PYTHONUNBUFFERED=1 \
-      XFORMERS_DISABLE_FLASH_ATTN=1 \
-      python3 -m pip wheel -w /wheels -v \
-      --no-cache-dir --no-build-isolation --no-deps \
-      --no-binary=xformers \
-      xformers==${XFORMERS_VERSION} 2> \
-    >(grep -Ev --line-buffered 'ptxas info\s*:|bytes spill stores' >&2)
-
+RUN --mount=type=bind,from=xformers-downloader,source=/git/xformers,target=xformers/,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
+    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    cd xformers && \
+    MAX_JOBS=1 PYTHONUNBUFFERED=1 XFORMERS_DISABLE_FLASH_ATTN=1 \
+      /build/build-wheel.sh .
 SHELL ["/bin/sh", "-c"]
 
 WORKDIR /build

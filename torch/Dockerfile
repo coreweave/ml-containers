@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.10
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:13.2.0-devel-ubuntu22.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:13.2.0-base-ubuntu22.04"
 
@@ -7,7 +7,7 @@ ARG BUILD_TORCH_VISION_VERSION="0.26.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.11.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="2.12"
 ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
-ARG BUILD_FLASH_ATTN_3_VERSION="1ceaa984b2f348caea18b39a98458d33b4ea7a09"
+ARG BUILD_FLASH_ATTN_3_VERSION="15270e66dc88d70d08f6ba6003eb17e7307149b0"
 ARG BUILD_FLASH_ATTN_4_VERSION="e065bf1ba1091040eeaa9328846c3bd31c718543"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
@@ -18,7 +18,16 @@ ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
 
+ARG SCCACHE_VERSION="0.14.0"
+
 # region Downloads
+
+FROM alpine/curl:8.17.0 AS sccache-downloader
+ARG SCCACHE_VERSION
+RUN ARCH=$(uname -m) && \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
+    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
+    chmod 755 /opt/sccache
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
@@ -100,8 +109,8 @@ FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
 RUN if [ -n "$BUILD_FLASH_ATTN_3_VERSION" ]; then \
       ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_3_VERSION}" && \
-      git -C flash-attention cherry-pick -n 3edf7e0daa62662cd2dd2ec8fd999dd7f254415c && \
-      git -C flash-attention cherry-pick -n afc97c60f799e470886c154e3473df938f8fa93d; \
+      git -C flash-attention/csrc/cutlass fetch origin +refs/tags/v4.4.2:refs/tags/v4.4.2 && \
+      git -C flash-attention/csrc/cutlass checkout v4.4.2; \
     else \
       mkdir flash-attention; \
     fi
@@ -153,9 +162,7 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
 FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
 ENV DEBIAN_FRONTEND=noninteractive
 
-ARG BUILD_CCACHE_SIZE="1Gi"
-
-# ninja-build, ccache, and lld are optional but improve the build.
+# ninja-build and lld are optional but improve the build.
 # Remove PEP 668 marker since containers are often single-purpose
 # and thus do not inherently need to be pushed into venv isolation.
 RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
@@ -178,7 +185,7 @@ RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
 
-COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+COPY --link --from=torch-common --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 
 RUN CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     CUDA_MINOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f2) && \
@@ -206,25 +213,22 @@ RUN apt-get -qq update && apt-get -qq install -y \
     apt-get clean && \
     python3 -m pip install --no-cache-dir 'cmake==3.31.6'
 
-RUN mkdir /tmp/ccache-install && \
-    cd /tmp/ccache-install && \
-    CCACHE_URL='https://github.com/ccache/ccache/releases/download/v4.8.2/ccache-4.8.2.tar.xz' && \
-    wget -qO - "$CCACHE_URL" | tar --strip-components 1 -xJf - && \
-    mkdir build && \
-    cd build && \
-    cmake -B. -S.. -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build . --config Release && \
-    make install && \
-    cd ../.. && \
-    rm -rf /tmp/ccache-install && \
-    ccache -M "${BUILD_CCACHE_SIZE}" && \
-    ccache -F 0
+# Setup for sccache and its wrappers.
+# Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
+COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
+COPY --link --from=common --chmod=755 sccache*.sh /opt/
+COPY --link --from=common sccache.toml /etc/sccache.toml
+RUN sed -Ei 's@^(key_prefix.*)misc@\1torch@' /etc/sccache.toml
+ENV SCCACHE_CONF=/etc/sccache.toml
 
 # Build-time environment variables
-ENV CCACHE_DIR=/ccache \
-    CMAKE_C_COMPILER_LAUNCHER=ccache \
-    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
-    CMAKE_CUDA_COMPILER_LAUNCHER=ccache
+ENV CC=/opt/sccache-cc.sh \
+    CXX=/opt/sccache-c++.sh
+
+# Skip nvcc's -MD dependency generation in torch extension builds,
+# which sccache cannot cache. These are always built from scratch,
+# so incremental build dependency tracking has no value anyway.
+ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 # Suppress less-relevant-to-us warnings from the packages being built
 ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result" \
@@ -248,6 +252,8 @@ RUN LLVM_VERSION='18' && \
     { SETUP_TOOLCHAIN || { sleep "$(shuf -i10-20 -n1)" && SETUP_TOOLCHAIN; }; } && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 13 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 13 && \
+    update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 1 && \
+    update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 1 && \
     update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-13 13 && \
     if [ "$(uname -m)" != 'aarch64' ]; then \
       update-alternatives --install /usr/bin/ld ld "/usr/bin/ld.lld-$LLVM_VERSION" 1; \
@@ -299,9 +305,9 @@ ENV C_INCLUDE_PATH="${AOCL_BASE}/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}" \
 FROM builder-base-${TARGETARCH} AS builder-base
 RUN mkdir /build /build/dist
 WORKDIR /build
-COPY --chmod=755 effective_cpu_count.sh .
-COPY --chmod=755 scale.sh .
-COPY compiler_wrapper.f95 .
+COPY --link --from=torch-common --chmod=755 effective_cpu_count.sh .
+COPY --link --from=torch-common --chmod=755 scale.sh .
+COPY --link --from=torch-common compiler_wrapper.f95 .
 ARG AMD64_NATIVE_ARCH="skylake"
 ARG ARM64_NATIVE_ARCH="armv8.5-a+nopredres"
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
@@ -368,7 +374,11 @@ ENV CMAKE_PREFIX_PATH=/usr/bin/ \
 ARG BUILD_TRITON
 ARG BUILD_MAX_JOBS=""
 RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     if [ "$BUILD_TRITON" = '1' ]; then \
       pip3 install --no-cache-dir pybind11 lit && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
@@ -402,7 +412,7 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     esac && \
     { printf '%s' \
       "-Wno-deprecated-gpu-targets" \
-      " -diag-suppress 191,186,177" \
+      " --diag-suppress=191,186,177" \
       " -Xcompiler -Wno-sign-compare" \
       ",-Wno-deprecated-declarations" \
       ",-Wno-unused-parameter" \
@@ -411,13 +421,25 @@ RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
       "${FLAGS:+ $FLAGS}" && echo; \
     } > /build/nvcc.conf
 
-COPY --link --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+COPY --link --from=torch-common --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
     CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py' \
     CUDACXX='/build/nvcc-wrapper.py'
 # Filter these codes because we already build for the architecture-specific
 # versions of them instead.
 ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;compute_75;compute_90;compute_100'
+
+# Manually replicate the sccache-friendly settings that PyTorch applies when it
+# auto-detects sccache at configure time. Without sccache on the PATH during the
+# CMake configure step (e.g. when sccache is set manually as a compiler
+# launcher), the auto-detection doesn't fire and nvcc falls back to response
+# files, which cause sccache to consider the call non-cacheable.
+#
+# Upstream reference:
+#   https://github.com/pytorch/pytorch/blob/v2.11.0/cmake/Dependencies.cmake#L68-L74
+ENV CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF \
+    CMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF \
+    CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF
 
 # If the directory /opt/nccl-tests exists,
 # the base image is assumed to be nccl-tests,
@@ -448,7 +470,11 @@ ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;comput
 ARG BUILD_CXX11_ABI=""
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
@@ -463,9 +489,6 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     ./storage-info.sh . && \
     cd pytorch && \
     ../storage-info.sh . && \
-    mkdir build && \
-    ln -s /usr/bin/cc build/cc && \
-    ln -s /usr/bin/c++ build/c++ && \
     if [ "$(uname -m)" = 'aarch64' ]; then \
       export USE_PRIORITIZED_TEXT_FOR_LD=1; \
     fi && \
@@ -479,11 +502,8 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     USE_CUDNN=1 \
     BUILD_TORCH=ON \
     BUILD_TEST=0 \
-    CUDA_HOST_COMPILER=cc \
     USE_CUDA=1 \
     USE_NNPACK=1 \
-    CC=cc \
-    CXX=c++ \
     USE_BLAS=1 \
     USE_LAPACK=1 \
     WITH_BLAS=FLAME \
@@ -504,34 +524,19 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd vision && \
-    mkdir build && \
-    ln -s /usr/bin/cc build/cc && \
-    ln -s /usr/bin/c++ build/c++ && \
-    { if [ -d /opt/nccl-tests ]; then \
-      export \
-        USE_DISTRIBUTED=1 \
-        USE_NCCL=1 USE_SYSTEM_NCCL=1 \
-        UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
-        USE_NCCL_WITH_UCC=1 \
-        USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
-    USE_CUDNN=1 \
-    USE_OPENCV=1 \
-    BUILD_TORCH=ON \
-    BUILD_TEST=0 \
-    CUDA_HOST_COMPILER=cc \
     USE_CUDA=1 \
     FORCE_CUDA=1 \
-    USE_NNPACK=1 \
-    CC=cc \
-    CXX=c++ \
     BUILD_VERSION="$(../version-string.sh "$TORCH_VISION_VERSION")" \
-    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     /build/build-wheel.sh
 
 FROM builder-base AS torchaudio-builder
@@ -544,34 +549,19 @@ RUN pip3 install --no-cache-dir --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     cd audio && \
-    mkdir build && \
-    ln -s /usr/bin/cc build/cc && \
-    ln -s /usr/bin/c++ build/c++ && \
-    { if [ -d /opt/nccl-tests ]; then \
-      export \
-        USE_DISTRIBUTED=1 \
-        USE_NCCL=1 USE_SYSTEM_NCCL=1 \
-        UCC_HOME=${HPCX_UCC_DIR} UCX_HOME=${HPCX_UCX_DIR} \
-        USE_NCCL_WITH_UCC=1 \
-        USE_UCC=1 USE_SYSTEM_UCC=1; fi; } && \
-    USE_CUDNN=1 \
-    USE_OPENCV=1 \
-    BUILD_TORCH=ON \
-    BUILD_TEST=0 \
-    CUDA_HOST_COMPILER=cc \
     USE_CUDA=1 \
     FORCE_CUDA=1 \
-    USE_NNPACK=1 \
-    CC=cc \
-    CXX=c++ \
     BUILD_VERSION="$(../version-string.sh "$TORCH_AUDIO_VERSION")" \
-    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     /build/build-wheel.sh
 
 FROM builder-base AS transformerengine-builder
@@ -580,12 +570,18 @@ RUN rm ./dist/*
 # Build TransformerEngine
 ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
+ENV NVTE_CMAKE_EXTRA_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF'
 
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
-    --mount=type=cache,target=/ccache \
-    export MAX_JOBS=$(($(./effective_cpu_count.sh) + 2)) && \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
+    export MAX_JOBS=$(./scale.sh "$(./effective_cpu_count.sh)" 7 32) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$MAX_JOBS}" && \
-    echo "MAX_JOBS: ${MAX_JOBS}" && \
+    export NVTE_BUILD_THREADS_PER_JOB=7 && \
+    echo "MAX_JOBS: ${MAX_JOBS}; NVTE_BUILD_THREADS_PER_JOB: ${NVTE_BUILD_THREADS_PER_JOB}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     case "${CUDA_VERSION}" in 12.[0123456].*) \
@@ -603,8 +599,12 @@ FROM flash-attn-builder-base AS flash-attn-builder
 
 # Build flash-attn
 RUN --mount=type=bind,from=flash-attn-downloader,source=/git/flash-attention,target=flash-attention/,rw \
-    --mount=type=cache,target=/ccache \
-    export CC=$(realpath -e ./compiler) \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
+    export CC_WRAPPED=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 8 12)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
@@ -628,11 +628,15 @@ ENV FLASH_ATTN_CUDA_ARCHS='80;90;100;120'
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
-    --mount=type=cache,target=/ccache \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     if [ ! -d flash-attention/hopper ]; then \
       echo "Not compiling flash-attn v3" && exit 0; \
     fi && \
-    export CC=$(realpath -e ./compiler) \
+    export CC_WRAPPED=$(realpath -e ./compiler) \
       MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 10 6)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
@@ -646,8 +650,14 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_100a,code=sm_100a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
-      -e 's@if bare_metal_version != Version("12.8"):@if bare_metal_version < Version("12.8"):@' \
-      -e 's@code=sm_80@code=[sm_80,sm_120]@' \
+      -e 's@bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")@bare_metal_version < Version("12.8")@' \
+      -e 's@"--resource-usage",@# "--resource-usage",@' \
+      -e 's@, "-DPy_LIMITED_API=0x03090000"@@' \
+      -e 's@py_limited_api=True,@py_limited_api=False,@' \
+      -e 's@"py_limited_api": "cp39"@@' \
+      -e 's@subprocess\.run.*git.*submodule.*update.*cutlass.*$@pass@' \
+      flash-attention/hopper/setup.py && \
+    sed -Ei 's@(\s+cuda_post_cflags_sm80(_sm90)? = .*)$@\1 + '"['-gencode', 'arch=compute_120f,code=sm_120f']"'@' \
       flash-attention/hopper/setup.py && \
     NVCC_THREADS=4 /build/build-wheel.sh flash-attention/hopper
 
@@ -740,7 +750,7 @@ ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 
-COPY --link --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
+COPY --link --from=torch-common --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 # - libnvjitlink-X-Y only exists for CUDA versions >= 12-0.
 # - Don't mess with libnccl2 when using nccl-tests as a base,
 #   checked via the existence of the directory "/opt/nccl-tests".

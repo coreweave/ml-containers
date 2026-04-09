@@ -2,3 +2,15 @@
 /vllm-tensorizer/ @coreweave/inference
 /.github/configurations/vllm-tensorizer.yml @coreweave/inference
 /.github/workflows/vllm-tensorizer.yml @coreweave/inference
+
+# PyTorch-related
+/torch/ @Eta0
+/torch-extras/ @Eta0
+/torch-common/ @Eta0
+/.github/workflows/torch*.yml @Eta0
+/.github/workflows/read-configuration.yml @Eta0
+/.github/configurations/torch*.yml @Eta0
+
+# Shared build infrastructure
+/.github/workflows/build.yml @Eta0
+/common/ @Eta0

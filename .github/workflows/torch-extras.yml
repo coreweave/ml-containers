@@ -52,6 +52,7 @@ on:
   push:
     paths:
       - "torch-extras/**"
+      - "torch-common/**"
       - ".github/workflows/torch-extras.yml"
 
 
@@ -161,6 +162,10 @@ jobs:
       buildkit-index: ${{ inputs.buildkit-index }}
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
+      build-contexts: |
+        torch-common=torch-common
+        common=common
+      object-storage-secrets: true
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
@@ -179,6 +184,10 @@ jobs:
       buildkit-index: ${{ inputs.buildkit-index || 0 }}
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
+      build-contexts: |
+        torch-common=torch-common
+        common=common
+      object-storage-secrets: true
       tag-suffix: ${{ matrix.bases.tag }}
       build-args: |
         BASE_IMAGE=${{ matrix.bases.image }}
