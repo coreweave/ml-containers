@@ -1,5 +1,14 @@
+# syntax=docker/dockerfile:1.10
 ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1"
 ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1"
+ARG SCCACHE_VERSION="0.14.0"
+
+FROM alpine/curl:8.17.0 AS sccache-downloader
+ARG SCCACHE_VERSION
+RUN ARCH=$(uname -m) && \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
+    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
+    chmod 755 /opt/sccache
 
 FROM scratch AS freezer
 WORKDIR /
@@ -25,9 +34,19 @@ WORKDIR /workspace
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /opt/constraints.txt
 
-COPY --link --chmod=755 nvcc-wrapper.py /opt/nvcc-wrapper.py
+COPY --link --from=common --chmod=755 nvcc-wrapper.py /opt/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/opt/nvcc-wrapper.py' \
-    CMAKE_CUDA_COMPILER='/opt/nvcc-wrapper.py'
+    CUDACXX='/opt/nvcc-wrapper.py'
+
+# Setup for sccache and its wrappers.
+COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
+COPY --link --from=common --chmod=755 sccache*.sh /opt/
+COPY --link --from=common sccache.toml /etc/sccache.toml
+RUN sed -Ei 's@^(key_prefix.*)misc@\1vllm-tensorizer@' /etc/sccache.toml
+ENV SCCACHE_CONF=/etc/sccache.toml
+ENV CC=/opt/sccache-cc.sh \
+    CXX=/opt/sccache-c++.sh
+ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 ARG TARGETPLATFORM
 # Switch 9.0, 10.0, and 12.0 to -a variants; preserve originals for PTX
@@ -105,7 +124,13 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
+    export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
     if [ -f 'use_existing_torch.py' ]; then \
@@ -115,7 +140,6 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
         e489ad7a210f4234db696d1f2749d5f3662fa65b:use_existing_torch.py \
         | python3 -; \
     fi && \
-    USE_CUDNN=1 USE_CUSPARSELT=1 \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
@@ -126,6 +150,11 @@ WORKDIR /wheels
 
 FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     [ -n "${CUDA_VERSION}" ] && \
@@ -133,7 +162,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       requests nvidia-ml-py ninja tqdm filelock \
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
-      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" \
+      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       'apache-tvm-ffi>=0.1,<0.2' && \
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
@@ -149,6 +178,11 @@ WORKDIR /wheels
 FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/workspace,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
     python3 -m pip install --no-cache-dir \
     'setuptools>=77.0.3,<81.0.0' \
@@ -163,6 +197,11 @@ FROM builder-base AS infinistore-builder
 # InfiniStore is required when installing LMCache
 # It must also be built from source as it also doesn't have pre-built ARM binaries
 RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target=/workspace,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     apt-get -qq update && \
     apt-get -q install --no-install-recommends --no-upgrade -y \
       libuv1-dev libflatbuffers-dev libspdlog-dev \
@@ -175,6 +214,11 @@ RUN --mount=type=bind,from=infinistore-downloader,source=/git/InfiniStore,target
 
 FROM builder-base AS deepgemm-builder
 RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/workspace,rw \
+    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
     /opt/build.sh
 
@@ -188,7 +232,12 @@ RUN apt-get -qq update && \
 ARG NIXL_TAG='0.2.0'
 ARG NIXL_UCX_HOME='/opt/hpcx/ucx'
 
-RUN mkdir /tmp/nixl && \
+RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=tmpfs,target=/sccache \
+    --mount=type=tmpfs,target=/tmp \
+    . /opt/sccache-start.sh && \
+    mkdir /tmp/nixl && \
     cd /tmp/nixl && \
     wget "https://github.com/ai-dynamo/nixl/archive/refs/tags/${NIXL_TAG}.tar.gz" -qO- \
     | tar --strip-components=1 -xzf - && \

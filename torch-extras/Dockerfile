@@ -160,7 +160,7 @@ ENV CC=/opt/sccache-cc.sh \
 # so incremental build dependency tracking has no value anyway.
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
-COPY --link --from=torch-common --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
+COPY --link --from=common --chmod=755 nvcc-wrapper.py /build/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
     CMAKE_CUDA_COMPILER='/build/nvcc-wrapper.py' \
     CUDACXX='/build/nvcc-wrapper.py'
