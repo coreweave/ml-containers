@@ -47,9 +47,6 @@ ENV SCCACHE_CONF=/etc/sccache.toml
 ENV CC=/opt/sccache-cc.sh \
     CXX=/opt/sccache-c++.sh
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
-ENV CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF \
-    CMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF \
-    CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF
 
 ARG TARGETPLATFORM
 # Switch 9.0, 10.0, and 12.0 to -a variants; preserve originals for PTX
@@ -142,7 +139,6 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
         e489ad7a210f4234db696d1f2749d5f3662fa65b:use_existing_torch.py \
         | python3 -; \
     fi && \
-    USE_CUDNN=1 USE_CUSPARSELT=1 \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
