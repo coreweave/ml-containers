@@ -165,7 +165,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       requests nvidia-ml-py ninja tqdm filelock \
       'nvidia-cudnn-frontend>=1.13.0' \
       "cuda-python~=${CUDA_VERSION}" \
-      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}" \
+      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       'apache-tvm-ffi>=0.1,<0.2' && \
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
