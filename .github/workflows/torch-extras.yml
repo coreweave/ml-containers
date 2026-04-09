@@ -43,6 +43,7 @@ on:
   push:
     paths:
       - "torch-extras/**"
+      - "torch-common/**"
       - ".github/workflows/torch-extras.yml"
 
 
@@ -59,7 +60,7 @@ jobs:
     outputs:
       bases-list: ${{ steps.choose-bases.outputs.list }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332  # v4.1.7
         with:
           fetch-depth: 0
       - name: Check if torch-extras needs to be rebuilt from previous bases
@@ -150,6 +151,10 @@ jobs:
     with:
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
+      build-contexts: |
+        torch-common=torch-common
+        common=common
+      object-storage-secrets: true
       tag-suffix: ${{ inputs.tag }}
       cache-key: ${{ inputs.cache-key }}
       build-args: |
@@ -167,6 +172,10 @@ jobs:
     with:
       image-name: ${{ inputs.image-name || 'torch-extras' }}
       folder: torch-extras
+      build-contexts: |
+        torch-common=torch-common
+        common=common
+      object-storage-secrets: true
       tag-suffix: ${{ matrix.bases.tag }}
       build-args: |
         BASE_IMAGE=${{ matrix.bases.image }}

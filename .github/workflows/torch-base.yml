@@ -14,6 +14,7 @@ on:
   push:
     paths:
       - "torch/**"
+      - "torch-common/**"
       - ".github/configurations/torch-base.yml"
       - ".github/workflows/torch-base.yml"
       - ".github/workflows/torch.yml"

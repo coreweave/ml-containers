@@ -24,6 +24,15 @@ on:
         description: "Platforms for which to build (default: linux/amd64,linux/arm64)"
         type: string
         default: linux/amd64,linux/arm64
+      build-contexts:
+        required: false
+        description: "Additional named build context directories (e.g. 'common=common')"
+        type: string
+      object-storage-secrets:
+        required: false
+        description: "Pass object storage credentials as build secrets"
+        type: boolean
+        default: false
     outputs:
       outcome:
         description: "The outcome of the build"
@@ -64,7 +73,7 @@ jobs:
         run: echo "TAG_SUFFIX=-${{ inputs.tag-suffix }}" >> $GITHUB_ENV
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v6.0.0
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf  # v6.0.0
         with:
           images: ${{ steps.registry.outputs.image }}
           tags: |
@@ -102,14 +111,14 @@ jobs:
       digest-amd64: ${{ steps.export.outputs.digest-amd64 }}
       digest-arm64: ${{ steps.export.outputs.digest-arm64 }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4.0.0
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
         with:
           driver: remote
           endpoint: unix:///run/buildkit/buildkitd.sock
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -122,17 +131,21 @@ jobs:
           echo "ref=${{ needs.prepare.outputs.registry }}/buildcache:${KEY}" >> "$GITHUB_OUTPUT"
       - name: Build and push by digest
         id: docker-build
-        uses: docker/build-push-action@v7.0.0
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294  # v7.0.0
         env:
           DOCKER_BUILD_SUMMARY: false
           DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: ${{ inputs.folder }}
+          build-contexts: ${{ inputs.build-contexts }}
           build-args: |-
             ${{ inputs.build-args }}
           labels: ${{ needs.prepare.outputs.labels }}
           platforms: ${{ matrix.platform }}
           outputs: type=image,"name=${{ needs.prepare.outputs.image }}",push-by-digest=true,name-canonical=true,push=true
+          secrets: |
+            ${{ inputs.object-storage-secrets && format('s3_access_key_id={0}', secrets.SCCACHE_S3_ACCESS_KEY_ID) || '' }}
+            ${{ inputs.object-storage-secrets && format('s3_secret_access_key={0}', secrets.SCCACHE_S3_SECRET_ACCESS_KEY) || '' }}
           cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
           cache-to: type=registry,ref=${{ steps.cache.outputs.ref }},mode=max
       - name: Export digest
@@ -152,9 +165,9 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4.0.0
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -218,13 +231,13 @@ jobs:
                 "${BUILD_ARGS}";
             fi;
           } >> "${GITHUB_STEP_SUMMARY}"
-      - uses: 8BitJonny/gh-get-current-pr@2.1.3
+      - uses: 8BitJonny/gh-get-current-pr@2501fb7d90d212808928edebbea7f1194b592fa0  # v2.1.3
         id: PR
         with:
           filterOutClosed: true
       - name: Comment
         if: steps.PR.outputs.number
-        uses: peter-evans/create-or-update-comment@v5.0.0
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9  # v5.0.0
         with:
           issue-number: ${{ steps.PR.outputs.number }}
           body: >
