@@ -36,7 +36,7 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 
 COPY --link --from=common --chmod=755 nvcc-wrapper.py /opt/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/opt/nvcc-wrapper.py' \
-    CMAKE_CUDA_COMPILER='/opt/nvcc-wrapper.py'
+    CUDACXX='/opt/nvcc-wrapper.py'
 
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
