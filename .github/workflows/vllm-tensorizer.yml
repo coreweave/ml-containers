@@ -22,6 +22,9 @@ jobs:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.vllm-commit }}
+      build-contexts: |
+        common=common
+      object-storage-secrets: true
       build-args: |
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
