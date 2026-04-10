@@ -55,6 +55,7 @@ cd sgl-kernel
 # FetchContent sub-project (e.g. dlpack inside mscclpp) that still declares
 # cmake_minimum_required(VERSION < 3.5).
 CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSGL_KERNEL_COMPILE_THREADS=8" \
+CMAKE_BUILD_PARALLEL_LEVEL=32 \
   python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
 )
 
