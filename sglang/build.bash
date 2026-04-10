@@ -24,7 +24,7 @@ _PIP_INSTALL() {
   "$@"
 }
 
-_PIP_INSTALL -U pip setuptools wheel build ninja 'scikit-build-core>=0.10'
+_PIP_INSTALL -U pip setuptools wheel build ninja 'scikit-build-core>=0.10' 'setuptools-scm>=8.0'
 # Do not install cmake via pip — the base image provides cmake from the Kitware
 # PPA (3.x). pip's cmake package installs 4.x which removed backward compat
 # with cmake_minimum_required(VERSION < 3.5) used by some sub-project deps.
@@ -54,8 +54,8 @@ cd sgl-kernel
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 silences the cmake 4.x breakage on any
 # FetchContent sub-project (e.g. dlpack inside mscclpp) that still declares
 # cmake_minimum_required(VERSION < 3.5).
-CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSGL_KERNEL_COMPILE_THREADS=4" \
-CMAKE_BUILD_PARALLEL_LEVEL=4 \
+CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSGL_KERNEL_COMPILE_THREADS=8" \
+CMAKE_BUILD_PARALLEL_LEVEL=8 \
   python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
 )
 
