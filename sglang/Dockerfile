@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:7d4f07a-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
 ARG BUILDER_IMAGE="${BASE_IMAGE}"
 ARG SCCACHE_VERSION="0.14.0"
 
@@ -14,8 +14,8 @@ FROM ${BUILDER_IMAGE} AS builder
 
 ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 
-ARG SGLANG_COMMIT='1519acf37c23f2189adb93f57ca9cd2db1bebf18'
-ARG DECORD_COMMIT='d2e56190286ae394032a8141885f76d5372bd44b'
+ARG SGLANG_COMMIT
+ARG DECORD_COMMIT
 
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache

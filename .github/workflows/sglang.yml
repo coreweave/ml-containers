@@ -1,24 +1,22 @@
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag for the build'
-        required: true
-      base-image:
-        description: 'Base image from which to build'
-        required: true
-      builder-image:
-        description: 'Image to use to compile wheels, if different from the base image'
-        required: false
   push:
     paths:
       - "sglang/**"
       - ".github/workflows/sglang.yml"
+      - ".github/configurations/sglang.yml"
 
 
 jobs:
+  get-config:
+    name: Get sglang config
+    uses: ./.github/workflows/read-configuration.yml
+    with:
+      path: ./.github/configurations/sglang.yml
   build:
     uses: ./.github/workflows/build.yml
+    needs: get-config
+    strategy:
+      matrix: ${{ fromJSON(needs.get-config.outputs.config) }}
     secrets: inherit
     with:
       image-name: sglang
@@ -26,7 +24,8 @@ jobs:
       platforms: linux/amd64,linux/arm64
       object-storage-secrets: true
       build-contexts: common=common
-      tag-suffix: ${{ inputs.tag || '7d4f07a-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1' }}
+      tag-suffix: ${{ matrix.tag }}
       build-args: |
-        BASE_IMAGE=${{ inputs.base-image || 'ghcr.io/coreweave/ml-containers/torch-extras:7d4f07a-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'}}
-        ${{ inputs.base-image && 'BASE_IMAGE=' }}${{ inputs.base-image}}
+        BASE_IMAGE=${{ matrix.base-image }}
+        SGLANG_COMMIT=${{ matrix.sglang-commit }}
+        DECORD_COMMIT=${{ matrix.decord-commit }}
