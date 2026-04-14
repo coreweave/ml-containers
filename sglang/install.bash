@@ -28,3 +28,9 @@ _PIP_INSTALL \
   'cuda-python==12.9' 'outlines==0.1.11' \
   'llguidance>=0.7.11,<0.8.0' \
   'xgrammar==0.1.32'
+
+# Make PyTorch's shared libs (libc10.so etc.) visible to the dynamic linker
+# so that torchao's CUDA extensions can load them at runtime.
+python3 -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))" \
+  > /etc/ld.so.conf.d/torch.conf
+ldconfig
