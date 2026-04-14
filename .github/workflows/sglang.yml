@@ -23,7 +23,7 @@ jobs:
     with:
       image-name: sglang
       folder: sglang
-      platforms: linux/amd64
+      platforms: linux/amd64,linux/arm64
       object-storage-secrets: true
       build-contexts: common=common
       tag-suffix: ${{ inputs.tag || '7d4f07a-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1' }}
