@@ -67,12 +67,15 @@ _BUILD python |& _LOG sglang.log
 
 if [ ! "$(uname -m)" = 'x86_64' ]; then
   # xgrammar (for sglang)
+  _PIP_INSTALL nanobind
   (
   git clone --recursive --filter=blob:none -b v0.1.32 https://github.com/mlc-ai/xgrammar && \
   cd xgrammar
   (
   mkdir build && cd build
-  cmake -S.. -B. -DCMAKE_BUILD_TYPE=Release -GNinja |& _LOG xgrammar.log
+  cmake -S.. -B. -DCMAKE_BUILD_TYPE=Release -GNinja \
+    -Dnanobind_DIR="$(python3 -c 'import nanobind; print(nanobind.cmake_dir())')" \
+    |& _LOG xgrammar.log
   cmake --build . |& _LOG xgrammar.log
   )
   _BUILD python |& _LOG xgrammar.log
