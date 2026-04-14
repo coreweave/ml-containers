@@ -13,6 +13,7 @@ RUN ARCH=$(uname -m) && \
 FROM ${BUILDER_IMAGE} AS builder
 
 ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
+ARG TARGETPLATFORM
 
 ARG SGLANG_COMMIT
 ARG DECORD_COMMIT
@@ -39,7 +40,9 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     mkdir /wheels && \
-    bash build.bash -a "${BUILD_TORCH_CUDA_ARCH_LIST}" && \
+    ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}" && \
+    [ "$TARGETPLATFORM" != "linux/arm64" ] || ARCH_LIST="9.0 10.0+PTX" && \
+    bash build.bash -a "${ARCH_LIST}" && \
     rm -rf /build/*
 COPY install.bash /wheels/
 
