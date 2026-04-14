@@ -25,7 +25,7 @@ _PIP_INSTALL \
   'msgspec' 'orjson' 'packaging' 'pillow' 'prometheus-client>=0.20.0' \
   'psutil' 'pydantic' 'python-multipart' 'pyzmq>=25.1.2' \
   'torchao>=0.9.0' 'uvicorn' 'uvloop' \
-  'cuda-python==12.9' 'outlines==0.1.11' \
+  "cuda-python==$(echo "${CUDA_VERSION}" | cut -d. -f1-2)" 'outlines==0.1.11' \
   'llguidance>=0.7.11,<0.8.0' \
   'xgrammar==0.1.32'
 
