@@ -74,11 +74,12 @@ if [ ! "$(uname -m)" = 'x86_64' ]; then
   (
   git clone --recursive --filter=blob:none -b v0.1.32 https://github.com/mlc-ai/xgrammar
   cd xgrammar
-  # xgrammar uses scikit-build-core so CMAKE_ARGS is picked up automatically;
-  # pyproject.toml lives at the repo root, not in a python/ subdirectory.
+  # Use pip wheel --no-build-isolation --no-deps (same as sgl-kernel) to skip
+  # the build-dep version check: xgrammar pins nanobind==2.5.0 exactly but we
+  # install whatever is current; scikit-build-core still picks up CMAKE_ARGS.
   CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -GNinja \
     -Dnanobind_DIR=$(python3 -c 'import nanobind; print(nanobind.cmake_dir())')" \
-    _BUILD . |& _LOG xgrammar.log
+    python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG xgrammar.log
   )
 
   # decord (for sglang)
