@@ -72,16 +72,13 @@ if [ ! "$(uname -m)" = 'x86_64' ]; then
   # xgrammar (for sglang)
   _PIP_INSTALL nanobind
   (
-  git clone --recursive --filter=blob:none -b v0.1.32 https://github.com/mlc-ai/xgrammar && \
+  git clone --recursive --filter=blob:none -b v0.1.32 https://github.com/mlc-ai/xgrammar
   cd xgrammar
-  (
-  mkdir build && cd build
-  cmake -S.. -B. -DCMAKE_BUILD_TYPE=Release -GNinja \
-    -Dnanobind_DIR="$(python3 -c 'import nanobind; print(nanobind.cmake_dir())')" \
-    |& _LOG xgrammar.log
-  cmake --build . |& _LOG xgrammar.log
-  )
-  _BUILD python |& _LOG xgrammar.log
+  # xgrammar uses scikit-build-core so CMAKE_ARGS is picked up automatically;
+  # pyproject.toml lives at the repo root, not in a python/ subdirectory.
+  CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -GNinja \
+    -Dnanobind_DIR=$(python3 -c 'import nanobind; print(nanobind.cmake_dir())')" \
+    _BUILD . |& _LOG xgrammar.log
   )
 
   # decord (for sglang)
