@@ -54,8 +54,11 @@ cd sgl-kernel
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 silences the cmake 4.x breakage on any
 # FetchContent sub-project (e.g. dlpack inside mscclpp) that still declares
 # cmake_minimum_required(VERSION < 3.5).
+# arm64 runners have less memory headroom; halve parallelism to avoid OOM.
+_CMAKE_PARALLEL=32
+[ "$(uname -m)" != 'aarch64' ] || _CMAKE_PARALLEL=16
 CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSGL_KERNEL_COMPILE_THREADS=8" \
-CMAKE_BUILD_PARALLEL_LEVEL=32 \
+CMAKE_BUILD_PARALLEL_LEVEL="${_CMAKE_PARALLEL}" \
   python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
 )
 
