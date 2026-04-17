@@ -72,13 +72,14 @@ if [ ! "$(uname -m)" = 'x86_64' ]; then
   # xgrammar (for sglang)
   _PIP_INSTALL nanobind
   (
-  git clone --recursive --filter=blob:none -b v0.1.32 https://github.com/mlc-ai/xgrammar
+  git clone --depth 1 --recursive --filter=blob:none -b v0.1.32 https://github.com/mlc-ai/xgrammar
   cd xgrammar
   # Use pip wheel --no-build-isolation --no-deps (same as sgl-kernel) to skip
   # the build-dep version check: xgrammar pins nanobind==2.5.0 exactly but we
   # install whatever is current; scikit-build-core still picks up CMAKE_ARGS.
   CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -GNinja \
     -Dnanobind_DIR=$(python3 -c 'import nanobind; print(nanobind.cmake_dir())')" \
+  CMAKE_BUILD_PARALLEL_LEVEL=$(nproc) \
     python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG xgrammar.log
   )
 
@@ -95,7 +96,7 @@ if [ ! "$(uname -m)" = 'x86_64' ]; then
   (
   mkdir build && cd build
   cmake -S.. -B. -DUSE_CUDA=0 -DCMAKE_BUILD_TYPE=Release -GNinja |& _LOG decord.log
-  cmake --build . |& _LOG decord.log
+  cmake --build . --parallel "$(nproc)" |& _LOG decord.log
   cp libdecord.so /wheels/libdecord.so
   )
   cd python

@@ -22,7 +22,8 @@ ARG DECORD_COMMIT
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache*.sh /opt/
 COPY --link --from=common sccache.toml /etc/sccache.toml
-RUN sed -Ei 's@^(key_prefix.*)misc@\1sglang@' /etc/sccache.toml
+RUN ARCH=$(uname -m) && \
+    sed -Ei "s@^(key_prefix.*)misc@\1sglang-${ARCH}@" /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml \
     CC=/opt/sccache-cc.sh \
     CXX=/opt/sccache-c++.sh \
