@@ -293,8 +293,16 @@ ARG TARGETPLATFORM
 # Ray was removed as a default dependancy by vllm in v18, but it is still required
 # for the multi-node setup.
 
-# Gemma 4 needs transformers > 5.5.0, but is packaged with 4 in vllm 19.
-# We must explicitly update it until vLLM updates their dependency.
+# Pin transformers to 4.57.6. transformers 5.x converts custom slow tokenizers
+# (e.g. Kimi K2.5's TikTokenTokenizer) to a fast TokenizersBackend that
+# re-numbers `added_tokens_decoder` IDs densely, dropping the gaps that the
+# original config declares — producing scrambled tool-call output on Kimi
+# K2.5 with no way to recover at the parser layer. vLLM 0.19 itself declares
+# `transformers<5,>=4.56.0`; the prior "transformers>=5.5.0" override was
+# out of spec. Gemma 4 (which needs transformers 5.x) should override at its
+# own infr image layer instead of forcing it here for everyone.
+# See projects/k25-bug/v019-tool-parser-investigation.md §6.5–6.6 in the
+# k25-bug workspace for the full diagnosis.
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
@@ -303,7 +311,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" "transformers>=5.5.0" -c /tmp/constraints.txt && \
+      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" "transformers==4.57.6" -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
 EXPOSE 8080
