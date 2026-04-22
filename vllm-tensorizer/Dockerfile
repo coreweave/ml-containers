@@ -293,8 +293,11 @@ ARG TARGETPLATFORM
 # Ray was removed as a default dependancy by vllm in v18, but it is still required
 # for the multi-node setup.
 
-# Gemma 4 needs transformers > 5.5.0, but is packaged with 4 in vllm 19.
-# We must explicitly update it until vLLM updates their dependency.
+# Pin transformers 4.57.6 for Kimi K2.5 tool-call compatibility.
+# 4.x does not have MODELS_WITH_INCORRECT_HUB_TOKENIZER_CLASS, so the
+# custom TikTokenTokenizer is preserved with sparse added_tokens_decoder IDs.
+# Note: 4.57.6 declares hf-hub<1.0, but vLLM needs hf-hub 1.x.
+# Testing whether pip resolves this cleanly or if we need --no-deps.
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
@@ -303,7 +306,9 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" "transformers>=5.5.0" -c /tmp/constraints.txt && \
+      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
+      'transformers==4.57.6' \
+      -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
 EXPOSE 8080

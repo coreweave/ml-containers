@@ -24,6 +24,7 @@ jobs:
       tag-suffix: ${{ matrix.vllm-commit }}
       build-contexts: |
         common=common
+      platforms: linux/amd64
       object-storage-secrets: true
       build-args: |
         VLLM_COMMIT=${{ matrix.vllm-commit }}
