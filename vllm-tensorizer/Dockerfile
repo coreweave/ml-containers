@@ -293,18 +293,8 @@ ARG TARGETPLATFORM
 # Ray was removed as a default dependancy by vllm in v18, but it is still required
 # for the multi-node setup.
 
-# Pin transformers, huggingface-hub, tokenizers, and hf-xet to the exact
-# versions in vLLM 0.19.1's requirements/test.txt — the combination their
-# CI tests against. Prevents pip from resolving to transformers==5.5.0,
-# which auto-converts custom slow tokenizers (Kimi K2.5's TikTokenTokenizer)
-# to a fast TokenizersBackend that re-numbers added_tokens_decoder IDs
-# densely — scrambling Kimi K2.5 tool-call output that no parser can recover.
-# Also prevents resolving to transformers 4.x, which drags huggingface_hub
-# back to 0.x and breaks vLLM's compiled C extensions on GPU (SIGSEGV).
-# transformers 5.5.3 keeps the slow TikTokenTokenizer path (sparse IDs)
-# while staying compatible with huggingface-hub 1.x.
-# See projects/k25-bug/v019-tool-parser-investigation.md §6.5–6.6 in the
-# k25-bug workspace for the full diagnosis.
+# i3: No transformers/hf-hub overrides — let vLLM 0.19.0's own pins resolve
+# (transformers>=4.56.0,<5 → 4.57.6, hf-hub per transformers dep chain).
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
@@ -314,7 +304,6 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
-      'transformers==5.5.3' 'huggingface-hub==1.10.2' 'hf-xet==1.4.3' 'tokenizers==0.22.2' \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
