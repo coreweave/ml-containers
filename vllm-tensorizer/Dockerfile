@@ -293,19 +293,9 @@ ARG TARGETPLATFORM
 # Ray was removed as a default dependancy by vllm in v18, but it is still required
 # for the multi-node setup.
 
-# Pin transformers to 5.5.4: satisfies both Gemma 4 (needs > 5.5.0) and
-# Kimi K2.5 (HF PR #45359 landed in 5.5.4 restores the custom slow
-# TikTokenTokenizer path with sparse added_tokens_decoder IDs — earlier
-# 5.x versions dense-pack them and scramble tool-call output). vLLM
-# 0.19.1's common.txt declares `transformers >= 4.56.0, != 5.5.0`, so
-# 5.5.4 is in-spec.
-#
-# Pin nixl and nixl-cu12 to 1.0.0: nixl-cu12 1.0.1 bundles a different
-# libucs.so with a static-destructor ordering bug in ucs_topo_release_devices
-# that SIGSEGVs during Python interpreter shutdown (atexit), causing
-# vLLM's model-registry subprocess to return non-zero even though the
-# inspection work completes. 1.0.0's bundled libucs.so does not have
-# this bug. Drop this pin once nixl ships a fixed release.
+# * Gemma 4 needs transformers > 5.5.0
+# * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
+# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 — pin both to 1.0.0
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
