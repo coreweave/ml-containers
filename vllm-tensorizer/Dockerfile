@@ -293,8 +293,19 @@ ARG TARGETPLATFORM
 # Ray was removed as a default dependancy by vllm in v18, but it is still required
 # for the multi-node setup.
 
-# Gemma 4 needs transformers > 5.5.0, but is packaged with 4 in vllm 19.
-# We must explicitly update it until vLLM updates their dependency.
+# Pin transformers to 5.5.4: satisfies both Gemma 4 (needs > 5.5.0) and
+# Kimi K2.5 (HF PR #45359 landed in 5.5.4 restores the custom slow
+# TikTokenTokenizer path with sparse added_tokens_decoder IDs — earlier
+# 5.x versions dense-pack them and scramble tool-call output). vLLM
+# 0.19.1's common.txt declares `transformers >= 4.56.0, != 5.5.0`, so
+# 5.5.4 is in-spec.
+#
+# Pin nixl and nixl-cu12 to 1.0.0: nixl-cu12 1.0.1 bundles a different
+# libucs.so with a static-destructor ordering bug in ucs_topo_release_devices
+# that SIGSEGVs during Python interpreter shutdown (atexit), causing
+# vLLM's model-registry subprocess to return non-zero even though the
+# inspection work completes. 1.0.0's bundled libucs.so does not have
+# this bug. Drop this pin once nixl ships a fixed release.
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
@@ -303,7 +314,9 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" "transformers>=5.5.0" -c /tmp/constraints.txt && \
+      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
+      'transformers==5.5.4' 'nixl==1.0.0' 'nixl-cu12==1.0.0' \
+      -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
 EXPOSE 8080
