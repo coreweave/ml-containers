@@ -295,7 +295,7 @@ ARG TARGETPLATFORM
 
 # * Gemma 4 needs transformers > 5.5.0
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
-# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 — pin both to 1.0.0
+# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) — pin both to 1.0.0
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
