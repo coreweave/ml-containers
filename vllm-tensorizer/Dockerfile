@@ -303,7 +303,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" "transformers>=5.5.0" -c /tmp/constraints.txt && \
+      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" "transformers==5.5.0" -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
 EXPOSE 8080
