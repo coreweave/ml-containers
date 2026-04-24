@@ -19,15 +19,18 @@ if [ -x /wheels/libdecord.so ]; then
   cp /wheels/libdecord.so /usr/local/lib/ && ldconfig
 fi
 
-SGLANG_EXTRA_PIP_DEPENDENCIES=()
-if [ "$(uname -m)" = 'x86_64' ]; then
-  SGLANG_EXTRA_PIP_DEPENDENCIES=('decord' 'xgrammar>=0.1.10')
-fi
 _PIP_INSTALL \
   'aiohttp' 'fastapi' \
   'hf_transfer' 'huggingface_hub' 'interegular' 'modelscope' \
-  'orjson' 'packaging' 'pillow' 'prometheus-client>=0.20.0' \
+  'msgspec' 'orjson' 'packaging' 'pillow' 'prometheus-client>=0.20.0' \
   'psutil' 'pydantic' 'python-multipart' 'pyzmq>=25.1.2' \
-  'torchao>=0.7.0' 'uvicorn' 'uvloop' \
-  'cuda-python' 'outlines>=0.0.44,<0.1.0' \
-  "${SGLANG_EXTRA_PIP_DEPENDENCIES[@]}"
+  'torchao>=0.9.0' 'uvicorn' 'uvloop' \
+  "cuda-python==$(echo "${CUDA_VERSION}" | cut -d. -f1-2)" 'outlines==0.1.11' \
+  'llguidance>=0.7.11,<0.8.0' \
+  'xgrammar==0.1.32'
+
+# Make PyTorch's shared libs (libc10.so etc.) visible to the dynamic linker
+# so that torchao's CUDA extensions can load them at runtime.
+python3 -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))" \
+  > /etc/ld.so.conf.d/torch.conf
+ldconfig
