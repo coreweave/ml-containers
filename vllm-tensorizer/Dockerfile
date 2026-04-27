@@ -49,20 +49,20 @@ ENV CC=/opt/sccache-cc.sh \
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 ARG TARGETPLATFORM
-# Switch 9.0, 10.0, and 12.0 to -a variants; preserve originals for PTX
+# Switch 9.0, 10.0, 10.3, and 12.0 to -a variants; preserve originals for PTX
 # Flashinfer v0.28.0 in particular can only build for 12.0a but not 12.0
 # vLLM Marlin MoE requires 8.0+PTX for non-FP8 WNA16 kernels. Keep the arm64
 # filter strict about unsupported sm80 SASS, but preserve compute80 PTX so
 # newer architectures can forward-JIT the generated sm80 kernels.
 RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
     echo "${TORCH_CUDA_ARCH_LIST}" \
-    | sed -E 's@\b(9|10|12)\.0\b@\1\.0a@g; s@\+PTX\b@@g' \
+    | sed -E 's@\b(9\.0|10\.0|10\.3|12\.0)\b@\1a@g; s@\+PTX\b@@g' \
     | tee /opt/arch_list.txt && \
     printf 'NVCC_WRAPPER_FILTER_CODES=' && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-      echo 'sm_80;sm_89;sm_90;sm_100;sm_120;compute_89;compute_90;compute_100;compute_120'; \
+      echo 'sm_80;sm_89;sm_90;sm_100;sm_103;sm_120;compute_89;compute_90;compute_100;compute_103;compute_120'; \
     else \
-      echo 'sm_90;sm_100;sm_120;compute_90;compute_100;compute_120'; \
+      echo 'sm_90;sm_100;sm_103;sm_120;compute_90;compute_100;compute_103;compute_120'; \
     fi \
     | tee /opt/filter_codes.txt && \
     printf '#!/bin/sh\nexport %s %s;\n' \
@@ -309,7 +309,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
-      'transformers==5.5.4' 'nixl==1.0.0' 'nixl-cu12==1.0.0' \
+      'transformers==5.5.4' 'nixl==1.0.0' "nixl-cu${CUDA_VERSION%%.*}==1.0.0" \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 

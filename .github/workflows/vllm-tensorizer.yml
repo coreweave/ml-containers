@@ -21,7 +21,7 @@ jobs:
     with:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
-      tag-suffix: ${{ matrix.vllm-commit }}
+      tag-suffix: ${{ contains(matrix.base-image, 'cuda12.') && format('cuda12.9-{0}', matrix.vllm-commit) || format('cuda13.2-{0}', matrix.vllm-commit) }}
       build-contexts: |
         common=common
       object-storage-secrets: true
@@ -29,5 +29,5 @@ jobs:
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         LMCACHE_COMMIT=${{ matrix.lmcache-commit }}
-        BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
-        FINAL_BASE_IMAGE=${{ matrix.final-base-image }}
+        BUILDER_BASE_IMAGE=${{ matrix.base-image }}
+        FINAL_BASE_IMAGE=${{ matrix.base-image }}
