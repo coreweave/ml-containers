@@ -49,14 +49,14 @@ ENV CC=/opt/sccache-cc.sh \
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 ARG TARGETPLATFORM
-# Switch 9.0, 10.0, 10.3, and 12.0 to -a variants; preserve originals for PTX
+# Switch 9.0, 10.0, 10.3, and 12.0 to -a variants; inject 10.3a after 10.0a (not in base TORCH_CUDA_ARCH_LIST)
 # Flashinfer v0.28.0 in particular can only build for 12.0a but not 12.0
 # vLLM Marlin MoE requires 8.0+PTX for non-FP8 WNA16 kernels. Keep the arm64
 # filter strict about unsupported sm80 SASS, but preserve compute80 PTX so
 # newer architectures can forward-JIT the generated sm80 kernels.
 RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
     echo "${TORCH_CUDA_ARCH_LIST}" \
-    | sed -E 's@\b(9\.0|10\.0|10\.3|12\.0)\b@\1a@g; s@\+PTX\b@@g' \
+    | sed -E 's@\b(9\.0|10\.0|10\.3|12\.0)\b@\1a@g; s@\b10\.0a\b@10.0a 10.3a@; s@\+PTX\b@@g' \
     | tee /opt/arch_list.txt && \
     printf 'NVCC_WRAPPER_FILTER_CODES=' && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
@@ -294,10 +294,6 @@ COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
 
-# Ray was removed as a default dependancy by vllm in v18, but it is still required
-# for the multi-node setup.
-
-# * Gemma 4 needs transformers > 5.5.0
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
 # * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) — pin both to 1.0.0
 
@@ -308,7 +304,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
+      'runai-model-streamer[s3,gcs,azure]>=0.15.7' "ray[cgraph]>=2.48.0" \
       'transformers==5.5.4' 'nixl==1.0.0' "nixl-cu${CUDA_VERSION%%.*}==1.0.0" \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
