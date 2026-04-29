@@ -22,7 +22,7 @@ RUN ldconfig
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-      python3-pip git ninja-build cmake && \
+      python3-pip git ninja-build cmake gcc-12 g++-12 && \
     apt-get clean && \
     pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
@@ -167,10 +167,11 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
-    for DIR in . flashinfer-cubin flashinfer-jit-cache; do ( \
+    for DIR in . flashinfer-cubin; do ( \
       cd "${DIR}" && \
       /opt/build.sh; \
-    ); done
+    ); done && \
+    ( cd flashinfer-jit-cache && CXX_WRAPPED=g++-12 CC_WRAPPED=gcc-12 /opt/build.sh )
 
 WORKDIR /wheels
 
