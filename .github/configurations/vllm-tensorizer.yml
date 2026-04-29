@@ -1,7 +1,7 @@
 vllm-commit:
-  - 'v0.19.1'
+  - 'v0.20.0'
 flashinfer-commit:
-  - 'v0.6.6'
+  - 'v0.6.8'
 lmcache-commit:
   - 'v0.4.2'
 builder-base-image:
