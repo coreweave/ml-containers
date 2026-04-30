@@ -22,7 +22,7 @@ RUN ldconfig
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-      python3-pip git ninja-build cmake && \
+      python3-pip git ninja-build cmake gcc-12 g++-12 && \
     apt-get clean && \
     pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
@@ -113,7 +113,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='477618cd51baffca09c4b0b87e97c03fe827ef03'
+ARG DEEPGEMM_COMMIT='891d57b4db1071624b5c8fa0d1e51cb317fa709f'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/deepseek-ai/DeepGEMM && \
     cd DeepGEMM && \
@@ -160,17 +160,18 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
-      'nvidia-cudnn-frontend>=1.13.0' \
+      'nvidia-cudnn-frontend>=1.13.0,<1.19.0' \
       "cuda-python~=${CUDA_VERSION}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
-      'apache-tvm-ffi>=0.1,<0.2' && \
+      'apache-tvm-ffi==0.1.9' && \
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
-    for DIR in . flashinfer-cubin flashinfer-jit-cache; do ( \
+    for DIR in . flashinfer-cubin; do ( \
       cd "${DIR}" && \
       /opt/build.sh; \
-    ); done
+    ); done && \
+    ( cd flashinfer-jit-cache && CXX_WRAPPED=g++-12 CC_WRAPPED=gcc-12 /opt/build.sh )
 
 WORKDIR /wheels
 
