@@ -226,6 +226,23 @@ RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/work
     . /opt/arch_flags.sh && \
     /opt/build.sh
 
+FROM builder-base AS deepep-builder
+ARG DEEPEP_COMMIT='73b6ea4'
+ARG NVSHMEM_VER='3.3.24'
+# DeepEP requires SM 9.0+ (Hopper/Blackwell). Use vLLM's install script
+# and filter out pre-SM90 arches so Blackwell (10.0) is also supported.
+RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/tmp/ep_kernels \
+    pip install --no-cache-dir uv && \
+    . /opt/arch_flags.sh && \
+    export NVCC_WRAPPER_FILTER_CODES="sm_80;sm_89;compute_80;compute_89;${NVCC_WRAPPER_FILTER_CODES}" && \
+    WORKSPACE=/tmp/deepep_build MODE=wheel \
+    DEEPEP_COMMIT_HASH="${DEEPEP_COMMIT}" \
+    NVSHMEM_VER="${NVSHMEM_VER}" \
+    bash /tmp/ep_kernels/install_python_libraries.sh && \
+    cp /tmp/deepep_build/dist/*.whl /wheels/ && \
+    mkdir -p /nvshmem_libs && \
+    cp /tmp/deepep_build/nvshmem/lib/libnvshmem*.so* /nvshmem_libs/
+
 FROM builder-base AS nixl-builder
 RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends --no-upgrade -y \
@@ -287,6 +304,12 @@ RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
 
 RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
+RUN --mount=type=bind,from=deepep-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
+
+COPY --link --from=deepep-builder /nvshmem_libs/ /usr/local/lib/
+RUN ldconfig
 
 COPY --link --from=nixl-builder /opt/nixl /opt/nixl
 COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib/python3/dist-packages/nixl.pth
