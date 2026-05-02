@@ -22,7 +22,7 @@ jobs:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.vllm-commit }}
-      platforms: linux/amd64
+      platforms: linux/arm64
       build-contexts: |
         common=common
       object-storage-secrets: true
