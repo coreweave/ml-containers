@@ -20,6 +20,10 @@ ARG MAX_JOBS="32"
 
 RUN ldconfig
 
+# The torch base image preinstalls newer runtime libs from this PPA. Keep the
+# libs, but avoid depending on Launchpad for builder prerequisites.
+RUN rm -f /etc/apt/sources.list.d/ubuntu-toolchain-r-ubuntu-test-jammy.list
+
 RUN apt-get -o Acquire::Retries=5 -qq update && \
     apt-get -o Acquire::Retries=5 -qq install -y --no-install-recommends \
       python3-pip git ninja-build cmake gcc-12 g++-12 && \
