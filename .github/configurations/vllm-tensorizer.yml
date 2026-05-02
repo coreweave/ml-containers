@@ -1,7 +1,7 @@
 vllm-repo:
   - 'https://github.com/alexeldeib/vllm'
 vllm-commit:
-  - '8f0c77a7c20db5843a2fadddf47a417b8777ee3c'
+  - '6acdb096fea8723d337292251068ee5928ce00a2'
 flashinfer-commit:
   - 'v0.6.8'
 lmcache-commit:
