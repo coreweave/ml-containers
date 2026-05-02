@@ -79,9 +79,10 @@ RUN printf '%s\n' \
 
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
+ARG VLLM_REPO="https://github.com/vllm-project/vllm"
 ARG VLLM_COMMIT
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
-      https://github.com/vllm-project/vllm && \
+      "${VLLM_REPO}" && \
     cd vllm && \
     git checkout "${VLLM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \

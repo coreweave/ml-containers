@@ -22,10 +22,12 @@ jobs:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.vllm-commit }}
+      platforms: linux/amd64
       build-contexts: |
         common=common
       object-storage-secrets: true
       build-args: |
+        VLLM_REPO=${{ matrix.vllm-repo }}
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         LMCACHE_COMMIT=${{ matrix.lmcache-commit }}
