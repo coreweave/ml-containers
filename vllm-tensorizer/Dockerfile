@@ -20,8 +20,8 @@ ARG MAX_JOBS="32"
 
 RUN ldconfig
 
-RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 -qq update && \
+    apt-get -o Acquire::Retries=5 -qq install -y --no-install-recommends \
       python3-pip git ninja-build cmake gcc-12 g++-12 && \
     apt-get clean && \
     pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
