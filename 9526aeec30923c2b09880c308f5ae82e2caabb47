@@ -1,0 +1,22 @@
+## Conversation
+The original request was to determine whether the repository already had a vLLM image compiled with SM103/GB300 support, and if not to create a draft PR, let GitHub Actions build/push the image, monitor the build, and smoke test it on GB300 using kube context infr-dev-us-e-04b. The first pass completed that with PR #159 and a broader commit, but the user objected to the apt-management changes. The commit was amended once to remove all apt-management changes. The user then asked why the sed expression was so much more complicated and agreed it should be simplified. This commit is the narrowed, simpler SM103-only version.
+
+## Actions
+Started from branch abatilo/vllm-sm103 in /Users/abatilo/work/ml-containers. Confirmed the branch tracked origin/abatilo/vllm-sm103 and read the active Dockerfile snippet plus PR body. Replaced the defensive, idempotent sed expression that removed existing 10.3/10.3a tokens and normalized whitespace with a simpler expression matching the existing Dockerfile style: first convert existing 9.0, 10.0, and 12.0 tokens to 9.0a, 10.0a, and 12.0a; then inject 10.3a after 10.0a; then strip +PTX. Updated the nearby comment so it no longer says 10.3 itself is being switched to an a variant. Left the sm_103/compute_103 denylist additions unchanged and did not touch any apt lines.
+
+Validation before amending: git diff --check passed. Ran the simplified expression with /opt/homebrew/bin/gsed against the current base list 8.0 8.9 9.0 10.0 12.0+PTX and confirmed the output is 8.0 8.9 9.0a 10.0a 10.3a 12.0a. Amended the existing PR commit with git commit --amend --no-edit, producing this commit.
+
+## Errors & Mistakes
+The previous amended commit was technically more robust against future Torch base images that already include 10.3 or 10.3a, but it made the sed much harder to read. The user preferred the simpler expression. That means this version is intentionally not idempotent for a hypothetical future base list that already includes 10.3 or 10.3a; a future maintainer should revisit the expression if the base image's TORCH_CUDA_ARCH_LIST changes.
+
+## Dead Ends
+No separate fixup commit was made. Amending was chosen to keep PR #159 as a single focused commit.
+
+## Hints for Future Agents
+The final intended diff is only in vllm-tensorizer/Dockerfile. It should not include removal of ubuntu-toolchain-r apt sources, apt retry flags, or any other builder package management behavior. The simplified sed assumes the current Torch base arch list lacks 10.3/10.3a. If CI fails in apt before compilation, do not reintroduce the apt workaround unless the user explicitly approves widening the PR again. If CI reaches compilation, verify logs show 10.3a in TORCH_CUDA_ARCH_LIST and nvcc flags with compute_103a,code=sm_103a. NVCC_WRAPPER_FILTER_CODES is a denylist; it should include plain sm_103/compute_103 but not sm_103a/compute_103a.
+
+## Codebase Discoveries
+The original Dockerfile style used a single compact GNU sed expression for arch conversion. This version preserves that style and adds only the minimal injection step needed for 10.3a.
+
+## Open Questions
+The amended commit had not yet been pushed when this note was written. PR #159 should receive another workflow run after force-pushing this commit, and the PR body should be updated to remove the previous claim that future base lists already containing 10.3 or 10.3a remain deduplicated.
