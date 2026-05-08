@@ -20,8 +20,12 @@ ARG MAX_JOBS="32"
 
 RUN ldconfig
 
-RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends \
+# The torch base image preinstalls newer runtime libs from this PPA. Keep the
+# libs, but avoid depending on Launchpad for builder prerequisites.
+RUN rm -f /etc/apt/sources.list.d/ubuntu-toolchain-r-ubuntu-test-jammy.list
+
+RUN apt-get -o Acquire::Retries=5 -qq update && \
+    apt-get -o Acquire::Retries=5 -qq install -y --no-install-recommends \
       python3-pip git ninja-build cmake && \
     apt-get clean && \
     pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
@@ -49,17 +53,20 @@ ENV CC=/opt/sccache-cc.sh \
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 ARG TARGETPLATFORM
-# Switch 9.0, 10.0, and 12.0 to -a variants; preserve originals for PTX
+# Switch 9.0, 10.0, 10.3, and 12.0 to -a variants; inject 10.3a after 10.0a.
 # Flashinfer v0.28.0 in particular can only build for 12.0a but not 12.0
+# vLLM Marlin MoE requires 8.0+PTX for non-FP8 WNA16 kernels. Keep the arm64
+# filter strict about unsupported sm80 SASS, but preserve compute80 PTX so
+# newer architectures can forward-JIT the generated sm80 kernels.
 RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
     echo "${TORCH_CUDA_ARCH_LIST}" \
-    | sed -E 's@\b(9|10|12)\.0\b@\1\.0a@g; s@\+PTX\b@@g' \
+    | sed -E 's@\b10\.3a?(\+PTX)?\b@@g; s@\b(9\.0|10\.0|12\.0)\b@\1a@g; s@\b10\.0a\b@10.0a 10.3a@; s@\+PTX\b@@g; s@  +@ @g; s@^ @@; s@ $@@' \
     | tee /opt/arch_list.txt && \
     printf 'NVCC_WRAPPER_FILTER_CODES=' && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-      echo 'sm_80;sm_89;sm_90;sm_100;sm_120;compute_80;compute_89;compute_90;compute_100;compute_120'; \
+      echo 'sm_80;sm_89;sm_90;sm_100;sm_103;sm_120;compute_89;compute_90;compute_100;compute_103;compute_120'; \
     else \
-      echo 'sm_90;sm_100;sm_120;compute_90;compute_100;compute_120'; \
+      echo 'sm_90;sm_100;sm_103;sm_120;compute_90;compute_100;compute_103;compute_120'; \
     fi \
     | tee /opt/filter_codes.txt && \
     printf '#!/bin/sh\nexport %s %s;\n' \
