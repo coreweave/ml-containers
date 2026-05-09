@@ -1,5 +1,5 @@
 vllm-commit:
-  - 'v0.20.0'
+  - 'v0.20.2rc0'
 flashinfer-commit:
   - 'v0.6.8'
 lmcache-commit:
