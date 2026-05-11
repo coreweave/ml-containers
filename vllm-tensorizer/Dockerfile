@@ -191,7 +191,8 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     . /opt/arch_flags.sh && \
     python3 -m pip install --no-cache-dir \
     'setuptools>=77.0.3,<81.0.0' \
-    'setuptools_scm>=8' && \
+    'setuptools_scm>=8' \
+    'wheel' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
