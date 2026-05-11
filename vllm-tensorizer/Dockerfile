@@ -25,7 +25,7 @@ RUN apt-get -qq update && \
       git ninja-build cmake gcc-12 g++-12 && \
     apt-get clean && \
     rm -f /usr/lib/python3*/EXTERNALLY-MANAGED && \
-    pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' setuptools_scm regex build
+    pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
 # Create the /wheels directory
 WORKDIR /wheels
@@ -191,8 +191,7 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     . /opt/arch_flags.sh && \
     python3 -m pip install --no-cache-dir \
     'setuptools>=77.0.3,<81.0.0' \
-    'setuptools_scm>=8' \
-    'wheel' && \
+    'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
