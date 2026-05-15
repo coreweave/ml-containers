@@ -21,7 +21,7 @@ jobs:
     with:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
-      tag-suffix: ${{ matrix.vllm-commit }}
+      tag-suffix: ${{ matrix.tag-suffix }}
       build-contexts: |
         common=common
       object-storage-secrets: true

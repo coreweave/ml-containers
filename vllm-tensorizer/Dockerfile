@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:17ad6db-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.2-1-torch2.10.0-vision0.25.0-audio2.10.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
 ARG SCCACHE_VERSION="0.14.0"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -22,9 +22,10 @@ RUN ldconfig
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-      python3-pip git ninja-build cmake gcc-12 g++-12 && \
+      git ninja-build cmake gcc-12 g++-12 && \
     apt-get clean && \
-    pip3 install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
+    rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
+    python3 -m pip install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
 # Create the /wheels directory
 WORKDIR /wheels
@@ -164,7 +165,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
       'nvidia-cudnn-frontend>=1.13.0,<1.19.0' \
-      "cuda-python~=${CUDA_VERSION}" \
+      "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       'apache-tvm-ffi==0.1.9' && \
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
@@ -264,7 +265,11 @@ FROM ${FINAL_BASE_IMAGE} AS base
 
 WORKDIR /workspace
 
-RUN apt-get -qq update && apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && apt-get clean
+RUN apt-get -qq update && \
+    apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && \
+    apt-get purge -y python3-jwt && \
+    apt-get clean && \
+    rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
