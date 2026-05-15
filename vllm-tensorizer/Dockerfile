@@ -24,7 +24,6 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       git ninja-build cmake gcc-12 g++-12 && \
     apt-get clean && \
-    rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
     python3 -m pip install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
 # Create the /wheels directory
@@ -268,8 +267,7 @@ WORKDIR /workspace
 RUN apt-get -qq update && \
     apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && \
     apt-get purge -y python3-jwt && \
-    apt-get clean && \
-    rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED
+    apt-get clean
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
