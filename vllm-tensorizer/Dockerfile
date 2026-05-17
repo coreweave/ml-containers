@@ -326,6 +326,8 @@ ARG TARGETPLATFORM
 # * Gemma 4 needs transformers > 5.5.0
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
 # * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) — pin both to 1.0.0
+# * llguidance bumped to 1.7 — vLLM's pin (<1.4) lacks JSON Schema "format": "uri" support
+#   (added in llguidance v1.6.0; mirrors upstream vllm-project/vllm#42150)
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
@@ -336,6 +338,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
       'transformers==5.5.4' 'nixl==1.0.0' 'nixl-cu12==1.0.0' \
+      'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
