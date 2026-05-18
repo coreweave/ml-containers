@@ -12,6 +12,14 @@ jobs:
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/vllm-tensorizer.yml
+      filter: |
+        .include |= map(. + {
+          "tag-suffix": (
+            .["vllm-commit"] + "-" +
+            (.["builder-base-image"] | match("cuda[0-9.]+").string) + "-" +
+            (.["builder-base-image"] | match("ubuntu[0-9.]+").string)
+          )
+        })
   build:
     uses: ./.github/workflows/build.yml
     needs: get-config
