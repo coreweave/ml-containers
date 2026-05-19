@@ -11,8 +11,8 @@ ARG BUILD_FLASH_ATTN_3_VERSION="15270e66dc88d70d08f6ba6003eb17e7307149b0"
 ARG BUILD_FLASH_ATTN_4_VERSION="e065bf1ba1091040eeaa9328846c3bd31c718543"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
-ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
-ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST="80;89;90;100;120"
+ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0+PTX"
+ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST="80;89;90;100"
 
 ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
@@ -392,8 +392,8 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
 
 ARG BUILD_TORCH_VERSION
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
-# Filter out the 10.0 & 12.0 arches on CUDA versions < 12.8
-ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0 12.0/}||${TORCH_CUDA_ARCH_LIST}"
+# Filter out the 10.0 arch on CUDA versions < 12.8
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0+PTX/}||${TORCH_CUDA_ARCH_LIST}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#13.?.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
@@ -403,11 +403,11 @@ ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
 RUN printf 'Arch: %s\nTORCH_CUDA_ARCH_LIST=%s\n' "$(uname -m)" "${TORCH_CUDA_ARCH_LIST}"
 
 ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
-# Add sm_100a & sm_120a builds unless NV_CUDA_LIB_VERSION matches 12.[0-7].*
+# Add sm_100a builds unless NV_CUDA_LIB_VERSION matches 12.[0-7].*
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[0-7].*) ;; *) \
       FLAGS="${FLAGS}$( \
-        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a 103a 103a \
+        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 100a 100a 103a 103a \
       )" ;; \
     esac && \
     { printf '%s' \
@@ -427,7 +427,7 @@ ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
     CUDACXX='/build/nvcc-wrapper.py'
 # Filter these codes because we already build for the architecture-specific
 # versions of them instead.
-ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;compute_75;compute_90;compute_100'
+ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;compute_70;compute_75;compute_90'
 
 # Manually replicate the sccache-friendly settings that PyTorch applies when it
 # auto-detects sccache at configure time. Without sccache on the PATH during the
@@ -624,7 +624,7 @@ RUN --mount=type=bind,from=flash-attn-builder,source=/build,target=/build :
 ARG BUILD_FLASH_ATTN_MAX_JOBS="${BUILD_FLASH_ATTN_MAX_JOBS:-3}"
 
 ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;compute_70;compute_75'
-ENV FLASH_ATTN_CUDA_ARCHS='80;90;100;120'
+ENV FLASH_ATTN_CUDA_ARCHS='80;90;100'
 # Build flash-attn v3
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,target=flash-attention/,rw \
@@ -656,8 +656,6 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
       -e 's@py_limited_api=True,@py_limited_api=False,@' \
       -e 's@"py_limited_api": "cp39"@@' \
       -e 's@subprocess\.run.*git.*submodule.*update.*cutlass.*$@pass@' \
-      flash-attention/hopper/setup.py && \
-    sed -Ei 's@(\s+cuda_post_cflags_sm80(_sm90)? = .*)$@\1 + '"['-gencode', 'arch=compute_120f,code=sm_120f']"'@' \
       flash-attention/hopper/setup.py && \
     NVCC_THREADS=4 /build/build-wheel.sh flash-attention/hopper
 
@@ -742,8 +740,8 @@ ARG BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_VERSION=$BUILD_TORCH_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
-# Filter out the 10.0 & 12.0 arches on CUDA versions < 12.8
-ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0 12.0/}||${TORCH_CUDA_ARCH_LIST}"
+# Filter out the 10.0 arch on CUDA versions < 12.8
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0+PTX/}||${TORCH_CUDA_ARCH_LIST}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#13.?.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"

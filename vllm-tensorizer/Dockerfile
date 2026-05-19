@@ -49,20 +49,20 @@ ENV CC=/opt/sccache-cc.sh \
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 ARG TARGETPLATFORM
-# Switch 9.x, 10.x, and 12.x to -a variants; inject 10.3a if absent.
-# Flashinfer v0.28.0 in particular can only build for 12.0a but not 12.0
+# Drop 12.x targets for this experiment. Switch 9.x and 10.x SASS targets to
+# -a variants; inject 10.3a if absent. Preserve 10.0+PTX for forward-JIT.
 # vLLM Marlin MoE requires 8.0+PTX for non-FP8 WNA16 kernels. Keep the arm64
-# filter strict about unsupported sm80 SASS, but preserve compute80 PTX so
-# newer architectures can forward-JIT the generated sm80 kernels.
+# filter strict about unsupported SASS, but preserve compute80 and compute100
+# PTX so newer architectures can forward-JIT the generated kernels.
 RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
     echo "${TORCH_CUDA_ARCH_LIST}" \
-    | sed -E 's@\b(9|10|12)\.([0-9]+)\b@\1.\2a@g; /\b10\.3a\b/!s@\b10\.0a\b@10.0a 10.3a@; s@\+PTX\b@@g' \
+    | sed -E 's@\b12\.[0-9]+(\+PTX)?\b ?@@g; s@\b(9|10)\.([0-9]+)\+PTX\b@__PTX_\1_\2__ \1.\2@g; s@\b(9|10)\.([0-9]+)\b@\1.\2a@g; s@__PTX_([0-9]+)_([0-9]+)__@\1.\2+PTX@g; /\b10\.3a\b/!s@\b10\.0a\b@10.0a 10.3a@; s@[[:space:]]+@ @g; s@^ @@; s@ $@@' \
     | tee /opt/arch_list.txt && \
     printf 'NVCC_WRAPPER_FILTER_CODES=' && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-      echo 'sm_80;sm_89;sm_90;sm_100;sm_103;sm_120;compute_89;compute_90;compute_100;compute_103;compute_120'; \
+      echo 'sm_80;sm_89;sm_90;sm_100;sm_103;compute_89;compute_90;compute_103'; \
     else \
-      echo 'sm_90;sm_100;sm_103;sm_120;compute_90;compute_100;compute_103;compute_120'; \
+      echo 'sm_90;sm_100;sm_103;compute_90;compute_103'; \
     fi \
     | tee /opt/filter_codes.txt && \
     printf '#!/bin/sh\nexport %s %s;\n' \
