@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:ff69109-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:ff69109-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
 ARG SCCACHE_VERSION="0.14.0"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -47,16 +47,17 @@ ENV SCCACHE_CONF=/etc/sccache.toml
 ENV CC=/opt/sccache-cc.sh \
     CXX=/opt/sccache-c++.sh
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
+ENV NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_103f,code=sm_103f"
 
 ARG TARGETPLATFORM
-# Switch 9.x, 10.x, and 12.x to -a variants; inject 10.3a if absent.
+# Switch 9.x, 10.x, and 12.x to -a variants; inject 10.3a + 10.3f if absent.
 # Flashinfer v0.28.0 in particular can only build for 12.0a but not 12.0
 # vLLM Marlin MoE requires 8.0+PTX for non-FP8 WNA16 kernels. Keep the arm64
 # filter strict about unsupported sm80 SASS, but preserve compute80 PTX so
 # newer architectures can forward-JIT the generated sm80 kernels.
 RUN printf 'TORCH_CUDA_ARCH_LIST=' && \
     echo "${TORCH_CUDA_ARCH_LIST}" \
-    | sed -E 's@\b(9|10|12)\.([0-9]+)\b@\1.\2a@g; /\b10\.3a\b/!s@\b10\.0a\b@10.0a 10.3a@; s@\+PTX\b@@g' \
+    | sed -E 's@\b(9|10|12)\.([0-9]+)\b@\1.\2a@g; /\b10\.3a\b/!s@\b10\.0a\b@10.0a 10.3a@; /\b10\.3f\b/!s@\b10\.3a\b@10.3a 10.3f@; s@\+PTX\b@@g' \
     | tee /opt/arch_list.txt && \
     printf 'NVCC_WRAPPER_FILTER_CODES=' && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
@@ -134,6 +135,11 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
     export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
+    { \
+      sed -i -E 's@(CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;)(11\.0;)@\110.3;\2@' CMakeLists.txt && \
+      grep -qE 'CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;10\.3;11\.0;' CMakeLists.txt \
+      || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
+    } && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
     if [ -f 'use_existing_torch.py' ]; then \
