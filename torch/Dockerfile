@@ -427,7 +427,7 @@ ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
     CUDACXX='/build/nvcc-wrapper.py'
 # Filter these codes because we already build for the architecture-specific
 # versions of them instead.
-ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;compute_75;compute_90;compute_100'
+ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_103;sm_120;compute_70;compute_75;compute_90;compute_100;compute_103'
 
 # Manually replicate the sccache-friendly settings that PyTorch applies when it
 # auto-detects sccache at configure time. Without sccache on the PATH during the
