@@ -584,15 +584,18 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     { \
-      sed -i -E 's@list\(APPEND NVTE_SPECIFIC_ARCHS "103a"\)@list(APPEND NVTE_SPECIFIC_ARCHS "103a" "103f")@' TransformerEngine/transformer_engine/common/CMakeLists.txt && \
-      grep -qF '"103a" "103f"' TransformerEngine/transformer_engine/common/CMakeLists.txt \
-      || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
+      awk '{ print } /list\(APPEND NVTE_SPECIFIC_ARCHS "103a"\)/ { print "    list(APPEND NVTE_GENERIC_ARCHS \"103f\")"; found = 1 } END { if (!found) exit 1 }' \
+        TransformerEngine/transformer_engine/common/CMakeLists.txt > /tmp/NVTE.CMakeLists.txt && \
+      mv /tmp/NVTE.CMakeLists.txt TransformerEngine/transformer_engine/common/CMakeLists.txt && \
+      grep -qF 'list(APPEND NVTE_GENERIC_ARCHS "103f")' TransformerEngine/transformer_engine/common/CMakeLists.txt \
+      || { echo 'Failed to patch TransformerEngine' >&2; exit 1; }; \
     } && \
     export MAX_JOBS=$(./scale.sh "$(./effective_cpu_count.sh)" 7 32) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$MAX_JOBS}" && \
     export NVTE_BUILD_THREADS_PER_JOB=7 && \
     echo "MAX_JOBS: ${MAX_JOBS}; NVTE_BUILD_THREADS_PER_JOB: ${NVTE_BUILD_THREADS_PER_JOB}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    NVCC_APPEND_FLAGS="$(echo "${NVCC_APPEND_FLAGS}" | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     case "${CUDA_VERSION}" in 12.[0123456].*) \
       export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
@@ -755,6 +758,17 @@ ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
 # Filter out the 10.0 & 12.0 arches on CUDA versions < 12.8
 ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.8.*}||${TORCH_CUDA_ARCH_LIST/ 10.0 12.0/}||${TORCH_CUDA_ARCH_LIST}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#13.?.?}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
+# Expose 10.3f to downstream extension builds when the CUDA toolkit can build it.
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##12.9.*}||${TORCH_CUDA_ARCH_LIST}||${TORCH_CUDA_ARCH_LIST} 10.3f"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#12.9.?}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#*||}"
+ENV TORCH_CUDA_ARCH_LIST="${CUDA_VERSION##13.*}||${TORCH_CUDA_ARCH_LIST}||${TORCH_CUDA_ARCH_LIST} 10.3f"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#13.?.?}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST#||*||}"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST%||*}"
