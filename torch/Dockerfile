@@ -407,7 +407,7 @@ ARG BUILD_NVCC_APPEND_FLAGS="-gencode=arch=compute_90a,code=sm_90a"
 RUN FLAGS="$BUILD_NVCC_APPEND_FLAGS" && \
     case "${NV_CUDA_LIB_VERSION}" in 12.[0-7].*) ;; *) \
       FLAGS="${FLAGS}$( \
-        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a 103a 103a \
+        printf -- ' -gencode=arch=compute_%s,code=sm_%s' 120a 120a 100a 100a 103a 103a 103f 103f \
       )" ;; \
     esac && \
     { printf '%s' \
@@ -427,7 +427,7 @@ ENV PYTORCH_NVCC='/build/nvcc-wrapper.py' \
     CUDACXX='/build/nvcc-wrapper.py'
 # Filter these codes because we already build for the architecture-specific
 # versions of them instead.
-ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_120;compute_70;compute_75;compute_90;compute_100'
+ENV NVCC_WRAPPER_FILTER_CODES='sm_70;sm_75;sm_90;sm_100;sm_103;sm_120;compute_70;compute_75;compute_90;compute_100;compute_103'
 
 # Manually replicate the sccache-friendly settings that PyTorch applies when it
 # auto-detects sccache at configure time. Without sccache on the PATH during the
@@ -475,6 +475,11 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
+    { \
+      sed -i -E "/supported_arches *= *\[/,/] *\$/ { /] *\$/ s@]@, '10.0f', '10.3f', '11.0f', '12.0f', '12.1f']@ }" pytorch/torch/utils/cpp_extension.py && \
+      grep -qF "'10.3f'" pytorch/torch/utils/cpp_extension.py \
+      || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
+    } && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
@@ -578,11 +583,16 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
+    { \
+      sed -i -E 's@list\(APPEND NVTE_GENERIC_ARCHS "100"\)@list(APPEND NVTE_GENERIC_ARCHS "100" "103f")@' TransformerEngine/transformer_engine/common/CMakeLists.txt && \
+      grep -qF '"100" "103f"' TransformerEngine/transformer_engine/common/CMakeLists.txt \
+      || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
+    } && \
     export MAX_JOBS=$(./scale.sh "$(./effective_cpu_count.sh)" 7 32) && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$MAX_JOBS}" && \
     export NVTE_BUILD_THREADS_PER_JOB=7 && \
     echo "MAX_JOBS: ${MAX_JOBS}; NVTE_BUILD_THREADS_PER_JOB: ${NVTE_BUILD_THREADS_PER_JOB}" && \
-    export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
+    export NVCC_APPEND_FLAGS="$(sed -E 's@ ?-gencode=arch=compute_103f,code=sm_103f@@' /build/nvcc.conf)" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     case "${CUDA_VERSION}" in 12.[0123456].*) \
       export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
@@ -647,7 +657,7 @@ RUN --mount=type=bind,from=flash-attn-3-downloader,source=/git/flash-attention,t
     else \
       export NVCC_WRAPPER_ATTEMPTS=2; \
     fi && \
-    NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_100a,code=sm_100a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
+    NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_103f,code=sm_103f -gencode=arch=compute_100a,code=sm_100a $(echo ${NVCC_APPEND_FLAGS} | sed -E 's@[[:space:]]?-gencode=[^[:space:]]+@@g')" && \
     echo "NVCC_APPEND_FLAGS: ${NVCC_APPEND_FLAGS}" && \
     sed -i \
       -e 's@bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")@bare_metal_version < Version("12.8")@' \
