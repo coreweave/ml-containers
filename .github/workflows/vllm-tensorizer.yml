@@ -18,6 +18,10 @@ jobs:
             .["vllm-commit"] + "-" +
             (.["builder-base-image"] | match("cuda[0-9.]+").string) + "-" +
             (.["builder-base-image"] | match("ubuntu[0-9.]+").string)
+          ),
+          "cache-key": (
+            (.["builder-base-image"] | match("cuda[0-9.]+").string) + "-" +
+            (.["builder-base-image"] | match("ubuntu[0-9.]+").string)
           )
         })
   build:
@@ -30,7 +34,7 @@ jobs:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.tag-suffix }}
-      cache-key: ${{ matrix.tag-suffix }}
+      cache-key: ${{ matrix.cache-key }}
       build-contexts: |
         common=common
       object-storage-secrets: true
