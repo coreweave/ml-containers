@@ -28,4 +28,3 @@ jobs:
       build-args: |
         BASE_IMAGE=${{ matrix.base-image }}
         SGLANG_COMMIT=${{ matrix.sglang-commit }}
-        DECORD_COMMIT=${{ matrix.decord-commit }}
