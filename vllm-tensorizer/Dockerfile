@@ -47,7 +47,6 @@ ENV SCCACHE_CONF=/etc/sccache.toml
 ENV CC=/opt/sccache-cc.sh \
     CXX=/opt/sccache-c++.sh
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
-ENV NVCC_APPEND_FLAGS="-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_103f,code=sm_103f"
 
 ARG TARGETPLATFORM
 # Switch 9.x, 10.x, and 12.x to -a variants; inject 10.3a + 10.3f if absent.
@@ -134,6 +133,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
+    export NVCC_APPEND_FLAGS='-gencode=arch=compute_103a,code=sm_103a -gencode=arch=compute_103f,code=sm_103f' && \
     export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
     { \
       sed -i -E 's@(CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;)(11\.0;)@\110.3;\2@' CMakeLists.txt && \
