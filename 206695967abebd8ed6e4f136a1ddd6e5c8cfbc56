@@ -1,0 +1,40 @@
+## Conversation
+This commit continues the user's request to produce a working FlashInfer `v0.6.12rc1` vLLM image from branch `abatilo/bump-flashinfer-v0.6.12rc1` and deploy an exact clone of `v050-dflash-vllm` with only the image changed. The previous commit put the SM103 ViT backend workaround into the vLLM source before wheel build. That was correct behaviorally, but it invalidated the expensive `vllm-builder` stage and caused the branch CI to spend a long time rebuilding vLLM for a pure Python change.
+
+## Actions
+- Watched GitHub Actions run `26409021839` for commit `94e5b999fa0164d7c8031526985281b08ad919bb`. After several polls, the CUDA 13.2 arm64 job and the other platform jobs were all still in the `Build and push by digest` step.
+- Decided to preserve the same runtime behavior but move the patch application to the final image layer. This lets the Docker build reuse the already-published vLLM wheel layer from the earlier FlashInfer `v0.6.12rc1` CI build while still producing an image from this branch.
+- Removed the `COPY --link patches /opt/vllm-patches` and `git apply /opt/vllm-patches/vllm-sm103-vit-backend.patch` lines from the `vllm-builder` stage.
+- Deleted `vllm-tensorizer/patches/vllm-sm103-vit-backend.patch`; the final-stage Dockerfile now carries the small text replacement inline.
+- Added a final-stage `RUN python3 - <<'PY'` block immediately after the vLLM wheel install. It locates the installed site-packages directory with `sysconfig.get_paths()["purelib"]`, opens `vllm/platforms/cuda.py`, and replaces exactly the old default loop:
+  `cc = cls.get_device_capability()` followed by `for vit_attn_backend in cls.get_supported_vit_attn_backends():`
+  with the SM103-aware candidate-list block.
+- Kept the same runtime semantics from the previous commit: default ViT backend selection on compute capability 10.3 skips `FLASH_ATTN`, while explicit `--mm-encoder-attn-backend=FLASH_ATTN` still uses vLLM's existing explicit-backend branch.
+- Kept the previous final dependency pins, `pytest==9.0.3` and `quack-kernels==0.4.1`, unchanged.
+- Ran `git diff --check`; it completed with no whitespace errors.
+- Verified the text replacement target exists in the exact vLLM source blob for commit `ad7125a431e176d4161099480a66f0169609a690` by piping `git show ...:vllm/platforms/cuda.py` into Ruby and checking that the old block is present. The command printed `old block present`.
+- Staged only `vllm-tensorizer/Dockerfile` and the deletion of `vllm-tensorizer/patches/vllm-sm103-vit-backend.patch`, then created this commit.
+
+## Errors & Mistakes
+- The previous commit made a Python-only workaround more expensive than necessary by applying it before `/opt/build.sh`, which invalidated the vLLM wheel build stage. That approach was behaviorally sound but too slow for this live deploy-and-iterate objective.
+- No image build or live pod verification has completed yet for this commit at the moment this note was first attached. Those results should be appended after CI/image/deploy validation.
+
+## Dead Ends
+- Continuing to wait indefinitely for the source-rebuild CI run was rejected once it became clear all platform jobs remained in the long build step. The faster final-layer patch retains the behavior while reducing the amount of image work needed.
+- Keeping a standalone patch file in `vllm-tensorizer/patches/` was rejected for this commit because the final image does not necessarily include `git` or `patch`, and parsing a unified diff in the Dockerfile would be more complicated than a single exact text replacement.
+
+## Hints for Future Agents
+- This commit intentionally patches the installed Python source, not the vLLM wheel source before build. If a future reviewer asks why, the reason is build-time practicality: the changed code is Python-only and does not need a C++/CUDA extension rebuild.
+- If the Dockerfile build fails with `expected ViT backend block not found`, the vLLM source changed and the inline replacement needs to be refreshed against the new `vllm/platforms/cuda.py` implementation.
+- If the pod still selects `FLASH_ATTN` for ViT attention on SM103, check that the final image actually came from this commit and that Docker did not reuse a final layer from an older build.
+- The import-level pins from the prior commit are still necessary: without `pytest`, CuPy import can fail during vLLM startup; without `quack-kernels==0.4.1`, `vllm.vllm_flash_attn.cute.interface` can fail to import `Arch` from `cutlass.base_dsl` with `nvidia-cutlass-dsl 4.5.x`.
+
+## Codebase Discoveries
+- The final image has Python 3.12 and can locate installed packages through `sysconfig.get_paths()["purelib"]`, avoiding a hard-coded `/usr/local/lib/python3.12/dist-packages` path in the Dockerfile.
+- Dockerfile heredocs are available because this file uses `# syntax=docker/dockerfile:1.10`.
+- The old block being replaced exists in vLLM commit `ad7125a431e176d4161099480a66f0169609a690`, which is the `VLLM_COMMIT=v0.21.0` source used by this branch's matrix.
+
+## Open Questions
+- Whether the branch CI for this commit completes and publishes the patched CUDA 13.2 image is still pending.
+- Whether the public tag `cw9704-public.registry.cwcr.cloud/vllm:infr-vllm-with-flashinfer-v0.6.12rc1` is updated from that branch-built artifact is still pending.
+- Whether the exact `v050-dflash-vllm` clone reaches Ready and serves requests is still pending.
