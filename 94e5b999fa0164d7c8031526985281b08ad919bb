@@ -1,0 +1,53 @@
+## Conversation
+The user first asked whether the image tag could be retagged as `infr-vllm-with-flashinfer-v0.6.12rc1`. The work initially tried to clone the known-good `v050-dflash-vllm` pod and point it at `cw9704-public.registry.cwcr.cloud/vllm:infr-vllm-with-flashinfer-v0.6.12rc1`, but the runtime failures showed the previously pushed tag was not sufficient. The user then clarified the real objective: use the branch `abatilo/bump-flashinfer-v0.6.12rc1` in `/Users/abatilo/work/ml-containers`, build and push new image(s) if needed, and keep iterating until there is an end-to-end FlashInfer `v0.6.12rc1` vLLM pod. The goal is not just to retag an existing image; the image must be reproducible from this branch and usable by a pod that is healthy enough to accept requests.
+
+## Actions
+- Worked in `/Users/abatilo/work/ml-containers` on branch `abatilo/bump-flashinfer-v0.6.12rc1`, which was clean and tracking `origin/abatilo/bump-flashinfer-v0.6.12rc1` before this commit.
+- Read the previous commit with `git log --show-notes -1 --stat`. Commit `ecb076a` only bumped both `flashinfer-commit` matrix entries in `.github/configurations/vllm-tensorizer.yml` from `v0.6.8` to `v0.6.12rc1`; its note explained that no local runtime validation had been done yet.
+- Inspected the GitHub Actions run for that branch before this commit. Run `26400387720` completed successfully and published GHCR images for the branch, but those CI-built images were only build-success artifacts, not runtime-proven artifacts.
+- Probed the CUDA 12.9 CI image `ghcr.io/coreweave/ml-containers/vllm-tensorizer:abatilo-bump-flashinfer-v0.6.12rc1-ecb076a-v0.21.0-cuda12.9.1-ubuntu24.04`. The package probe showed `vllm 0.21.1.dev0+gad7125a43.d20260520`, `flashinfer-python 0.6.12rc1`, `flashinfer-cubin 0.6.12rc1`, `quack-kernels 0.3.11`, `nvidia-cutlass-dsl 4.5.2`, no `pytest` metadata, and `from vllm.vllm_flash_attn.cute.interface import _flash_attn_fwd` failed with `ImportError: cannot import name 'Arch' from 'cutlass.base_dsl'`.
+- Started probing the CUDA 13.2 image too, then killed that package-probe build because the CUDA 12.9 probe and prior live pod failures had already isolated the same dependency problems and the probe was wasting time pulling multi-GB layers.
+- Earlier in the same investigation, before making this commit, a cloned pod of `v050-dflash-vllm` using ad hoc versions of the requested public tag exposed the concrete runtime failures:
+  - First image digest failed during vLLM import with `ModuleNotFoundError: No module named 'pytest'` from `cupy.testing._random import pytest` while torch custom-op fake registration used `inspect.getmodule`.
+  - After layering `pytest`, the pod failed with `ImportError: cannot import name 'Arch' from 'cutlass.base_dsl'` from `quack/rmsnorm.py` via `vllm.vllm_flash_attn.cute.interface`.
+  - After layering `quack-kernels==0.4.1`, the pod got through import and model loading, initialized NCCL, used FlashInfer for MLA/top-k/top-p/NVFP4 paths, and then failed during Kimi K2.5 multimodal startup profiling with `AssertionError: Only SM 10.x and 11.x are supported` in `vllm/vllm_flash_attn/cute/flash_fwd_sm100.py` while the ViT attention path selected vLLM's FA4/CUTE backend on a GB300/SM103 node.
+- Inspected `vllm-tensorizer/Dockerfile` around the `vllm-builder` and final image stages. The vLLM source is mounted from the downloader stage into `/workspace` and built by `/opt/build.sh`; the final image installs the vLLM wheel, FlashInfer wheels, and then extra runtime dependencies under `/tmp/constraints.txt`.
+- Inspected `/Users/abatilo/work/vllm/vllm/platforms/cuda.py` and the exact vLLM commit built by this image (`ad7125a431e176d4161099480a66f0169609a690`) to find `get_vit_attn_backend`. The default backend order on CUDA >= 8.0 starts with `FLASH_ATTN`, then `TRITON_ATTN`, `TORCH_SDPA`, and `FLASHINFER`.
+- Added `vllm-tensorizer/patches/vllm-sm103-vit-backend.patch`. The patch changes only the default ViT attention backend selection: if the device capability is exactly SM103 (`major == 10` and `minor == 3`) and the user did not explicitly request a backend, it removes `FLASH_ATTN` from the default candidates. Explicit `--mm-encoder-attn-backend=FLASH_ATTN` still passes through the pre-existing explicit-backend branch.
+- Updated `vllm-tensorizer/Dockerfile` so the `vllm-builder` stage copies `patches` into `/opt/vllm-patches` and runs `git apply /opt/vllm-patches/vllm-sm103-vit-backend.patch` before building vLLM.
+- Updated the final-stage dependency install to include `pytest==9.0.3` and `quack-kernels==0.4.1`. The former fixes the CuPy runtime import, and the latter matches the `nvidia-cutlass-dsl 4.5.x` API pulled in by FlashInfer `0.6.12rc1`.
+- Validated the source patch locally with `git -C /Users/abatilo/work/vllm apply --check /Users/abatilo/work/ml-containers/vllm-tensorizer/patches/vllm-sm103-vit-backend.patch`.
+- Validated the patch against the exact vLLM source blob built by the Dockerfile by writing `ad7125a431e176d4161099480a66f0169609a690:vllm/platforms/cuda.py` into a temporary directory and running `git apply --check` there.
+- Ran `git diff --check`; it completed without whitespace errors.
+- Staged only `vllm-tensorizer/Dockerfile` and `vllm-tensorizer/patches/vllm-sm103-vit-backend.patch` and created this commit.
+
+## Errors & Mistakes
+- The initial approach treated the request as a retag/deploy problem. That was insufficient: the tag content had real runtime failures, so the fix had to move into `ml-containers` source and be rebuilt.
+- An intermediate image with only `pytest` installed still failed with `ImportError: cannot import name 'Arch' from 'cutlass.base_dsl'`; that showed the CuPy/pytest failure was only the first blocker.
+- An intermediate image with both `pytest` and `quack-kernels==0.4.1` still failed during model startup profiling with the FA4/CUTE SM100 assertion. This is why this commit includes a vLLM source patch instead of only package pins.
+- The CUDA 13.2 package probe was killed mid-pull because it was consuming time and bandwidth after the CUDA 12.9 probe and live pod failures already provided enough signal. The killed probe printed a BuildKit EOF after the process was terminated.
+- No full image build or live pod verification has been completed at the moment this note was first attached. Those steps are intentionally still pending and should be appended to this note after they run.
+
+## Dead Ends
+- Retagging the existing public image was abandoned because the image itself was missing runtime pieces and selected a broken startup path on GB300.
+- Adding only `pytest` was abandoned because it exposed the stale `quack-kernels` / `nvidia-cutlass-dsl` mismatch.
+- Adding only `pytest` plus `quack-kernels==0.4.1` was abandoned because the image then reached the Kimi K2.5 ViT profiling path and tripped FA4's CUTE arch assertion on SM103.
+- Adding a runtime manifest argument such as `--mm-encoder-attn-backend=TRITON_ATTN` was considered but not used for this commit because the user asked for an exact copy of `v050-dflash-vllm` with only the image changed. Putting the default-backend workaround into the image keeps the Kubernetes manifest clone exact while still avoiding the failing default on SM103.
+
+## Hints for Future Agents
+- The public deployment target tag is `cw9704-public.registry.cwcr.cloud/vllm:infr-vllm-with-flashinfer-v0.6.12rc1`.
+- The source pod to clone for runtime validation is `v050-dflash-vllm` in Kubernetes context `infr-dev-us-e-04b`, namespace `default`. The clone used during this investigation is `v050-dflash-vllm-fi0612rc1`.
+- If the pod still fails during startup, first check whether logs show `Using backend AttentionBackendEnum.TRITON_ATTN for vit attention` or whether the code path still selects `FLASH_ATTN`. If it still selects `FLASH_ATTN`, the source patch may not have been applied or the build cache may have reused an old vLLM wheel.
+- The expected import-level fixes after this commit are that `pytest` is installed, `quack-kernels` is `0.4.1`, `nvidia-cutlass-dsl` remains `4.5.x`, and `from vllm.vllm_flash_attn.cute.interface import _flash_attn_fwd` succeeds.
+- The SM103 workaround is deliberately narrow: it only changes automatic/default ViT backend selection on compute capability 10.3. Explicit operator choice remains possible via `--mm-encoder-attn-backend`.
+- If the backend falls through to `TORCH_SDPA`, startup may be slower but should be acceptable for proving health and requestability. The purpose of this branch is to prove FlashInfer 0.6.12rc1 in the vLLM image, not to optimize the multimodal profiling path.
+
+## Codebase Discoveries
+- `vllm-tensorizer/Dockerfile` mounts downloaded vLLM source into `/workspace` in the `vllm-builder` stage, so a source patch can be applied before `/opt/build.sh` without vendoring the whole vLLM checkout.
+- `get_vit_attn_backend` in vLLM chooses the first supported backend from `get_supported_vit_attn_backends` when no backend is explicitly configured. On CUDA-capable devices this means `FLASH_ATTN` is tried before `TRITON_ATTN`, `TORCH_SDPA`, and `FLASHINFER`.
+- The vLLM branch used by this image builds `v0.21.0` as a dev version string based on commit `ad7125a431e176d4161099480a66f0169609a690`.
+- The existing Dockerfile already has a final dependency-pinning block for Kimi K2.5/vLLM runtime compatibility, so adding the `pytest` and `quack-kernels` pins there follows the local pattern.
+
+## Open Questions
+- Whether the full arm64 image build from this commit succeeds and pushes to `cw9704-public.registry.cwcr.cloud/vllm:infr-vllm-with-flashinfer-v0.6.12rc1` is still pending.
+- Whether the exact Kubernetes clone reaches Ready and serves `/health`, `/v1/models`, and a small completion request is still pending.
