@@ -126,11 +126,13 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 
 FROM builder-base AS vllm-builder
+COPY --link patches /opt/vllm-patches
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
+    git apply /opt/vllm-patches/vllm-sm103-vit-backend.patch && \
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
     export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
@@ -328,6 +330,8 @@ ARG TARGETPLATFORM
 # * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) — pin both to 1.0.0
 # * llguidance bumped to 1.7 — vLLM's pin (<1.4) lacks JSON Schema "format": "uri" support
 #   (added in llguidance v1.6.0; mirrors upstream vllm-project/vllm#42150)
+# * FlashInfer 0.6.12rc1 currently needs pytest for CuPy runtime imports and quack-kernels
+#   0.4.1 for compatibility with nvidia-cutlass-dsl 4.5.x.
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
@@ -338,7 +342,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
       'transformers==5.5.4' 'nixl==1.0.0' 'nixl-cu12==1.0.0' \
-      'llguidance>=1.7.0,<1.8.0' \
+      'llguidance>=1.7.0,<1.8.0' 'pytest==9.0.3' 'quack-kernels==0.4.1' \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt
 
