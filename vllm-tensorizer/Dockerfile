@@ -293,33 +293,23 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
-# Patch installed vLLM source in the final image so this Python-only
-# SM103 workaround can reuse the cached vLLM wheel.
+# Patch installed vLLM source in the final image so this Python-only SM103
+# workaround can reuse the cached vLLM wheel.
 RUN python3 - <<'PY'
 from pathlib import Path
 import sysconfig
 
-path = Path(sysconfig.get_paths()["purelib"]) / "vllm/platforms/cuda.py"
+path = Path(sysconfig.get_paths()["purelib"]) / "vllm/vllm_flash_attn/cute/flash_fwd_sm100.py"
 text = path.read_text()
-old = """        cc = cls.get_device_capability()
-        for vit_attn_backend in cls.get_supported_vit_attn_backends():
+old = """        assert self.arch >= Arch.sm_100 and self.arch <= Arch.sm_110f, "Only SM 10.x and 11.x are supported"
 """
-new = """        cc = cls.get_device_capability()
-        vit_attn_backends = cls.get_supported_vit_attn_backends()
-        if cc is not None and cc.major == 10 and cc.minor == 3:
-            # FA4's CUTE ViT path currently trips its SM100 arch guard on
-            # GB300/SM103 during multimodal profiling. Prefer the next
-            # supported ViT backend by default while preserving explicit
-            # FLASH_ATTN overrides via --mm-encoder-attn-backend.
-            vit_attn_backends = [
-                backend
-                for backend in vit_attn_backends
-                if backend != AttentionBackendEnum.FLASH_ATTN
-            ]
-        for vit_attn_backend in vit_attn_backends:
+new = """        # In nvidia-cutlass-dsl 4.5.2, Arch.sm_110f attribute access resolves
+        # to sm_101f even though Arch.__members__["sm_110f"] is correct. That
+        # rejects SM103 before the SM103-specific tuning path below can run.
+        assert self.arch.value[0] in (10, 11), "Only SM 10.x and 11.x are supported"
 """
 if old not in text:
-    raise SystemExit(f"expected ViT backend block not found in {path}")
+    raise SystemExit(f"expected SM100 arch guard not found in {path}")
 path.write_text(text.replace(old, new, 1))
 PY
 
