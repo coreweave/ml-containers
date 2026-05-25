@@ -1,0 +1,43 @@
+## Conversation
+The user asked whether there was something we could do to try to get SM103 supported as part of this FlashInfer `v0.6.12rc1` vLLM image work. This commit changes direction from avoiding the FA4 CUTE ViT path on SM103 to trying to enable it directly. The earlier fallback commit `2066959` completed CI successfully and remains a known fallback artifact, but this commit is the native-SM103 trial.
+
+## Actions
+- Investigated the exact vLLM source used by the image (`VLLM_COMMIT=v0.21.0`, commit `ad7125a431e176d4161099480a66f0169609a690`) and confirmed vLLM installs FA4 CUTE Python files from the external `vllm-project/flash-attention` repository at commit `f5bc33cfc02c744d24a2e9d50e6db656de40611c`.
+- Cloned `https://github.com/vllm-project/flash-attention.git` to `/tmp/vllm-flash-attn-f5bc33`, checked out `f5bc33cfc02c744d24a2e9d50e6db656de40611c`, and inspected `flash_attn/cute/flash_fwd_sm100.py`.
+- Found that `flash_fwd_sm100.py` already contains SM103-specific code: it computes `is_sm103 = self.arch >= Arch.sm_103 and self.arch <= Arch.sm_103f`, stores `self.is_sm103`, and uses that value to change tuning behavior such as disabling the emulated exp2 path. That means SM103 is not obviously absent from the FA4 code path.
+- Found the failing assertion from the live pod failure: `assert self.arch >= Arch.sm_100 and self.arch <= Arch.sm_110f, "Only SM 10.x and 11.x are supported"`.
+- Probed the actual image's installed `nvidia-cutlass-dsl 4.5.2` enum behavior using a small `docker buildx build --builder infr-dev-us-e-04b --platform linux/arm64` throwaway build. The probe showed:
+  - Iterating `Arch` lists `sm_100`, `sm_101`, `sm_103`, `sm_110`, `sm_120`, etc. with correct tuple values such as `sm_103 (10, 3, '')` and `sm_110 (11, 0, '')`.
+  - Attribute access is buggy or alias-like for `sm_110`: `getattr(Arch, 'sm_110')` and `Arch.sm_110` returned `sm_101 (10, 1, '')`, while `Arch.__members__['sm_110']` returned the correct `sm_110 (11, 0, '')`.
+  - `Arch.sm_103 <= Arch.sm_110f` evaluated `False`, while `Arch.sm_103 <= Arch.__members__['sm_110f']` evaluated `True`.
+- Concluded that the live startup assertion is likely rejecting SM103 because `Arch.sm_110f` attribute access resolves to the 10.1 member, not because the FA4 file lacks all SM103 support.
+- Updated the final-layer Python patch in `vllm-tensorizer/Dockerfile` so it no longer patches `vllm/platforms/cuda.py` to skip `FLASH_ATTN` for ViT on SM103.
+- Replaced that fallback with a patch to installed `vllm/vllm_flash_attn/cute/flash_fwd_sm100.py`. The patch changes the arch guard to `assert self.arch.value[0] in (10, 11), "Only SM 10.x and 11.x are supported"` and adds a comment explaining the `Arch.sm_110f` attribute-access issue in `nvidia-cutlass-dsl 4.5.2`.
+- Kept the runtime dependency pins from the earlier commits: `pytest==9.0.3` for CuPy runtime import behavior and `quack-kernels==0.4.1` for `nvidia-cutlass-dsl 4.5.x` compatibility.
+- Ran `git diff --check`; it completed without whitespace errors.
+- Staged only `vllm-tensorizer/Dockerfile` and created this commit.
+
+## Errors & Mistakes
+- The first enum probe attempted `int(Arch.sm_103)` and failed with `TypeError: int() argument must be a string, a bytes-like object or a real number, not 'Arch'`. The retry printed `.value` and comparisons instead.
+- The initial interpretation was that FA4 CUTE broadly did not support SM103. Inspecting the source showed that was too pessimistic: the file has explicit SM103 tuning code, and the immediate crash is a bad upper-bound comparison.
+- No live pod has validated this native-SM103 trial at the time this note was first attached. The code may pass the assertion and still fail later in FA4 compilation or execution. If it does, the fallback artifact from commit `2066959` is the safe path back to a ready pod.
+
+## Dead Ends
+- Keeping the SM103 ViT fallback (`vllm/platforms/cuda.py` skipping `FLASH_ATTN`) was rejected for this commit because it would not answer the user's question about trying to get SM103 supported in the FA4 path.
+- Rebuilding vLLM from source was again avoided because this is a Python-only installed-source patch and can reuse the cached wheel stage.
+- Patching the guard to compare against `Arch.__members__['sm_110f']` was considered. The chosen `self.arch.value[0] in (10, 11)` is simpler and matches the assertion message directly while avoiding the broken attribute path entirely.
+
+## Hints for Future Agents
+- This is a trial patch. If the pod reaches logs showing `Using backend AttentionBackendEnum.FLASH_ATTN for vit attention` and gets past `flash_fwd_sm100.py` line 142, the patch did what it intended.
+- If the pod fails deeper in FA4 CUTE code on SM103, revert or replace this commit with the fallback behavior from commit `2066959`, which skipped automatic `FLASH_ATTN` only for SM103 ViT attention and let vLLM choose the next backend.
+- The known-good fallback branch image from commit `2066959` was published by CI as CUDA 13.2 tag `ghcr.io/coreweave/ml-containers/vllm-tensorizer:abatilo-bump-flashinfer-v0.6.12rc1-2066959-v0.21.0-cuda13.2.1-ubuntu24.04` with manifest digest `sha256:5f53200286c5081c2c2bdf29fe5b40f4915f228266922600f0e9663c7021dd11`. Its arm64 image digest from the merge job was `sha256:88c5fed37d73cb4c3a10b0aa9ab5c6bc777c1c6af6eeeb97a295449db42aa607`.
+- The requested public tag remains `cw9704-public.registry.cwcr.cloud/vllm:infr-vllm-with-flashinfer-v0.6.12rc1`; do not claim this commit works until that tag has been rebuilt/retagged and the cloned pod is Ready and requestable.
+
+## Codebase Discoveries
+- vLLM's `cmake/external_projects/vllm_flash_attn.cmake` fetches `vllm-project/flash-attention` at `f5bc33cfc02c744d24a2e9d50e6db656de40611c`, copies `flash_attn/cute/*.py` into `vllm/vllm_flash_attn/cute`, and rewrites imports from `flash_attn.cute` to `vllm.vllm_flash_attn.cute`.
+- In `nvidia-cutlass-dsl 4.5.2`, enum iteration and `Arch.__members__` show correct `sm_110` members, but direct attribute access for `Arch.sm_110` / `Arch.sm_110f` returns the `sm_101` / `sm_101f` entries. This is why direct source code using `Arch.sm_110f` can reject SM103 unexpectedly.
+- The FA4 CUTE forward path at `flash_fwd_sm100.py` already contains explicit SM103 tuning logic, so a narrow guard fix is a plausible native-support trial.
+
+## Open Questions
+- Whether this patch lets the FA4 CUTE ViT path compile and run on GB300/SM103 is still pending.
+- Whether this native-SM103 trial should become a long-lived downstream patch or be upstreamed to vLLM/flash-attention/CUTLASS DSL is still pending.
