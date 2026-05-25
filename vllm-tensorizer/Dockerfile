@@ -126,13 +126,11 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 
 FROM builder-base AS vllm-builder
-COPY --link patches /opt/vllm-patches
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
-    git apply /opt/vllm-patches/vllm-sm103-vit-backend.patch && \
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
     export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
@@ -294,6 +292,36 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
+
+# Patch installed vLLM source in the final image so this Python-only
+# SM103 workaround can reuse the cached vLLM wheel.
+RUN python3 - <<'PY'
+from pathlib import Path
+import sysconfig
+
+path = Path(sysconfig.get_paths()["purelib"]) / "vllm/platforms/cuda.py"
+text = path.read_text()
+old = """        cc = cls.get_device_capability()
+        for vit_attn_backend in cls.get_supported_vit_attn_backends():
+"""
+new = """        cc = cls.get_device_capability()
+        vit_attn_backends = cls.get_supported_vit_attn_backends()
+        if cc is not None and cc.major == 10 and cc.minor == 3:
+            # FA4's CUTE ViT path currently trips its SM100 arch guard on
+            # GB300/SM103 during multimodal profiling. Prefer the next
+            # supported ViT backend by default while preserving explicit
+            # FLASH_ATTN overrides via --mm-encoder-attn-backend.
+            vit_attn_backends = [
+                backend
+                for backend in vit_attn_backends
+                if backend != AttentionBackendEnum.FLASH_ATTN
+            ]
+        for vit_attn_backend in vit_attn_backends:
+"""
+if old not in text:
+    raise SystemExit(f"expected ViT backend block not found in {path}")
+path.write_text(text.replace(old, new, 1))
+PY
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
