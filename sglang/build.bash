@@ -29,9 +29,6 @@ _PIP_INSTALL() {
 # so it must be present in the host environment.
 _PIP_INSTALL -U pip setuptools wheel build ninja \
   'scikit-build-core>=0.10' 'setuptools-scm>=8.0' 'setuptools-rust>=1.10'
-# Do not install cmake via pip — the base image provides cmake from the Kitware
-# PPA (3.x). pip's cmake package installs 4.x which removed backward compat
-# with cmake_minimum_required(VERSION < 3.5) used by some sub-project deps.
 
 # protobuf-compiler: needed by tonic-build (via prost-build) when compiling the
 # sglang-grpc Rust crate.
@@ -43,8 +40,6 @@ apt-get -qq update && apt-get -q install --no-install-recommends -y \
 curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup.rs \
   | sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.90
 export PATH="/root/.cargo/bin:${PATH}"
-rustc --version
-cargo --version
 
 # sglang (includes sgl-kernel)
 : "${SGLANG_COMMIT:?}"
@@ -55,11 +50,6 @@ cd sglang
 git checkout "${SGLANG_COMMIT}"
 
 # Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent).
-# Published wheel name is `sglang-kernel` (sglang v0.5.12+); pyproject pins
-# sglang-kernel==0.4.2.post2, satisfied by this in-tree build.
-# Use pip wheel instead of python -m build to skip dep-validation checks that
-# fail with --no-isolation when the base image's torch/setuptools versions
-# don't satisfy scikit-build-core's internally-declared constraints.
 (
 cd sgl-kernel
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 silences the cmake 4.x breakage on any

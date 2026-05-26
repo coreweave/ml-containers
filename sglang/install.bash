@@ -11,9 +11,6 @@ _PIP_INSTALL() {
   "$@"
 }
 
-# pip resolves sglang's runtime deps (xgrammar, llguidance, torchao,
-# transformers, decord2/torchcodec, flashinfer, …) from PyPI using the pins
-# in upstream sglang's pyproject.toml — no explicit overrides needed here.
 _PIP_INSTALL /wheels/*.whl
 
 # Make PyTorch's shared libs (libc10.so etc.) visible to the dynamic linker
