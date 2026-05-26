@@ -6,4 +6,4 @@ include:
     vision: 0.27.0
     audio: 2.11.0
     nccl: 2.30.4-1
-    nccl-tests-hash: '111c25a'
+    nccl-tests-hash: '2eedd7c'
