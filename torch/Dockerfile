@@ -20,6 +20,8 @@ ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-a
 
 ARG SCCACHE_VERSION="0.14.0"
 
+ARG UV_VERSION="0.11.16"
+
 # region Downloads
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -28,6 +30,21 @@ RUN ARCH=$(uname -m) && \
     curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
     | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
     chmod 755 /opt/sccache
+
+FROM alpine/curl:8.17.0 AS uv-downloader
+ARG UV_VERSION
+RUN ARCH=$(uname -m) && \
+    curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz" \
+    | tar xz --strip-components=1 -C /opt/ \
+      "uv-${ARCH}-unknown-linux-gnu/uv" "uv-${ARCH}-unknown-linux-gnu/uvx"
+
+# Make uv play nice with the system Python installation
+COPY <<-"EOT" /opt/uv.toml
+	python-downloads = "never"
+
+	[pip]
+	system = true
+EOT
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
@@ -857,3 +874,6 @@ RUN <<-"EOT" python3
 	                record.write(record_entry(added))
 	        break
 EOT
+
+COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/
+COPY --link --from=uv-downloader /opt/uv.toml /etc/uv/uv.toml
