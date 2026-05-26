@@ -35,10 +35,9 @@ _PIP_INSTALL -U pip setuptools wheel build ninja \
 apt-get -qq update && apt-get -q install --no-install-recommends -y \
   protobuf-compiler
 
-# Rust toolchain: sglang/rust/sglang-grpc requires edition 2024 (rustc >= 1.85);
-# its rust-toolchain.toml pins channel 1.90, which rustup will fetch lazily.
+# rustup only; --default-toolchain none defers to rust-toolchain.toml on first cargo run.
 curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup.rs \
-  | sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.90
+  | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
 export PATH="/root/.cargo/bin:${PATH}"
 
 # sglang (includes sgl-kernel)
@@ -48,6 +47,14 @@ echo 'Building sglang'
 git clone --recursive --filter=blob:none https://github.com/sgl-project/sglang
 cd sglang
 git checkout "${SGLANG_COMMIT}"
+
+# Relax exact torch-family version pins to be compatible with the base image
+sed -Ei \
+  -e 's@"torch==[0-9]+\.[0-9]+\.[0-9]+"@"torch>=2.11.0"@' \
+  -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.11.0"@' \
+  -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
+  -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
+  python/pyproject.toml
 
 # Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent).
 (
