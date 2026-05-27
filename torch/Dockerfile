@@ -219,6 +219,16 @@ RUN CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     rm /tmp/install_cudnn.sh && \
     apt-get clean
 
+# There are intermittent compilation failures on CUDA 13.2,
+# so we pull in nvcc/ptxas from CUDA 13.3.
+RUN if [ "${CUDA_VERSION%.*}" = 13.2 ]; then \
+      apt-get -qq update && \
+      apt-get -qq install -y --no-install-recommends cuda-nvcc-13-3 && \
+      update-alternatives --set cuda /usr/local/cuda-13.2 && \
+      update-alternatives --set cuda-13 /usr/local/cuda-13.2 && \
+      apt-get clean; \
+    fi
+
 # Add Kitware's apt repository to get a newer version of CMake
 RUN apt-get -qq update && apt-get -qq install -y \
       software-properties-common lsb-release && \
@@ -494,6 +504,9 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     . /opt/sccache-start.sh && \
     export SCCACHE_RECACHE=1 && \
     export USE_CCACHE=OFF && \
+    if [ "${CUDA_VERSION%.*}" = 13.2 ]; then \
+      export PATH=/usr/local/cuda-13.3/bin:$PATH; \
+    fi && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
