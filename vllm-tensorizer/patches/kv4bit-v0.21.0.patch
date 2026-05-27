@@ -1,0 +1,2260 @@
+diff --git a/tests/kernels/attention/test_kv_4bit_attention.py b/tests/kernels/attention/test_kv_4bit_attention.py
+new file mode 100644
+index 00000000..40ded438
+--- /dev/null
++++ b/tests/kernels/attention/test_kv_4bit_attention.py
+@@ -0,0 +1,320 @@
++import math
++
++import pytest
++import torch
++
++from vllm.model_executor.layers.quantization.kv_4bit.config import KV4BitConfig
++from vllm.platforms import current_platform
++from vllm.utils.math_utils import cdiv
++from vllm.v1.attention.ops.triton_kv_4bit_decode import (
++    triton_kv_4bit_dequant_kv,
++    triton_kv_4bit_decode_attention,
++)
++from vllm.v1.attention.ops.triton_kv_4bit_store import triton_kv_4bit_store
++
++DEVICE_TYPE = current_platform.device_type
++pytestmark = pytest.mark.skipif(
++    DEVICE_TYPE != "cuda" or not torch.cuda.is_available(),
++    reason="KV-4BIT Triton kernels require CUDA",
++)
++
++
++def _hadamard(order: int, device: torch.device) -> torch.Tensor:
++    h = torch.tensor([[1.0]], device=device)
++    while h.shape[0] < order:
++        h = torch.cat([torch.cat([h, h], 1), torch.cat([h, -h], 1)], 0)
++    return h / math.sqrt(order)
++
++
++def _rotate_blocked(x: torch.Tensor, order: int) -> torch.Tensor:
++    h = _hadamard(order, x.device)
++    return (x.float().reshape(*x.shape[:-1], -1, order) @ h).reshape(x.shape)
++
++
++def _quant_params_ref(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
++    x = x.float()
++    x_min = x.amin(dim=-1)
++    x_max = x.amax(dim=-1)
++    scale = ((x_max - x_min) / 15.0).clamp(min=1.0e-8)
++    zero = -x_min / scale
++    return scale, zero
++
++
++def _slot_mapping(batch: int, seq_len: int, block_size: int, device: str):
++    pages_per_req = cdiv(seq_len, block_size)
++    block_table = torch.arange(
++        batch * pages_per_req,
++        device=device,
++        dtype=torch.int64,
++    ).view(batch, pages_per_req)
++    positions = torch.arange(seq_len, device=device, dtype=torch.int64)
++    slots = (
++        block_table[:, positions // block_size] * block_size
++        + positions[None, :] % block_size
++    )
++    return block_table, slots.reshape(-1)
++
++
++def _dequant_slots_with_params(
++    kv_cache: torch.Tensor,
++    slot_mapping: torch.Tensor,
++    block_size: int,
++    head_dim: int,
++) -> tuple[
++    torch.Tensor,
++    torch.Tensor,
++    torch.Tensor,
++    torch.Tensor,
++    torch.Tensor,
++    torch.Tensor,
++]:
++    data_bytes = head_dim // 2
++    k_scale_offset = data_bytes
++    v_data_offset = data_bytes + 8
++    v_scale_offset = v_data_offset + data_bytes
++
++    blocks = slot_mapping // block_size
++    offsets = slot_mapping % block_size
++    slots = kv_cache[blocks, offsets]
++
++    def load_fp32(byte_slice: torch.Tensor) -> torch.Tensor:
++        return byte_slice.contiguous().view(torch.float32).squeeze(-1)
++
++    def unpack(data_offset: int, scale_offset: int) -> torch.Tensor:
++        packed = slots[..., data_offset : data_offset + data_bytes]
++        lo = (packed & 0xF).float()
++        hi = ((packed >> 4) & 0xF).float()
++        q = torch.cat([lo, hi], dim=-1)
++        scale = load_fp32(slots[..., scale_offset : scale_offset + 4])
++        zero = load_fp32(slots[..., scale_offset + 4 : scale_offset + 8])
++        return (q - zero.unsqueeze(-1)) * scale.unsqueeze(-1)
++
++    k = unpack(0, k_scale_offset)
++    v = unpack(v_data_offset, v_scale_offset)
++    k_scale = load_fp32(slots[..., k_scale_offset : k_scale_offset + 4])
++    k_zero = load_fp32(slots[..., k_scale_offset + 4 : k_scale_offset + 8])
++    v_scale = load_fp32(slots[..., v_scale_offset : v_scale_offset + 4])
++    v_zero = load_fp32(slots[..., v_scale_offset + 4 : v_scale_offset + 8])
++    return k, v, k_scale, k_zero, v_scale, v_zero
++
++
++def _dequant_slots(
++    kv_cache: torch.Tensor,
++    slot_mapping: torch.Tensor,
++    block_size: int,
++    head_dim: int,
++) -> tuple[torch.Tensor, torch.Tensor]:
++    k, v, _, _, _, _ = _dequant_slots_with_params(
++        kv_cache,
++        slot_mapping,
++        block_size,
++        head_dim,
++    )
++    return k, v
++
++
++def _assert_quantized_within_half_step(
++    actual: torch.Tensor,
++    source: torch.Tensor,
++    stored_scale: torch.Tensor,
++    stored_zero: torch.Tensor,
++) -> None:
++    ref_scale, ref_zero = _quant_params_ref(source)
++    torch.testing.assert_close(stored_scale, ref_scale, atol=1e-5, rtol=1e-5)
++    torch.testing.assert_close(stored_zero, ref_zero, atol=1e-4, rtol=1e-5)
++
++    # Values exactly on a quantization threshold may round to either adjacent
++    # INT4 code depending on tiny arithmetic differences between Triton and
++    # PyTorch. Both choices are correct nearest-neighbor quantization, so test
++    # the quantizer contract directly: dequantization error is <= half a bin.
++    err = (actual - source.float()).abs()
++    bound = stored_scale.unsqueeze(-1) * 0.5 + 1e-3
++    assert torch.all(err <= bound), (
++        f"max quantization error {err.max().item()} exceeds "
++        f"half-step bound {bound.max().item()}"
++    )
++
++
++def test_kv_4bit_store_matches_reference():
++    torch.manual_seed(0)
++    batch = 2
++    seq_len = 11
++    num_kv_heads = 3
++    head_dim = 64
++    block_size = 8
++    hadamard_order = 32
++    cfg = KV4BitConfig(
++        head_dim=head_dim,
++        hadamard_order=hadamard_order,
++    )
++
++    device = DEVICE_TYPE
++    block_table, slot_mapping = _slot_mapping(batch, seq_len, block_size, device)
++    num_blocks = int(block_table.numel())
++    key = torch.randn(
++        batch * seq_len, num_kv_heads, head_dim, device=device, dtype=torch.bfloat16
++    )
++    value = torch.randn_like(key)
++    kv_cache = torch.empty(
++        num_blocks,
++        block_size,
++        num_kv_heads,
++        cfg.slot_size_aligned,
++        device=device,
++        dtype=torch.uint8,
++    )
++
++    triton_kv_4bit_store(
++        key,
++        value,
++        kv_cache,
++        slot_mapping,
++        hadamard_order=hadamard_order,
++    )
++
++    cached_k, cached_v, k_scale, k_zero, v_scale, v_zero = (
++        _dequant_slots_with_params(kv_cache, slot_mapping, block_size, head_dim)
++    )
++    key_ref = _rotate_blocked(key, hadamard_order)
++
++    _assert_quantized_within_half_step(cached_k, key_ref, k_scale, k_zero)
++    _assert_quantized_within_half_step(cached_v, value, v_scale, v_zero)
++
++
++def test_kv_4bit_decode_matches_quantized_reference():
++    torch.manual_seed(1)
++    batch = 2
++    seq_len = 19
++    num_heads = 4
++    num_kv_heads = 2
++    head_dim = 64
++    block_size = 8
++    hadamard_order = 32
++    scale = 1.0 / math.sqrt(head_dim)
++    cfg = KV4BitConfig(
++        head_dim=head_dim,
++        hadamard_order=hadamard_order,
++    )
++
++    device = DEVICE_TYPE
++    block_table, slot_mapping = _slot_mapping(batch, seq_len, block_size, device)
++    num_blocks = int(block_table.numel())
++    key = torch.randn(
++        batch * seq_len, num_kv_heads, head_dim, device=device, dtype=torch.bfloat16
++    )
++    value = torch.randn_like(key)
++    query = torch.randn(batch, num_heads, head_dim, device=device, dtype=torch.bfloat16)
++    seq_lens = torch.full((batch,), seq_len, device=device, dtype=torch.int64)
++    kv_cache = torch.empty(
++        num_blocks,
++        block_size,
++        num_kv_heads,
++        cfg.slot_size_aligned,
++        device=device,
++        dtype=torch.uint8,
++    )
++
++    triton_kv_4bit_store(
++        key,
++        value,
++        kv_cache,
++        slot_mapping,
++        hadamard_order=hadamard_order,
++    )
++    output = torch.empty_like(query)
++    actual = triton_kv_4bit_decode_attention(
++        query=query,
++        kv_cache=kv_cache,
++        block_table=block_table,
++        seq_lens=seq_lens,
++        scale=scale,
++        hadamard_order=hadamard_order,
++        max_num_kv_splits=4,
++        output=output,
++    )
++    assert actual.data_ptr() == output.data_ptr()
++
++    cached_k, cached_v = _dequant_slots(kv_cache, slot_mapping, block_size, head_dim)
++    cached_k = cached_k.view(batch, seq_len, num_kv_heads, head_dim)
++    cached_v = cached_v.view(batch, seq_len, num_kv_heads, head_dim)
++    query_ref = _rotate_blocked(query, hadamard_order)
++
++    expected = torch.empty_like(actual, dtype=torch.float32)
++    kv_group_size = num_heads // num_kv_heads
++    for b in range(batch):
++        for h in range(num_heads):
++            kv_h = h // kv_group_size
++            scores = (cached_k[b, :, kv_h] @ query_ref[b, h]) * scale
++            probs = torch.softmax(scores.float(), dim=0)
++            expected[b, h] = probs @ cached_v[b, :, kv_h].float()
++
++    torch.testing.assert_close(actual.float(), expected, atol=7e-2, rtol=7e-2)
++
++
++def test_kv_4bit_dequant_kv_matches_reference():
++    torch.manual_seed(2)
++    seq_len = 17
++    num_kv_heads = 2
++    head_dim = 64
++    block_size = 8
++    hadamard_order = 32
++    cfg = KV4BitConfig(
++        head_dim=head_dim,
++        hadamard_order=hadamard_order,
++    )
++
++    device = DEVICE_TYPE
++    block_table, slot_mapping = _slot_mapping(1, seq_len, block_size, device)
++    num_blocks = int(block_table.numel())
++    key = torch.randn(
++        seq_len,
++        num_kv_heads,
++        head_dim,
++        device=device,
++        dtype=torch.bfloat16,
++    )
++    value = torch.randn_like(key)
++    kv_cache = torch.empty(
++        num_blocks,
++        block_size,
++        num_kv_heads,
++        cfg.slot_size_aligned,
++        device=device,
++        dtype=torch.uint8,
++    )
++
++    triton_kv_4bit_store(
++        key,
++        value,
++        kv_cache,
++        slot_mapping,
++        hadamard_order=hadamard_order,
++    )
++
++    alloc_len = cdiv(seq_len, block_size) * block_size
++    k_out = torch.empty(
++        1,
++        num_kv_heads,
++        alloc_len,
++        head_dim,
++        device=device,
++        dtype=torch.bfloat16,
++    )
++    v_out = torch.empty_like(k_out)
++    triton_kv_4bit_dequant_kv(
++        kv_cache,
++        block_table,
++        k_out,
++        v_out,
++        hadamard_order=hadamard_order,
++    )
++
++    cached_k, cached_v = _dequant_slots(kv_cache, slot_mapping, block_size, head_dim)
++    cached_k = _rotate_blocked(cached_k, hadamard_order)
++    expected_k = cached_k.view(seq_len, num_kv_heads, head_dim)
++    expected_v = cached_v.view(seq_len, num_kv_heads, head_dim)
++
++    actual_k = k_out[0, :, :seq_len, :].transpose(0, 1).float()
++    actual_v = v_out[0, :, :seq_len, :].transpose(0, 1).float()
++    torch.testing.assert_close(actual_k, expected_k, atol=5e-2, rtol=5e-2)
++    torch.testing.assert_close(actual_v, expected_v, atol=5e-2, rtol=5e-2)
+diff --git a/tests/v1/core/test_kv_cache_utils.py b/tests/v1/core/test_kv_cache_utils.py
+index 985b97c6..a671d0ce 100644
+--- a/tests/v1/core/test_kv_cache_utils.py
++++ b/tests/v1/core/test_kv_cache_utils.py
+@@ -47,6 +47,7 @@ from vllm.v1.kv_cache_interface import (
+     MambaSpec,
+     MLAAttentionSpec,
+     SlidingWindowSpec,
++    TQFullAttentionSpec,
+     UniformTypeKVCacheSpecs,
+ )
+ from vllm.v1.metrics.stats import CachingMetrics, PrefixCacheStats
+@@ -123,6 +124,24 @@ def new_kv_cache_spec(
+     )
+ 
+ 
++def new_tq_kv_cache_spec(
++    block_size=16,
++    num_kv_heads=2,
++    head_size=64,
++    dtype=torch.uint8,
++    sliding_window=None,
++    tq_slot_size=36,
++):
++    return TQFullAttentionSpec(
++        block_size=block_size,
++        num_kv_heads=num_kv_heads,
++        head_size=head_size,
++        dtype=dtype,
++        sliding_window=sliding_window,
++        tq_slot_size=tq_slot_size,
++    )
++
++
+ def new_sliding_window_spec(
+     block_size=16,
+     num_kv_heads=2,
+@@ -2189,6 +2208,25 @@ def test_unify_hybrid_kv_cache_specs():
+         kv_cache_utils.unify_hybrid_kv_cache_specs(kv_cache_spec)
+ 
+ 
++def test_turboquant_hybrid_sliding_specs_are_uniform():
++    kv_cache_spec = {
++        "layer_1": new_tq_kv_cache_spec(),
++        "layer_2": new_tq_kv_cache_spec(sliding_window=1024),
++    }
++
++    assert is_kv_cache_spec_uniform(kv_cache_spec)
++    kv_cache_groups = kv_cache_utils.get_kv_cache_groups(
++        VllmConfig(), kv_cache_spec
++    )
++
++    assert len(kv_cache_groups) == 1
++    merged_spec = kv_cache_groups[0].kv_cache_spec
++    assert isinstance(merged_spec, TQFullAttentionSpec)
++    assert merged_spec.tq_slot_size == 36
++    assert merged_spec.page_size_bytes == 16 * 2 * 36
++    assert merged_spec.sliding_window == 1024
++
++
+ def test_hma_not_disabled_when_kv_events_enabled():
+     """
+     Test enabling KV events must not force disable_hybrid_kv_cache_manager to True.
+diff --git a/vllm/config/cache.py b/vllm/config/cache.py
+index ae5023f1..cdcd9ad2 100644
+--- a/vllm/config/cache.py
++++ b/vllm/config/cache.py
+@@ -28,6 +28,7 @@ CacheDType = Literal[
+     "turboquant_4bit_nc",
+     "turboquant_k3v4_nc",
+     "turboquant_3bit_nc",
++    "kv_4bit",
+     "int8_per_token_head",
+     "fp8_per_token_head",
+     "nvfp4",
+diff --git a/vllm/model_executor/layers/attention/attention.py b/vllm/model_executor/layers/attention/attention.py
+index db9ae2bb..48843aec 100644
+--- a/vllm/model_executor/layers/attention/attention.py
++++ b/vllm/model_executor/layers/attention/attention.py
+@@ -541,35 +541,54 @@ class Attention(nn.Module, AttentionLayerBase):
+         # Should not be called for enc-dec or encoder-only attention.
+         assert self.attn_type == AttentionType.DECODER
+         quant_mode = get_kv_quant_mode(self.kv_cache_dtype)
+-        if self.sliding_window is not None:
+-            assert not vllm_config.model_config.use_mla, (
+-                "MLA is not supported for slidingwindow"
++        if self.kv_cache_dtype.startswith("turboquant_"):
++            from vllm.model_executor.layers.quantization.turboquant.config import (
++                TurboQuantConfig,
+             )
+-            return SlidingWindowSpec(
++            from vllm.v1.kv_cache_interface import TQFullAttentionSpec
++
++            tq_config = TurboQuantConfig.from_cache_dtype(
++                self.kv_cache_dtype, self.head_size
++            )
++            return TQFullAttentionSpec(
+                 block_size=block_size,
+                 num_kv_heads=self.num_kv_heads,
+                 head_size=self.head_size,
+                 head_size_v=self.head_size_v,
+                 dtype=self.kv_cache_torch_dtype,
+-                kv_quant_mode=quant_mode,
+                 sliding_window=self.sliding_window,
++                tq_slot_size=tq_config.slot_size_aligned,
+             )
+-        elif self.kv_cache_dtype.startswith("turboquant_"):
+-            from vllm.model_executor.layers.quantization.turboquant.config import (
+-                TurboQuantConfig,
++        elif self.kv_cache_dtype == "kv_4bit":
++            from vllm.model_executor.layers.quantization.kv_4bit.config import (
++                KV4BitConfig,
+             )
+             from vllm.v1.kv_cache_interface import TQFullAttentionSpec
+ 
+-            tq_config = TurboQuantConfig.from_cache_dtype(
++            kv_4bit_config = KV4BitConfig.from_cache_dtype(
+                 self.kv_cache_dtype, self.head_size
+             )
+             return TQFullAttentionSpec(
+                 block_size=block_size,
+                 num_kv_heads=self.num_kv_heads,
+                 head_size=self.head_size,
+-                head_size_v=self.head_size,
++                head_size_v=self.head_size_v,
+                 dtype=self.kv_cache_torch_dtype,
+-                tq_slot_size=tq_config.slot_size_aligned,
++                sliding_window=self.sliding_window,
++                tq_slot_size=kv_4bit_config.slot_size_aligned,
++            )
++        elif self.sliding_window is not None:
++            assert not vllm_config.model_config.use_mla, (
++                "MLA is not supported for slidingwindow"
++            )
++            return SlidingWindowSpec(
++                block_size=block_size,
++                num_kv_heads=self.num_kv_heads,
++                head_size=self.head_size,
++                head_size_v=self.head_size_v,
++                dtype=self.kv_cache_torch_dtype,
++                kv_quant_mode=quant_mode,
++                sliding_window=self.sliding_window,
+             )
+         else:
+             return FullAttentionSpec(
+diff --git a/vllm/model_executor/layers/quantization/kv_4bit/__init__.py b/vllm/model_executor/layers/quantization/kv_4bit/__init__.py
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/vllm/model_executor/layers/quantization/kv_4bit/config.py b/vllm/model_executor/layers/quantization/kv_4bit/config.py
+new file mode 100644
+index 00000000..c8258637
+--- /dev/null
++++ b/vllm/model_executor/layers/quantization/kv_4bit/config.py
+@@ -0,0 +1,80 @@
++from __future__ import annotations
++
++import os
++from dataclasses import dataclass
++
++
++KV_4BIT_DTYPES = ("kv_4bit",)
++
++
++def _env_int(name: str, default: int) -> int:
++    value = os.environ.get(name)
++    if value is None:
++        return default
++    try:
++        return int(value)
++    except ValueError as err:
++        raise ValueError(f"{name} must be an integer, got {value!r}") from err
++
++
++@dataclass(frozen=True)
++class KV4BitConfig:
++    head_dim: int
++    hadamard_order: int = 128
++
++    @property
++    def data_bytes(self) -> int:
++        return self.head_dim // 2
++
++    @property
++    def scale_zero_bytes(self) -> int:
++        # float32 scale + float32 zero, stored inline as bytes.
++        return 8
++
++    @property
++    def key_packed_size(self) -> int:
++        return self.data_bytes + self.scale_zero_bytes
++
++    @property
++    def value_packed_size(self) -> int:
++        return self.data_bytes + self.scale_zero_bytes
++
++    @property
++    def slot_size(self) -> int:
++        return self.key_packed_size + self.value_packed_size
++
++    @property
++    def slot_size_aligned(self) -> int:
++        # Direct fp32 scale/zero cache aliases require 4-byte-aligned slots.
++        return self.slot_size + (-self.slot_size % 4)
++
++    def validate(self) -> None:
++        if self.head_dim % 8:
++            raise ValueError(
++                f"KV-4BIT requires head_dim to be a multiple of 8, "
++                f"got {self.head_dim}"
++            )
++        order = self.hadamard_order
++        if order < 2:
++            raise ValueError(f"Hadamard order must be >= 2, got {order}")
++        if order & (order - 1):
++            raise ValueError(f"Hadamard order must be a power of two, got {order}")
++        if self.head_dim % order:
++            raise ValueError(
++                f"head_dim ({self.head_dim}) must be divisible by "
++                f"Hadamard order ({order})"
++            )
++
++    @classmethod
++    def from_cache_dtype(cls, cache_dtype: str, head_dim: int) -> "KV4BitConfig":
++        if cache_dtype not in KV_4BIT_DTYPES:
++            valid = ", ".join(KV_4BIT_DTYPES)
++            raise ValueError(
++                f"Unknown KV-4BIT cache dtype {cache_dtype!r}. Valid: {valid}"
++            )
++        cfg = cls(
++            head_dim=head_dim,
++            hadamard_order=_env_int("VLLM_KV_4BIT_HADAMARD_ORDER", 128),
++        )
++        cfg.validate()
++        return cfg
+diff --git a/vllm/platforms/cuda.py b/vllm/platforms/cuda.py
+index e990b46d..afd0a2e7 100644
+--- a/vllm/platforms/cuda.py
++++ b/vllm/platforms/cuda.py
+@@ -83,6 +83,13 @@ def _get_backend_priorities(
+     kv_cache_dtype: CacheDType | None = None,
+ ) -> list[AttentionBackendEnum]:
+     """Get backend priorities with lazy import to avoid circular dependency."""
++    if (
++        not use_mla
++        and isinstance(kv_cache_dtype, str)
++        and kv_cache_dtype == "kv_4bit"
++    ):
++        return [AttentionBackendEnum.KV_4BIT]
++
+     if use_mla:
+         if device_capability.major == 10:
+             # Sparse MLA backend priorities
+@@ -136,6 +143,7 @@ def _get_backend_priorities(
+                 AttentionBackendEnum.TRITON_ATTN,
+                 AttentionBackendEnum.FLEX_ATTENTION,
+                 AttentionBackendEnum.TURBOQUANT,
++                AttentionBackendEnum.KV_4BIT,
+             ]
+         else:
+             return [
+@@ -144,6 +152,7 @@ def _get_backend_priorities(
+                 AttentionBackendEnum.TRITON_ATTN,
+                 AttentionBackendEnum.FLEX_ATTENTION,
+                 AttentionBackendEnum.TURBOQUANT,
++                AttentionBackendEnum.KV_4BIT,
+             ]
+ 
+ 
+diff --git a/vllm/platforms/interface.py b/vllm/platforms/interface.py
+index 80952ced..f216964e 100644
+--- a/vllm/platforms/interface.py
++++ b/vllm/platforms/interface.py
+@@ -522,6 +522,7 @@ class Platform:
+             FullAttentionSpec,
+             MambaSpec,
+             MLAAttentionSpec,
++            TQFullAttentionSpec,
+             get_kv_quant_mode,
+         )
+ 
+@@ -537,7 +538,39 @@ class Platform:
+         kv_quant_mode = get_kv_quant_mode(cache_config.cache_dtype)
+ 
+         # Compute attention page size for 1 token
+-        if model_config.use_mla:
++        if cache_config.cache_dtype.startswith("turboquant_"):
++            from vllm.model_executor.layers.quantization.turboquant.config import (
++                TurboQuantConfig,
++            )
++
++            tq_config = TurboQuantConfig.from_cache_dtype(
++                cache_config.cache_dtype,
++                model_config.get_head_size(),
++            )
++            attn_page_size_1_token = TQFullAttentionSpec(
++                block_size=1,
++                num_kv_heads=model_config.get_num_kv_heads(parallel_config),
++                head_size=model_config.get_head_size(),
++                dtype=kv_cache_dtype,
++                tq_slot_size=tq_config.slot_size_aligned,
++            ).page_size_bytes
++        elif cache_config.cache_dtype == "kv_4bit":
++            from vllm.model_executor.layers.quantization.kv_4bit.config import (
++                KV4BitConfig,
++            )
++
++            kv_4bit_config = KV4BitConfig.from_cache_dtype(
++                cache_config.cache_dtype,
++                model_config.get_head_size(),
++            )
++            attn_page_size_1_token = TQFullAttentionSpec(
++                block_size=1,
++                num_kv_heads=model_config.get_num_kv_heads(parallel_config),
++                head_size=model_config.get_head_size(),
++                dtype=kv_cache_dtype,
++                tq_slot_size=kv_4bit_config.slot_size_aligned,
++            ).page_size_bytes
++        elif model_config.use_mla:
+             attn_page_size_1_token = MLAAttentionSpec(
+                 block_size=1,
+                 num_kv_heads=model_config.get_num_kv_heads(parallel_config),
+diff --git a/vllm/utils/torch_utils.py b/vllm/utils/torch_utils.py
+index 12ec5b0f..edcd88bb 100644
+--- a/vllm/utils/torch_utils.py
++++ b/vllm/utils/torch_utils.py
+@@ -47,6 +47,7 @@ STR_DTYPE_TO_TORCH_DTYPE = {
+     "turboquant_4bit_nc": torch.uint8,
+     "turboquant_k3v4_nc": torch.uint8,
+     "turboquant_3bit_nc": torch.uint8,
++    "kv_4bit": torch.uint8,
+     "nvfp4": torch.uint8,
+ }
+ 
+@@ -76,6 +77,8 @@ PIN_MEMORY = "microsoft" not in " ".join(platform.uname()).lower()
+ def is_quantized_kv_cache(kv_cache_dtype: str) -> bool:
+     return (
+         kv_cache_dtype.startswith("fp8")
++        or kv_cache_dtype.startswith("turboquant_")
++        or kv_cache_dtype == "kv_4bit"
+         or kv_cache_dtype.endswith("per_token_head")
+         or kv_cache_dtype == "nvfp4"
+     )
+diff --git a/vllm/v1/attention/backends/kv_4bit_attn.py b/vllm/v1/attention/backends/kv_4bit_attn.py
+new file mode 100644
+index 00000000..432b687e
+--- /dev/null
++++ b/vllm/v1/attention/backends/kv_4bit_attn.py
+@@ -0,0 +1,595 @@
++from __future__ import annotations
++
++import math
++from dataclasses import dataclass
++from typing import ClassVar
++
++import torch
++import torch.nn.functional as F
++
++from vllm.config import get_current_vllm_config
++from vllm.config.cache import CacheDType
++from vllm.model_executor.layers.quantization.kv_4bit.config import (
++    KV_4BIT_DTYPES,
++    KV4BitConfig,
++)
++from vllm.v1.attention.backend import (
++    AttentionBackend,
++    AttentionCGSupport,
++    AttentionImpl,
++    AttentionLayer,
++    AttentionMetadata,
++    AttentionMetadataBuilder,
++    AttentionType,
++    CommonAttentionMetadata,
++    MultipleOf,
++)
++from vllm.v1.attention.backends.fa_utils import (
++    get_flash_attn_version,
++    is_flash_attn_varlen_func_available,
++)
++from vllm.v1.attention.backends.utils import split_decodes_and_prefills
++from vllm.v1.attention.ops.triton_kv_4bit_decode import (
++    triton_kv_4bit_dequant_kv,
++    triton_kv_4bit_decode_attention,
++)
++from vllm.v1.attention.ops.triton_kv_4bit_store import triton_kv_4bit_store
++from vllm.v1.worker.workspace import (
++    current_workspace_manager,
++    is_workspace_manager_initialized,
++)
++
++_HAS_FLASH_ATTN = is_flash_attn_varlen_func_available()
++if _HAS_FLASH_ATTN:
++    from vllm.v1.attention.backends.fa_utils import flash_attn_varlen_func
++
++
++class KV4BitAttentionBackend(AttentionBackend):
++    """Attention backend using KV-4BIT packed KV-cache storage."""
++
++    accept_output_buffer: bool = True
++    forward_includes_kv_cache_update: bool = False
++
++    supported_dtypes: ClassVar[list[torch.dtype]] = [
++        torch.float16,
++        torch.bfloat16,
++    ]
++    supported_kv_cache_dtypes: ClassVar[list[CacheDType]] = list(KV_4BIT_DTYPES)
++
++    @staticmethod
++    def get_name() -> str:
++        return "KV_4BIT"
++
++    @staticmethod
++    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
++        return [16, 32, 64, 128]
++
++    @classmethod
++    def supports_attn_type(cls, attn_type: str) -> bool:
++        return attn_type == AttentionType.DECODER
++
++    @classmethod
++    def supports_per_head_quant_scales(cls) -> bool:
++        return False
++
++    @staticmethod
++    def get_impl_cls() -> type["KV4BitAttentionImpl"]:
++        return KV4BitAttentionImpl
++
++    @staticmethod
++    def get_builder_cls() -> type["KV4BitMetadataBuilder"]:
++        return KV4BitMetadataBuilder
++
++    @staticmethod
++    def get_kv_cache_shape(
++        num_blocks: int,
++        block_size: int,
++        num_kv_heads: int,
++        head_size: int,
++        cache_dtype_str: str = "kv_4bit",
++    ) -> tuple[int, ...]:
++        cfg = KV4BitConfig.from_cache_dtype(cache_dtype_str, head_size)
++        return (num_blocks, block_size, num_kv_heads, cfg.slot_size_aligned)
++
++    @classmethod
++    def supports_kv_cache_dtype(cls, kv_cache_dtype: CacheDType | None) -> bool:
++        if kv_cache_dtype is None:
++            return False
++        return kv_cache_dtype in KV_4BIT_DTYPES
++
++    @classmethod
++    def supports_head_size(cls, head_size: int) -> bool:
++        # The selector passes the effective allocation head size for packed
++        # caches, so only reject impossible values here.
++        return head_size > 0
++
++    @classmethod
++    def supports_combination(
++        cls,
++        head_size: int,
++        dtype: torch.dtype,
++        kv_cache_dtype: CacheDType | None,
++        block_size: int | None,
++        use_mla: bool,
++        has_sink: bool,
++        use_sparse: bool,
++        device_capability,
++    ) -> str | None:
++        if kv_cache_dtype in KV_4BIT_DTYPES:
++            try:
++                KV4BitConfig.from_cache_dtype(kv_cache_dtype, head_size)
++            except ValueError as err:
++                return str(err)
++        return None
++
++
++@dataclass
++class KV4BitMetadata(AttentionMetadata):
++    seq_lens: torch.Tensor
++    slot_mapping: torch.Tensor
++    block_table: torch.Tensor
++    query_start_loc: torch.Tensor
++    num_actual_tokens: int = 0
++    max_query_len: int = 0
++    max_seq_len: int = 0
++    is_prefill: bool = False
++    num_decodes: int = 0
++    num_decode_tokens: int = 0
++
++
++class KV4BitMetadataBuilder(AttentionMetadataBuilder[KV4BitMetadata]):
++    _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.UNIFORM_BATCH
++
++    def __init__(self, kv_cache_spec, layer_names, vllm_config, device):
++        super().__init__(kv_cache_spec, layer_names, vllm_config, device)
++        self._init_reorder_batch_threshold(1, supports_spec_as_decode=False)
++
++    def build_for_cudagraph_capture(
++        self, common_attn_metadata: CommonAttentionMetadata
++    ) -> KV4BitMetadata:
++        attn_metadata = self.build(0, common_attn_metadata)
++        attn_metadata.seq_lens.fill_(1)
++        return attn_metadata
++
++    def build(self, common_prefix_len, common_attn_metadata, fast_build=False):
++        cam = common_attn_metadata
++        assert self.reorder_batch_threshold is not None
++        num_decodes, _, num_decode_tokens, _ = split_decodes_and_prefills(
++            cam, decode_threshold=self.reorder_batch_threshold
++        )
++        return KV4BitMetadata(
++            seq_lens=cam.seq_lens,
++            slot_mapping=cam.slot_mapping,
++            block_table=cam.block_table_tensor,
++            query_start_loc=cam.query_start_loc,
++            num_actual_tokens=cam.num_actual_tokens,
++            max_query_len=cam.max_query_len,
++            max_seq_len=cam.max_seq_len,
++            is_prefill=(cam.max_query_len > 1),
++            num_decodes=num_decodes,
++            num_decode_tokens=num_decode_tokens,
++        )
++
++
++class KV4BitAttentionImpl(AttentionImpl[KV4BitMetadata]):
++    supports_quant_query_input: bool = False
++
++    def __init__(
++        self,
++        num_heads: int,
++        head_size: int,
++        scale: float,
++        num_kv_heads: int | None = None,
++        alibi_slopes: list[float] | None = None,
++        sliding_window: int | None = None,
++        kv_cache_dtype: str = "auto",
++        logits_soft_cap: float | None = None,
++        attn_type: str = AttentionType.DECODER,
++        kv_sharing_target_layer_name: str | None = None,
++        **kwargs,
++    ):
++        if alibi_slopes is not None:
++            raise NotImplementedError("KV-4BIT does not support ALiBi yet")
++        if sliding_window is not None:
++            raise NotImplementedError("KV-4BIT does not support sliding window yet")
++        if logits_soft_cap is not None:
++            raise NotImplementedError("KV-4BIT does not support logits soft cap yet")
++        if attn_type != AttentionType.DECODER:
++            raise NotImplementedError("KV-4BIT only supports decoder attention")
++        if kv_sharing_target_layer_name is not None:
++            raise NotImplementedError("KV-4BIT does not support KV sharing yet")
++
++        self.num_heads = num_heads
++        self.head_size = head_size
++        self.scale = scale
++        self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
++        self.num_kv_groups = num_heads // self.num_kv_heads
++        self.kv_cache_dtype = kv_cache_dtype
++        self.kv_4bit_config = KV4BitConfig.from_cache_dtype(kv_cache_dtype, head_size)
++        self.fa_version = get_flash_attn_version(head_size=head_size)
++
++        vllm_config = get_current_vllm_config()
++        self.max_num_kv_splits = (
++            vllm_config.attention_config.tq_max_kv_splits_for_cuda_graph
++        )
++
++    def _flash_attn_varlen(
++        self,
++        q: torch.Tensor,
++        k: torch.Tensor,
++        v: torch.Tensor,
++        cu_seqlens_q: torch.Tensor,
++        cu_seqlens_k: torch.Tensor,
++        max_seqlen_q: int,
++        max_seqlen_k: int,
++    ) -> torch.Tensor:
++        if self.fa_version is None:
++            return flash_attn_varlen_func(
++                q=q,
++                k=k,
++                v=v,
++                cu_seqlens_q=cu_seqlens_q,
++                cu_seqlens_k=cu_seqlens_k,
++                max_seqlen_q=max_seqlen_q,
++                max_seqlen_k=max_seqlen_k,
++                softmax_scale=self.scale,
++                causal=True,
++            )
++        return flash_attn_varlen_func(
++            q=q,
++            k=k,
++            v=v,
++            cu_seqlens_q=cu_seqlens_q,
++            cu_seqlens_k=cu_seqlens_k,
++            max_seqlen_q=max_seqlen_q,
++            max_seqlen_k=max_seqlen_k,
++            softmax_scale=self.scale,
++            causal=True,
++            fa_version=self.fa_version,
++        )
++
++    def do_kv_cache_update(
++        self,
++        layer: torch.nn.Module,
++        key: torch.Tensor,
++        value: torch.Tensor,
++        kv_cache: torch.Tensor,
++        slot_mapping: torch.Tensor,
++    ) -> None:
++        N = slot_mapping.shape[0]
++        if N <= 0:
++            return
++        k = key[:N].view(N, self.num_kv_heads, self.head_size)
++        v = value[:N].view(N, self.num_kv_heads, self.head_size)
++        triton_kv_4bit_store(
++            k,
++            v,
++            kv_cache,
++            slot_mapping,
++            hadamard_order=self.kv_4bit_config.hadamard_order,
++        )
++
++    def forward(
++        self,
++        layer: AttentionLayer,
++        query: torch.Tensor,
++        key: torch.Tensor,
++        value: torch.Tensor,
++        kv_cache: torch.Tensor,
++        attn_metadata: KV4BitMetadata,
++        output: torch.Tensor | None = None,
++        output_scale: torch.Tensor | None = None,
++        output_block_scale: torch.Tensor | None = None,
++    ) -> torch.Tensor:
++        num_tokens = query.shape[0]
++        if output is None:
++            output = torch.zeros(
++                num_tokens,
++                self.num_heads * self.head_size,
++                dtype=query.dtype,
++                device=query.device,
++            )
++
++        if attn_metadata is None:
++            return output.fill_(0)
++
++        N = attn_metadata.num_actual_tokens
++        if N <= 0:
++            return output.fill_(0)
++
++        q = query[:N].view(N, self.num_heads, self.head_size)
++        num_decodes = attn_metadata.num_decodes
++        num_decode_tokens = attn_metadata.num_decode_tokens
++
++        if not attn_metadata.is_prefill:
++            decode_output = output[:N]
++            if decode_output.ndim == 2:
++                decode_output = decode_output.view(N, self.num_heads, self.head_size)
++            self._decode_attention(
++                q,
++                kv_cache,
++                attn_metadata,
++                layer,
++                output=decode_output,
++            )
++            return output
++        elif num_decodes == 0:
++            k = key[:N].view(N, self.num_kv_heads, self.head_size)
++            v = value[:N].view(N, self.num_kv_heads, self.head_size)
++            attn_out = self._prefill_attention(q, k, v, kv_cache, attn_metadata, layer)
++        else:
++            attn_out = torch.zeros(
++                N, self.num_heads, self.head_size, device=q.device, dtype=q.dtype
++            )
++
++            decode_meta = KV4BitMetadata(
++                seq_lens=attn_metadata.seq_lens[:num_decodes],
++                slot_mapping=attn_metadata.slot_mapping[:num_decode_tokens],
++                block_table=attn_metadata.block_table[:num_decodes],
++                query_start_loc=attn_metadata.query_start_loc[: num_decodes + 1],
++                num_actual_tokens=num_decode_tokens,
++                max_query_len=1,
++                max_seq_len=attn_metadata.max_seq_len,
++                is_prefill=False,
++            )
++            self._decode_attention(
++                q[:num_decode_tokens],
++                kv_cache,
++                decode_meta,
++                layer,
++                output=attn_out[:num_decode_tokens],
++            )
++
++            prefill_seq_lens = attn_metadata.seq_lens[num_decodes:]
++            prefill_max_seq = max(prefill_seq_lens.tolist())
++            prefill_qsl = (
++                attn_metadata.query_start_loc[num_decodes:] - num_decode_tokens
++            )
++            prefill_meta = KV4BitMetadata(
++                seq_lens=prefill_seq_lens,
++                slot_mapping=attn_metadata.slot_mapping[num_decode_tokens:N],
++                block_table=attn_metadata.block_table[num_decodes:],
++                query_start_loc=prefill_qsl,
++                num_actual_tokens=N - num_decode_tokens,
++                max_query_len=attn_metadata.max_query_len,
++                max_seq_len=prefill_max_seq,
++                is_prefill=True,
++            )
++            k = key[:N].view(N, self.num_kv_heads, self.head_size)
++            v = value[:N].view(N, self.num_kv_heads, self.head_size)
++            attn_out[num_decode_tokens:] = self._prefill_attention(
++                q[num_decode_tokens:],
++                k[num_decode_tokens:],
++                v[num_decode_tokens:],
++                kv_cache,
++                prefill_meta,
++                layer,
++            )
++
++        if output.ndim == 3:
++            output[:N] = attn_out.to(output.dtype)
++        else:
++            output[:N] = attn_out.reshape(N, -1).to(output.dtype)
++        return output
++
++    def _prefill_attention(
++        self,
++        query: torch.Tensor,
++        key: torch.Tensor,
++        value: torch.Tensor,
++        kv_cache: torch.Tensor,
++        attn_metadata: KV4BitMetadata,
++        layer: torch.nn.Module,
++    ) -> torch.Tensor:
++        N, Hq, D = query.shape
++        qsl = attn_metadata.query_start_loc.tolist()
++        seq_lens_list = attn_metadata.seq_lens.tolist()
++        num_reqs = len(qsl) - 1
++        all_first_chunk = all(
++            seq_lens_list[i] == qsl[i + 1] - qsl[i] for i in range(num_reqs)
++        )
++
++        if _HAS_FLASH_ATTN and all_first_chunk:
++            return self._flash_attn_varlen(
++                q=query,
++                k=key,
++                v=value,
++                cu_seqlens_q=attn_metadata.query_start_loc,
++                cu_seqlens_k=attn_metadata.query_start_loc,
++                max_seqlen_q=attn_metadata.max_query_len,
++                max_seqlen_k=attn_metadata.max_query_len,
++            )
++
++        output = torch.zeros(N, Hq, D, device=query.device, dtype=query.dtype)
++        for i in range(num_reqs):
++            q_start = qsl[i]
++            q_end = qsl[i + 1]
++            q_len = q_end - q_start
++            if q_len <= 0:
++                continue
++
++            seq_len = seq_lens_list[i]
++            q_seq = query[q_start:q_end]
++            k_seq = key[q_start:q_end]
++            v_seq = value[q_start:q_end]
++
++            if q_len == seq_len:
++                if _HAS_FLASH_ATTN:
++                    cu = torch.zeros(2, device=query.device, dtype=torch.int32)
++                    cu[1] = q_len
++                    out = self._flash_attn_varlen(
++                        q=q_seq,
++                        k=k_seq,
++                        v=v_seq,
++                        cu_seqlens_q=cu,
++                        cu_seqlens_k=cu,
++                        max_seqlen_q=q_len,
++                        max_seqlen_k=q_len,
++                    )
++                else:
++                    out = F.scaled_dot_product_attention(
++                        q_seq.transpose(0, 1).contiguous(),
++                        k_seq.transpose(0, 1).contiguous(),
++                        v_seq.transpose(0, 1).contiguous(),
++                        is_causal=True,
++                        scale=self.scale,
++                        enable_gqa=(self.num_kv_heads < self.num_heads),
++                    ).transpose(0, 1)
++            else:
++                cached_len = seq_len - q_len
++                out = self._continuation_prefill(
++                    query=q_seq,
++                    key_chunk=k_seq,
++                    value_chunk=v_seq,
++                    kv_cache=kv_cache,
++                    block_table=attn_metadata.block_table[i : i + 1],
++                    cached_len=cached_len,
++                    seq_len=seq_len,
++                )
++
++            output[q_start:q_end] = out.to(query.dtype)
++
++        return output
++
++    def _continuation_prefill(
++        self,
++        query: torch.Tensor,
++        key_chunk: torch.Tensor,
++        value_chunk: torch.Tensor,
++        kv_cache: torch.Tensor,
++        block_table: torch.Tensor,
++        cached_len: int,
++        seq_len: int,
++    ) -> torch.Tensor:
++        """Run SGLang-style prefill over dense cached + current K/V.
++
++        Cached K/V are stored packed in the KV-4BIT cache. For continuation prefill,
++        dequantize prior cached tokens to dense tensors, append the current raw
++        chunk K/V, then use FlashAttention/SDPA. The dequant kernel
++        inverse-rotates cached K so query and current K stay in original space.
++        """
++        q_len, Hq, D = query.shape
++        Hk = key_chunk.shape[1]
++        device = query.device
++        dtype = query.dtype
++
++        if cached_len <= 0:
++            if _HAS_FLASH_ATTN:
++                if not hasattr(self, "_cu_2"):
++                    self._cu_2 = torch.zeros(2, device=device, dtype=torch.int32)
++                self._cu_2[1] = q_len
++                return self._flash_attn_varlen(
++                    q=query,
++                    k=key_chunk,
++                    v=value_chunk,
++                    cu_seqlens_q=self._cu_2,
++                    cu_seqlens_k=self._cu_2,
++                    max_seqlen_q=q_len,
++                    max_seqlen_k=q_len,
++                )
++            return F.scaled_dot_product_attention(
++                query.transpose(0, 1).contiguous(),
++                key_chunk.transpose(0, 1).contiguous(),
++                value_chunk.transpose(0, 1).contiguous(),
++                is_causal=True,
++                scale=self.scale,
++                enable_gqa=(Hk < Hq),
++            ).transpose(0, 1)
++
++        block_size = kv_cache.shape[1]
++        alloc_len = math.ceil(cached_len / block_size) * block_size
++        cache_shape = (1, Hk, alloc_len, D)
++        if is_workspace_manager_initialized():
++            k_cache_buf, v_cache_buf = current_workspace_manager().get_simultaneous(
++                (cache_shape, dtype),
++                (cache_shape, dtype),
++            )
++        else:
++            k_cache_buf = torch.empty(cache_shape, dtype=dtype, device=device)
++            v_cache_buf = torch.empty(cache_shape, dtype=dtype, device=device)
++
++        triton_kv_4bit_dequant_kv(
++            kv_cache=kv_cache,
++            block_table=block_table,
++            k_out=k_cache_buf,
++            v_out=v_cache_buf,
++            hadamard_order=self.kv_4bit_config.hadamard_order,
++        )
++
++        k_full = torch.empty(seq_len, Hk, D, dtype=dtype, device=device)
++        v_full = torch.empty(seq_len, Hk, D, dtype=dtype, device=device)
++        k_full[:cached_len] = k_cache_buf[0, :, :cached_len, :].transpose(0, 1)
++        v_full[:cached_len] = v_cache_buf[0, :, :cached_len, :].transpose(0, 1)
++        k_full[cached_len:] = key_chunk
++        v_full[cached_len:] = value_chunk
++
++        if _HAS_FLASH_ATTN:
++            if not hasattr(self, "_cu_2_q"):
++                self._cu_2_q = torch.zeros(2, device=device, dtype=torch.int32)
++                self._cu_2_k = torch.zeros(2, device=device, dtype=torch.int32)
++            self._cu_2_q[1] = q_len
++            self._cu_2_k[1] = seq_len
++            return self._flash_attn_varlen(
++                q=query,
++                k=k_full,
++                v=v_full,
++                cu_seqlens_q=self._cu_2_q,
++                cu_seqlens_k=self._cu_2_k,
++                max_seqlen_q=q_len,
++                max_seqlen_k=seq_len,
++            )
++
++        q_t = query.transpose(0, 1).unsqueeze(0)
++        k_t = k_full.transpose(0, 1).unsqueeze(0)
++        v_t = v_full.transpose(0, 1).unsqueeze(0)
++        q_pos = torch.arange(q_len, device=device).unsqueeze(1) + cached_len
++        k_pos = torch.arange(seq_len, device=device).unsqueeze(0)
++        causal_mask = k_pos <= q_pos
++        out = F.scaled_dot_product_attention(
++            q_t,
++            k_t,
++            v_t,
++            attn_mask=causal_mask,
++            scale=self.scale,
++            enable_gqa=(Hk < Hq),
++        )
++        return out[0].transpose(0, 1)
++
++    def _decode_attention(
++        self,
++        query: torch.Tensor,
++        kv_cache: torch.Tensor,
++        attn_metadata: KV4BitMetadata,
++        layer: torch.nn.Module | None = None,
++        output: torch.Tensor | None = None,
++    ) -> torch.Tensor:
++        B = query.shape[0]
++        D = self.head_size
++        Hq = self.num_heads
++        S = self.max_num_kv_splits
++        mid_o_buf = output_buf = None
++        if is_workspace_manager_initialized():
++            workspace = current_workspace_manager()
++            if output is None:
++                mid_o_buf, output_buf = workspace.get_simultaneous(
++                    ((B, Hq, S, D + 1), torch.float32),
++                    ((B, Hq, D), query.dtype),
++                )
++            else:
++                (mid_o_buf,) = workspace.get_simultaneous(
++                    ((B, Hq, S, D + 1), torch.float32),
++                )
++
++        return triton_kv_4bit_decode_attention(
++            query=query,
++            kv_cache=kv_cache,
++            block_table=attn_metadata.block_table,
++            seq_lens=attn_metadata.seq_lens,
++            scale=self.scale,
++            hadamard_order=self.kv_4bit_config.hadamard_order,
++            mid_o_buf=mid_o_buf,
++            output_buf=output_buf,
++            output=output,
++            buf_holder=layer,
++            max_num_kv_splits=self.max_num_kv_splits,
++        )
+diff --git a/vllm/v1/attention/backends/registry.py b/vllm/v1/attention/backends/registry.py
+index 87abb688..9fc0c1b0 100644
+--- a/vllm/v1/attention/backends/registry.py
++++ b/vllm/v1/attention/backends/registry.py
+@@ -85,6 +85,7 @@ class AttentionBackendEnum(Enum, metaclass=_AttentionBackendEnumMeta):
+     )
+     CPU_ATTN = "vllm.v1.attention.backends.cpu_attn.CPUAttentionBackend"
+     TURBOQUANT = "vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend"
++    KV_4BIT = "vllm.v1.attention.backends.kv_4bit_attn.KV4BitAttentionBackend"
+     # Placeholder for third-party/custom backends - must be registered before use
+     # set to None to avoid alias with other backend, whose value is an empty string
+     CUSTOM = None
+diff --git a/vllm/v1/attention/ops/triton_kv_4bit_decode.py b/vllm/v1/attention/ops/triton_kv_4bit_decode.py
+new file mode 100644
+index 00000000..a4add172
+--- /dev/null
++++ b/vllm/v1/attention/ops/triton_kv_4bit_decode.py
+@@ -0,0 +1,719 @@
++import math
++from typing import Any
++
++import torch
++
++from vllm.triton_utils import tl, triton
++
++
++_MIN_BLOCK_KV = 32
++_MAX_BLOCK_H = 16
++_TARGET_STAGE1_PROGRAMS = 512
++
++
++def _next_power_of_2(value: int) -> int:
++    if value <= 1:
++        return 1
++    return 1 << (value - 1).bit_length()
++
++
++def _select_decode_num_splits(
++    batch: int,
++    head_grid: int,
++    max_num_kv_splits: int,
++) -> int:
++    """Choose the active split count under the cudagraph allocation limit."""
++    max_num_kv_splits = max(1, max_num_kv_splits)
++    programs_per_split = max(1, batch * head_grid)
++    requested_splits = triton.cdiv(_TARGET_STAGE1_PROGRAMS, programs_per_split)
++    return min(max_num_kv_splits, _next_power_of_2(requested_splits))
++
++
++def get_kv_4bit_scale_zero_views(
++    kv_cache: torch.Tensor,
++    head_dim: int,
++) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
++    """Return float32 views over the inline KV-4BIT scale/zero fields.
++
++    The cache allocation remains a single uint8 tensor, but direct float32 views
++    let Triton load/store scale and zero with one fp32 memory op instead of
++    reconstructing fp32 values from four byte loads.
++    """
++    assert kv_cache.dtype == torch.uint8
++    data_bytes = head_dim // 2
++    k_scale_offset = data_bytes
++    k_zero_offset = k_scale_offset + 4
++    v_data_offset = data_bytes + 8
++    v_scale_offset = v_data_offset + data_bytes
++    v_zero_offset = v_scale_offset + 4
++
++    byte_strides = tuple(
++        stride * kv_cache.element_size() for stride in kv_cache.stride()
++    )
++    byte_storage_offset = kv_cache.storage_offset() * kv_cache.element_size()
++    offsets = (k_scale_offset, k_zero_offset, v_scale_offset, v_zero_offset)
++    align_values = (*byte_strides[:3], byte_storage_offset, *offsets)
++    if any(value % 4 != 0 for value in align_values):
++        raise ValueError(
++            "KV-4BIT optimized scale views require 4-byte aligned cache "
++            f"layout; got head_dim={head_dim}, strides={kv_cache.stride()}, "
++            f"offsets={offsets}"
++        )
++
++    storage = kv_cache.untyped_storage()
++    base = torch.empty(0, dtype=torch.float32, device=kv_cache.device).set_(
++        storage,
++        0,
++        (storage.nbytes() // 4,),
++        (1,),
++    )
++    size = tuple(kv_cache.shape[:3])
++    stride = tuple(byte_stride // 4 for byte_stride in byte_strides[:3])
++    base_offset = byte_storage_offset // 4
++
++    def make_view(byte_offset: int) -> torch.Tensor:
++        return torch.as_strided(
++            base,
++            size=size,
++            stride=stride,
++            storage_offset=base_offset + byte_offset // 4,
++        )
++
++    return (
++        make_view(k_scale_offset),
++        make_view(k_zero_offset),
++        make_view(v_scale_offset),
++        make_view(v_zero_offset),
++    )
++
++
++@triton.jit
++def _fwht_blocked_batch(
++    x,
++    width: tl.constexpr,
++    log_order: tl.constexpr,
++    block_h: tl.constexpr,
++):
++    idx = tl.arange(0, width)
++    for s in tl.static_range(0, log_order):
++        stride = 1 << s
++        partner = idx ^ stride
++        other = tl.gather(
++            x,
++            tl.broadcast_to(partner[None, :], [block_h, width]),
++            1,
++        )
++        is_low = ((idx >> s) & 1) == 0
++        x = tl.where(is_low[None, :], x + other, other - x)
++    return x
++
++
++@triton.jit
++def _fwht_blocked_vector(
++    x,
++    width: tl.constexpr,
++    log_order: tl.constexpr,
++):
++    idx = tl.arange(0, width)
++    for s in tl.static_range(0, log_order):
++        stride = 1 << s
++        partner = idx ^ stride
++        other = tl.gather(x, partner, 0)
++        is_low = ((idx >> s) & 1) == 0
++        x = tl.where(is_low, x + other, other - x)
++    return x
++
++
++@triton.jit
++def _actual_kv_splits(
++    seq_len,
++    max_kv_splits: tl.constexpr,
++    min_block_kv: tl.constexpr,
++):
++    kv_splits = tl.cdiv(seq_len, min_block_kv)
++    kv_splits = tl.maximum(kv_splits, 1)
++    return tl.minimum(kv_splits, max_kv_splits)
++
++
++@triton.jit
++def _kv_4bit_decode_stage1_grouped(
++    Query_ptr,
++    KV_cache_ptr,
++    K_scale_ptr,
++    K_zero_ptr,
++    V_scale_ptr,
++    V_zero_ptr,
++    Block_table_ptr,
++    Seq_lens_ptr,
++    Mid_o_ptr,
++    stride_qb,
++    stride_qh,
++    stride_cache_block,
++    stride_cache_pos,
++    stride_cache_head,
++    stride_ks_block,
++    stride_ks_pos,
++    stride_ks_head,
++    stride_vs_block,
++    stride_vs_pos,
++    stride_vs_head,
++    stride_bt_b,
++    stride_mid_b,
++    stride_mid_h,
++    stride_mid_s,
++    HEAD_DIM: tl.constexpr,
++    BLOCK_SIZE: tl.constexpr,
++    NUM_KV_SPLITS: tl.constexpr,
++    KV_GROUP_SIZE: tl.constexpr,
++    V_DATA_OFFSET: tl.constexpr,
++    ATTN_SCALE: tl.constexpr,
++    BLOCK_D: tl.constexpr,
++    BLOCK_KV: tl.constexpr,
++    BLOCK_H: tl.constexpr,
++    ROTATE_Q: tl.constexpr,
++    LOG_ORDER: tl.constexpr,
++    PRE_SCALE: tl.constexpr,
++    NUM_Q_HEADS: tl.constexpr,
++    MIN_BLOCK_KV: tl.constexpr,
++):
++    bid = tl.program_id(0)
++    head_group = tl.program_id(1)
++    sid = tl.program_id(2)
++
++    seq_len = tl.load(Seq_lens_ptr + bid)
++    kv_splits = _actual_kv_splits(seq_len, NUM_KV_SPLITS, MIN_BLOCK_KV)
++    split_len = tl.cdiv(tl.cdiv(seq_len, kv_splits), MIN_BLOCK_KV) * MIN_BLOCK_KV
++    split_start = split_len * sid
++    split_end = tl.minimum(split_start + split_len, seq_len)
++
++    d_offs = tl.arange(0, BLOCK_D)
++    d_mask = d_offs < HEAD_DIM
++    half = HEAD_DIM // 2
++    half_offs = tl.arange(0, BLOCK_D // 2)
++    half_mask = half_offs < half
++    second_offs = half + half_offs
++    second_mask = second_offs < HEAD_DIM
++
++    groups_per_kv = tl.cdiv(KV_GROUP_SIZE, BLOCK_H)
++    kv_head = head_group // groups_per_kv
++    group_in_kv = head_group % groups_per_kv
++    group_head_offsets = tl.arange(0, BLOCK_H)
++    cur_heads = (
++        kv_head * KV_GROUP_SIZE + group_in_kv * BLOCK_H + group_head_offsets
++    )
++    head_mask = (
++        (group_in_kv * BLOCK_H + group_head_offsets) < KV_GROUP_SIZE
++    ) & (cur_heads < NUM_Q_HEADS)
++
++    out_base = (
++        bid * stride_mid_b
++        + cur_heads[:, None] * stride_mid_h
++        + sid * stride_mid_s
++    )
++
++    if split_start >= split_end:
++        tl.store(
++            Mid_o_ptr + out_base + d_offs[None, :],
++            tl.zeros([BLOCK_H, BLOCK_D], dtype=tl.float32),
++            mask=head_mask[:, None] & d_mask[None, :],
++        )
++        tl.store(
++            Mid_o_ptr
++            + bid * stride_mid_b
++            + cur_heads * stride_mid_h
++            + sid * stride_mid_s
++            + HEAD_DIM,
++            -float("inf"),
++            mask=head_mask,
++        )
++        return
++
++    q_base = bid * stride_qb + cur_heads[:, None] * stride_qh
++    q = tl.load(
++        Query_ptr + q_base + d_offs[None, :],
++        mask=head_mask[:, None] & d_mask[None, :],
++        other=0.0,
++    )
++    if ROTATE_Q:
++        q = _fwht_blocked_batch(
++            q.to(tl.float32) * PRE_SCALE,
++            BLOCK_D,
++            LOG_ORDER,
++            BLOCK_H,
++        ).to(q.dtype)
++
++    q_first = tl.gather(
++        q,
++        tl.broadcast_to(half_offs[None, :], [BLOCK_H, BLOCK_D // 2]),
++        1,
++    )
++    q_second = tl.gather(
++        q,
++        tl.broadcast_to(second_offs[None, :], [BLOCK_H, BLOCK_D // 2]),
++        1,
++    )
++    q_sum = tl.sum(q_first, 1) + tl.sum(q_second, 1)
++
++    kv_range = tl.arange(0, BLOCK_KV)
++    m_prev = tl.full([BLOCK_H], -float("inf"), dtype=tl.float32)
++    l_prev = tl.zeros([BLOCK_H], dtype=tl.float32)
++    acc_first = tl.zeros([BLOCK_H, BLOCK_D // 2], dtype=tl.float32)
++    acc_second = tl.zeros([BLOCK_H, BLOCK_D // 2], dtype=tl.float32)
++    bt_base = bid * stride_bt_b
++
++    for start_n in range(split_start, split_end, BLOCK_KV):
++        kv_offs = start_n + kv_range
++        kv_mask = kv_offs < split_end
++        page_idx = kv_offs // BLOCK_SIZE
++        page_off = kv_offs % BLOCK_SIZE
++        block_nums = tl.load(
++            Block_table_ptr + bt_base + page_idx,
++            mask=kv_mask,
++            other=0,
++        ).to(tl.int64)
++
++        slot_bases = (
++            block_nums * stride_cache_block
++            + page_off.to(tl.int64) * stride_cache_pos
++            + tl.cast(kv_head, tl.int64) * stride_cache_head
++        )
++        scale_bases = (
++            block_nums * stride_ks_block
++            + page_off.to(tl.int64) * stride_ks_pos
++            + tl.cast(kv_head, tl.int64) * stride_ks_head
++        )
++
++        k_packed = tl.load(
++            KV_cache_ptr + slot_bases[None, :] + half_offs[:, None],
++            mask=kv_mask[None, :] & half_mask[:, None],
++            other=0,
++        )
++        k_scale = tl.load(K_scale_ptr + scale_bases, mask=kv_mask, other=1.0)
++        k_zero = tl.load(K_zero_ptr + scale_bases, mask=kv_mask, other=0.0)
++        k_lower = (k_packed & 0x0F).to(q_first.dtype)
++        k_upper = ((k_packed >> 4) & 0x0F).to(q_first.dtype)
++
++        scores = tl.dot(q_first, k_lower) + tl.dot(q_second, k_upper)
++        scores = (scores - q_sum[:, None] * k_zero[None, :]) * (k_scale[None, :] * ATTN_SCALE)
++        scores = tl.where(
++            head_mask[:, None] & kv_mask[None, :],
++            scores,
++            -float("inf"),
++        )
++
++        n_e_max = tl.maximum(tl.max(scores, 1), m_prev)
++        re_scale = tl.exp(m_prev - n_e_max)
++        p = tl.exp(scores - n_e_max[:, None])
++
++        v_packed = tl.load(
++            KV_cache_ptr + slot_bases[:, None] + V_DATA_OFFSET + half_offs[None, :],
++            mask=kv_mask[:, None] & half_mask[None, :],
++            other=0,
++        )
++        v_scale_bases = (
++            block_nums * stride_vs_block
++            + page_off.to(tl.int64) * stride_vs_pos
++            + tl.cast(kv_head, tl.int64) * stride_vs_head
++        )
++        v_scale = tl.load(V_scale_ptr + v_scale_bases, mask=kv_mask, other=1.0)
++        v_zero = tl.load(V_zero_ptr + v_scale_bases, mask=kv_mask, other=0.0)
++        v_lower = (v_packed & 0x0F).to(q_first.dtype)
++        v_upper = ((v_packed >> 4) & 0x0F).to(q_first.dtype)
++        p_scaled = p * v_scale[None, :]
++        p_scaled_dot = p_scaled.to(v_lower.dtype)
++        v_bias = tl.sum(p_scaled * v_zero[None, :], 1)
++
++        acc_first = (
++            acc_first * re_scale[:, None]
++            + tl.dot(p_scaled_dot, v_lower)
++            - v_bias[:, None]
++        )
++        acc_second = acc_second * re_scale[:, None] + tl.dot(
++            p_scaled_dot,
++            v_upper,
++        ) - v_bias[:, None]
++        l_prev = l_prev * re_scale + tl.sum(p, 1)
++        m_prev = n_e_max
++
++    safe_l = tl.where(l_prev > 0.0, l_prev, 1.0)
++    tl.store(
++        Mid_o_ptr + out_base + half_offs[None, :],
++        acc_first / safe_l[:, None],
++        mask=head_mask[:, None] & half_mask[None, :],
++    )
++    tl.store(
++        Mid_o_ptr + out_base + second_offs[None, :],
++        acc_second / safe_l[:, None],
++        mask=head_mask[:, None] & second_mask[None, :],
++    )
++    tl.store(
++        Mid_o_ptr
++        + bid * stride_mid_b
++        + cur_heads * stride_mid_h
++        + sid * stride_mid_s
++        + HEAD_DIM,
++        m_prev + tl.log(safe_l),
++        mask=head_mask,
++    )
++
++
++@triton.jit
++def _kv_4bit_decode_stage2(
++    Mid_o_ptr,
++    Out_ptr,
++    Seq_lens_ptr,
++    stride_mid_b,
++    stride_mid_h,
++    stride_mid_s,
++    stride_out_b,
++    stride_out_h,
++    NUM_KV_SPLITS: tl.constexpr,
++    BLOCK_D: tl.constexpr,
++    HEAD_DIM: tl.constexpr,
++    MIN_BLOCK_KV: tl.constexpr,
++    OUTPUT_FP16: tl.constexpr = 0,
++):
++    bid = tl.program_id(0)
++    hid = tl.program_id(1)
++    seq_len = tl.load(Seq_lens_ptr + bid)
++    kv_splits = _actual_kv_splits(seq_len, NUM_KV_SPLITS, MIN_BLOCK_KV)
++    split_len = tl.cdiv(tl.cdiv(seq_len, kv_splits), MIN_BLOCK_KV) * MIN_BLOCK_KV
++
++    d_offs = tl.arange(0, BLOCK_D)
++    d_mask = d_offs < HEAD_DIM
++    e_sum = 0.0
++    e_max = -float("inf")
++    acc = tl.zeros([BLOCK_D], dtype=tl.float32)
++
++    offs_v = bid * stride_mid_b + hid * stride_mid_h + d_offs
++    offs_lse = bid * stride_mid_b + hid * stride_mid_h + HEAD_DIM
++
++    for sid in range(0, NUM_KV_SPLITS):
++        split_start = split_len * sid
++        split_end = tl.minimum(split_start + split_len, seq_len)
++        if split_end > split_start:
++            tv = tl.load(
++                Mid_o_ptr + offs_v + sid * stride_mid_s,
++                mask=d_mask,
++                other=0.0,
++            )
++            tlogic = tl.load(Mid_o_ptr + offs_lse + sid * stride_mid_s)
++            n_e_max = tl.maximum(tlogic, e_max)
++            old_scale = tl.exp(e_max - n_e_max)
++            acc *= old_scale
++            exp_logic = tl.exp(tlogic - n_e_max)
++            acc += exp_logic * tv
++            e_sum = e_sum * old_scale + exp_logic
++            e_max = n_e_max
++
++    result = acc / e_sum
++    if OUTPUT_FP16:
++        result = result.to(tl.float16)
++    tl.store(
++        Out_ptr + bid * stride_out_b + hid * stride_out_h + d_offs,
++        result,
++        mask=d_mask,
++    )
++
++
++@triton.jit
++def _kv_4bit_dequant_kv_kernel(
++    KV_cache_ptr,
++    K_scale_ptr,
++    K_zero_ptr,
++    V_scale_ptr,
++    V_zero_ptr,
++    Block_table_ptr,
++    K_out_ptr,
++    V_out_ptr,
++    stride_ko_h,
++    stride_ko_s,
++    stride_vo_h,
++    stride_vo_s,
++    stride_cache_block,
++    stride_cache_pos,
++    stride_cache_head,
++    stride_ks_block,
++    stride_ks_pos,
++    stride_ks_head,
++    stride_vs_block,
++    stride_vs_pos,
++    stride_vs_head,
++    HEAD_DIM: tl.constexpr,
++    BLOCK_SIZE: tl.constexpr,
++    V_DATA_OFFSET: tl.constexpr,
++    BLOCK_D: tl.constexpr,
++    ROTATE_K: tl.constexpr,
++    LOG_ORDER: tl.constexpr,
++    PRE_SCALE: tl.constexpr,
++):
++    """Dequantize one cached KV-4BIT token/head into dense K/V tensors."""
++    pos = tl.program_id(0)
++    hid = tl.program_id(1)
++
++    page_idx = pos // BLOCK_SIZE
++    page_off = pos % BLOCK_SIZE
++    block_num = tl.load(Block_table_ptr + page_idx).to(tl.int64)
++    slot_base = (
++        block_num * stride_cache_block
++        + tl.cast(page_off, tl.int64) * stride_cache_pos
++        + tl.cast(hid, tl.int64) * stride_cache_head
++    )
++    scale_base = (
++        block_num * stride_ks_block
++        + tl.cast(page_off, tl.int64) * stride_ks_pos
++        + tl.cast(hid, tl.int64) * stride_ks_head
++    )
++
++    d_offs = tl.arange(0, BLOCK_D)
++    d_mask = d_offs < HEAD_DIM
++    half = HEAD_DIM // 2
++    packed_offs = d_offs % half
++    is_upper = d_offs >= half
++
++    k_packed = tl.load(
++        KV_cache_ptr + slot_base + packed_offs,
++        mask=d_mask,
++        other=0,
++    ).to(tl.int32)
++    k_scale = tl.load(K_scale_ptr + scale_base)
++    k_zero = tl.load(K_zero_ptr + scale_base)
++    k_q = tl.where(is_upper, (k_packed >> 4) & 0x0F, k_packed & 0x0F).to(tl.float32)
++    k_vals = (k_q - k_zero) * k_scale
++    if ROTATE_K:
++        # The cache stores normalized-Hadamard K. Applying the same transform
++        # again recovers original-space K for FlashAttention prefill.
++        k_vals = _fwht_blocked_vector(
++            k_vals * PRE_SCALE,
++            BLOCK_D,
++            LOG_ORDER,
++        )
++
++    v_scale_base = (
++        block_num * stride_vs_block
++        + tl.cast(page_off, tl.int64) * stride_vs_pos
++        + tl.cast(hid, tl.int64) * stride_vs_head
++    )
++    v_packed = tl.load(
++        KV_cache_ptr + slot_base + V_DATA_OFFSET + packed_offs,
++        mask=d_mask,
++        other=0,
++    ).to(tl.int32)
++    v_scale = tl.load(V_scale_ptr + v_scale_base)
++    v_zero = tl.load(V_zero_ptr + v_scale_base)
++    v_q = tl.where(is_upper, (v_packed >> 4) & 0x0F, v_packed & 0x0F).to(tl.float32)
++    v_vals = (v_q - v_zero) * v_scale
++
++    ko_base = hid * stride_ko_h + pos * stride_ko_s
++    vo_base = hid * stride_vo_h + pos * stride_vo_s
++    tl.store(K_out_ptr + ko_base + d_offs, k_vals, mask=d_mask)
++    tl.store(V_out_ptr + vo_base + d_offs, v_vals, mask=d_mask)
++
++
++def triton_kv_4bit_dequant_kv(
++    kv_cache: torch.Tensor,
++    block_table: torch.Tensor,
++    k_out: torch.Tensor,
++    v_out: torch.Tensor,
++    *,
++    hadamard_order: int,
++) -> None:
++    """Dequantize cached KV-4BIT K/V for prefill FlashAttention.
++
++    ``k_out`` and ``v_out`` use shape ``[1, num_kv_heads, seq_len, head_dim]``.
++    K is inverse-rotated back to original space to match SGLang's flattened
++    prefill path, so raw Q/current K can be used directly.
++    """
++    assert kv_cache.dtype == torch.uint8
++    assert k_out.shape == v_out.shape
++    assert k_out.ndim == 4 and k_out.shape[0] == 1
++
++    _, num_kv_heads, seq_len, head_dim = k_out.shape
++    if seq_len <= 0:
++        return
++
++    if hadamard_order < 2 or hadamard_order & (hadamard_order - 1):
++        raise ValueError(
++            f"hadamard_order must be a power of two >= 2, got {hadamard_order}"
++        )
++    if head_dim % hadamard_order:
++        raise ValueError(
++            f"head_dim ({head_dim}) must be divisible by hadamard_order "
++            f"({hadamard_order})"
++        )
++
++    k_scale, k_zero, v_scale, v_zero = get_kv_4bit_scale_zero_views(
++        kv_cache,
++        head_dim,
++    )
++    block_size = kv_cache.shape[1]
++    block_d = triton.next_power_of_2(head_dim)
++    v_data_offset = head_dim // 2 + 8
++    log_order = int(math.log2(hadamard_order))
++    pre_scale = 1.0 / math.sqrt(float(hadamard_order))
++
++    _kv_4bit_dequant_kv_kernel[(seq_len, num_kv_heads)](
++        kv_cache.view(-1),
++        k_scale,
++        k_zero,
++        v_scale,
++        v_zero,
++        block_table,
++        k_out,
++        v_out,
++        k_out.stride(1),
++        k_out.stride(2),
++        v_out.stride(1),
++        v_out.stride(2),
++        kv_cache.stride(0),
++        kv_cache.stride(1),
++        kv_cache.stride(2),
++        k_scale.stride(0),
++        k_scale.stride(1),
++        k_scale.stride(2),
++        v_scale.stride(0),
++        v_scale.stride(1),
++        v_scale.stride(2),
++        HEAD_DIM=head_dim,
++        BLOCK_SIZE=block_size,
++        V_DATA_OFFSET=v_data_offset,
++        BLOCK_D=block_d,
++        ROTATE_K=True,
++        LOG_ORDER=log_order,
++        PRE_SCALE=pre_scale,
++        num_warps=4,
++    )
++
++
++def triton_kv_4bit_decode_attention(
++    query: torch.Tensor,
++    kv_cache: torch.Tensor,
++    block_table: torch.Tensor,
++    seq_lens: torch.Tensor,
++    scale: float,
++    *,
++    hadamard_order: int,
++    max_num_kv_splits: int = 32,
++    mid_o_buf: torch.Tensor | None = None,
++    output_buf: torch.Tensor | None = None,
++    output: torch.Tensor | None = None,
++    buf_holder: Any = None,
++) -> torch.Tensor:
++    query = query.contiguous()
++    B, Hq, D = query.shape
++    Hk = kv_cache.shape[2]
++    block_size = kv_cache.shape[1]
++    kv_group_size = Hq // Hk
++    device = query.device
++    block_d = triton.next_power_of_2(D)
++    block_h = min(_MAX_BLOCK_H, kv_group_size)
++    head_grid = Hk * triton.cdiv(kv_group_size, block_h)
++    num_splits = _select_decode_num_splits(B, head_grid, max_num_kv_splits)
++
++    if hadamard_order < 2 or hadamard_order & (hadamard_order - 1):
++        raise ValueError(
++            f"hadamard_order must be a power of two >= 2, got {hadamard_order}"
++        )
++    if D % hadamard_order:
++        raise ValueError(
++            f"head_dim ({D}) must be divisible by hadamard_order "
++            f"({hadamard_order})"
++        )
++    log_order = int(math.log2(hadamard_order))
++    pre_scale = 1.0 / math.sqrt(float(hadamard_order))
++
++    k_scale, k_zero, v_scale, v_zero = get_kv_4bit_scale_zero_views(kv_cache, D)
++    v_data_offset = D // 2 + 8
++
++    if (
++        mid_o_buf is not None
++        and mid_o_buf.shape[0] >= B
++        and mid_o_buf.shape[2] >= num_splits
++    ):
++        mid_o = mid_o_buf[:B, :Hq, :num_splits, :]
++    else:
++        mid_o = torch.empty(
++            B, Hq, num_splits, D + 1, dtype=torch.float32, device=device
++        )
++        if buf_holder is not None:
++            buf_holder._kv_4bit_mid_o_buf = mid_o
++
++    _kv_4bit_decode_stage1_grouped[(B, head_grid, num_splits)](
++        query,
++        kv_cache,
++        k_scale,
++        k_zero,
++        v_scale,
++        v_zero,
++        block_table,
++        seq_lens,
++        mid_o,
++        query.stride(0),
++        query.stride(1),
++        kv_cache.stride(0),
++        kv_cache.stride(1),
++        kv_cache.stride(2),
++        k_scale.stride(0),
++        k_scale.stride(1),
++        k_scale.stride(2),
++        v_scale.stride(0),
++        v_scale.stride(1),
++        v_scale.stride(2),
++        block_table.stride(0),
++        mid_o.stride(0),
++        mid_o.stride(1),
++        mid_o.stride(2),
++        HEAD_DIM=D,
++        BLOCK_SIZE=block_size,
++        NUM_KV_SPLITS=num_splits,
++        KV_GROUP_SIZE=kv_group_size,
++        V_DATA_OFFSET=v_data_offset,
++        ATTN_SCALE=scale,
++        BLOCK_D=block_d,
++        BLOCK_KV=128,
++        BLOCK_H=block_h,
++        ROTATE_Q=True,
++        LOG_ORDER=log_order,
++        PRE_SCALE=pre_scale,
++        NUM_Q_HEADS=Hq,
++        MIN_BLOCK_KV=_MIN_BLOCK_KV,
++        num_warps=4,
++        num_stages=2,
++    )
++
++    query_dtype = query.dtype
++    if output is not None:
++        if output.ndim == 2:
++            out = output.view(B, Hq, D)
++        else:
++            out = output
++    elif (
++        output_buf is not None
++        and output_buf.shape[0] >= B
++        and output_buf.dtype == query_dtype
++    ):
++        out = output_buf[:B, :Hq, :D]
++    else:
++        out = torch.empty(B, Hq, D, dtype=query_dtype, device=device)
++        if buf_holder is not None:
++            buf_holder._kv_4bit_output_buf = out
++    out_dtype = out.dtype
++
++    _kv_4bit_decode_stage2[(B, Hq)](
++        mid_o,
++        out,
++        seq_lens,
++        mid_o.stride(0),
++        mid_o.stride(1),
++        mid_o.stride(2),
++        out.stride(0),
++        out.stride(1),
++        NUM_KV_SPLITS=num_splits,
++        BLOCK_D=block_d,
++        HEAD_DIM=D,
++        MIN_BLOCK_KV=_MIN_BLOCK_KV,
++        OUTPUT_FP16=1 if out_dtype == torch.float16 else 0,
++        num_warps=4,
++        num_stages=2,
++    )
++    return out
+diff --git a/vllm/v1/attention/ops/triton_kv_4bit_store.py b/vllm/v1/attention/ops/triton_kv_4bit_store.py
+new file mode 100644
+index 00000000..70327b5d
+--- /dev/null
++++ b/vllm/v1/attention/ops/triton_kv_4bit_store.py
+@@ -0,0 +1,248 @@
++import math
++
++import torch
++
++from vllm.triton_utils import tl, triton
++from vllm.v1.attention.ops.triton_kv_4bit_decode import (
++    get_kv_4bit_scale_zero_views,
++)
++
++
++@triton.jit
++def _fwht_blocked(x, width: tl.constexpr, log_order: tl.constexpr):
++    idx = tl.arange(0, width)
++    for s in tl.static_range(0, log_order):
++        stride = 1 << s
++        partner = idx ^ stride
++        other = tl.gather(x, partner, 0)
++        is_low = ((idx >> s) & 1) == 0
++        x = tl.where(is_low, x + other, other - x)
++    return x
++
++
++@triton.jit
++def _quant_pack_store_vector(
++    X_ptr,
++    KV_cache_ptr,
++    Scale_ptr,
++    Zero_ptr,
++    base,
++    slot_base,
++    scale_base,
++    data_offset: tl.constexpr,
++    dim_full,
++    dim_half,
++    full_mask,
++    half_mask,
++    D: tl.constexpr,
++    D_PAD: tl.constexpr,
++    D_HALF_PAD: tl.constexpr,
++    ROTATE: tl.constexpr,
++    LOG_ORDER: tl.constexpr,
++    PRE_SCALE: tl.constexpr,
++):
++    x = tl.load(X_ptr + base + dim_full, mask=full_mask, other=0.0).to(tl.float32)
++    if ROTATE:
++        x = _fwht_blocked(x * PRE_SCALE, D_PAD, LOG_ORDER)
++
++    half = D // 2
++    safe_lo = tl.where(half_mask, dim_half, 0)
++    safe_hi = tl.where(half_mask, dim_half + half, 0)
++    vals_lo = tl.gather(x, safe_lo, 0)
++    vals_hi = tl.gather(x, safe_hi, 0)
++
++    vals_lo_min = tl.where(half_mask, vals_lo, float("inf"))
++    vals_hi_min = tl.where(half_mask, vals_hi, float("inf"))
++    vals_lo_max = tl.where(half_mask, vals_lo, -float("inf"))
++    vals_hi_max = tl.where(half_mask, vals_hi, -float("inf"))
++    x_min = tl.minimum(tl.min(vals_lo_min, axis=0), tl.min(vals_hi_min, axis=0))
++    x_max = tl.maximum(tl.max(vals_lo_max, axis=0), tl.max(vals_hi_max, axis=0))
++    scale = tl.maximum((x_max - x_min) / 15.0, 1.0e-8)
++    zero = -x_min / scale
++
++    q_lo_f = tl.minimum(tl.maximum((vals_lo - x_min) / scale + 0.5, 0.0), 15.0)
++    q_hi_f = tl.minimum(tl.maximum((vals_hi - x_min) / scale + 0.5, 0.0), 15.0)
++    q_lo = q_lo_f.to(tl.uint8)
++    q_hi = q_hi_f.to(tl.uint8)
++    packed = q_lo | (q_hi << 4)
++
++    tl.store(
++        KV_cache_ptr + slot_base + data_offset + dim_half,
++        packed,
++        mask=half_mask,
++    )
++    tl.store(Scale_ptr + scale_base, scale)
++    tl.store(Zero_ptr + scale_base, zero)
++
++
++@triton.jit
++def _kv_4bit_store_kernel(
++    Key_ptr,
++    Value_ptr,
++    KV_cache_ptr,
++    K_scale_ptr,
++    K_zero_ptr,
++    V_scale_ptr,
++    V_zero_ptr,
++    Slot_mapping_ptr,
++    stride_cache_block: tl.constexpr,
++    stride_cache_pos: tl.constexpr,
++    stride_cache_head: tl.constexpr,
++    stride_ks_block: tl.constexpr,
++    stride_ks_pos: tl.constexpr,
++    stride_ks_head: tl.constexpr,
++    stride_vs_block: tl.constexpr,
++    stride_vs_pos: tl.constexpr,
++    stride_vs_head: tl.constexpr,
++    D: tl.constexpr,
++    H: tl.constexpr,
++    BLOCK_SIZE: tl.constexpr,
++    D_PAD: tl.constexpr,
++    D_HALF_PAD: tl.constexpr,
++    V_DATA_OFFSET: tl.constexpr,
++    ROTATE_K: tl.constexpr,
++    LOG_ORDER: tl.constexpr,
++    PRE_SCALE: tl.constexpr,
++    HEADS_PER_PROGRAM: tl.constexpr,
++):
++    token_idx = tl.program_id(0)
++    head_group = tl.program_id(1)
++
++    slot = tl.load(Slot_mapping_ptr + token_idx)
++    if slot < 0:
++        return
++
++    blk = (slot // BLOCK_SIZE).to(tl.int64)
++    off = (slot % BLOCK_SIZE).to(tl.int64)
++    dim_full = tl.arange(0, D_PAD)
++    dim_half = tl.arange(0, D_HALF_PAD)
++    full_mask = dim_full < D
++    half_mask = dim_half < (D // 2)
++
++    for head_offset in tl.static_range(0, HEADS_PER_PROGRAM):
++        head_idx = head_group * HEADS_PER_PROGRAM + head_offset
++        if head_idx < H:
++            slot_base = (
++                blk * stride_cache_block
++                + off * stride_cache_pos
++                + tl.cast(head_idx, tl.int64) * stride_cache_head
++            )
++            k_scale_base = (
++                blk * stride_ks_block
++                + off * stride_ks_pos
++                + tl.cast(head_idx, tl.int64) * stride_ks_head
++            )
++            v_scale_base = (
++                blk * stride_vs_block
++                + off * stride_vs_pos
++                + tl.cast(head_idx, tl.int64) * stride_vs_head
++            )
++            base = (token_idx * H + head_idx) * D
++
++            _quant_pack_store_vector(
++                Key_ptr,
++                KV_cache_ptr,
++                K_scale_ptr,
++                K_zero_ptr,
++                base,
++                slot_base,
++                k_scale_base,
++                data_offset=0,
++                dim_full=dim_full,
++                dim_half=dim_half,
++                full_mask=full_mask,
++                half_mask=half_mask,
++                D=D,
++                D_PAD=D_PAD,
++                D_HALF_PAD=D_HALF_PAD,
++                ROTATE=ROTATE_K,
++                LOG_ORDER=LOG_ORDER,
++                PRE_SCALE=PRE_SCALE,
++            )
++            _quant_pack_store_vector(
++                Value_ptr,
++                KV_cache_ptr,
++                V_scale_ptr,
++                V_zero_ptr,
++                base,
++                slot_base,
++                v_scale_base,
++                data_offset=V_DATA_OFFSET,
++                dim_full=dim_full,
++                dim_half=dim_half,
++                full_mask=full_mask,
++                half_mask=half_mask,
++                D=D,
++                D_PAD=D_PAD,
++                D_HALF_PAD=D_HALF_PAD,
++                ROTATE=False,
++                LOG_ORDER=LOG_ORDER,
++                PRE_SCALE=PRE_SCALE,
++            )
++
++
++def triton_kv_4bit_store(
++    key: torch.Tensor,
++    value: torch.Tensor,
++    kv_cache: torch.Tensor,
++    slot_mapping: torch.Tensor,
++    *,
++    hadamard_order: int,
++) -> None:
++    """Quantize and store K/V into the KV-4BIT combined cache."""
++    N, H, D = key.shape
++    assert value.shape == key.shape
++    assert D % 2 == 0
++
++    if hadamard_order < 2 or hadamard_order & (hadamard_order - 1):
++        raise ValueError(
++            f"hadamard_order must be a power of two >= 2, got {hadamard_order}"
++        )
++    if D % hadamard_order:
++        raise ValueError(
++            f"head_dim ({D}) must be divisible by hadamard_order "
++            f"({hadamard_order})"
++        )
++
++    d_pad = triton.next_power_of_2(D)
++    d_half_pad = triton.next_power_of_2(D // 2)
++    data_bytes = D // 2
++    v_data_offset = data_bytes + 8
++
++    block_size = kv_cache.shape[1]
++    log_order = int(math.log2(hadamard_order))
++    pre_scale = 1.0 / math.sqrt(float(hadamard_order))
++    k_scale, k_zero, v_scale, v_zero = get_kv_4bit_scale_zero_views(kv_cache, D)
++    heads_per_program = min(8, H) if d_pad < 512 else 1
++
++    _kv_4bit_store_kernel[(N, triton.cdiv(H, heads_per_program))](
++        key.reshape(N * H, D).contiguous(),
++        value.reshape(N * H, D).contiguous(),
++        kv_cache.view(-1),
++        k_scale,
++        k_zero,
++        v_scale,
++        v_zero,
++        slot_mapping,
++        stride_cache_block=kv_cache.stride(0),
++        stride_cache_pos=kv_cache.stride(1),
++        stride_cache_head=kv_cache.stride(2),
++        stride_ks_block=k_scale.stride(0),
++        stride_ks_pos=k_scale.stride(1),
++        stride_ks_head=k_scale.stride(2),
++        stride_vs_block=v_scale.stride(0),
++        stride_vs_pos=v_scale.stride(1),
++        stride_vs_head=v_scale.stride(2),
++        D=D,
++        H=H,
++        BLOCK_SIZE=block_size,
++        D_PAD=d_pad,
++        D_HALF_PAD=d_half_pad,
++        V_DATA_OFFSET=v_data_offset,
++        ROTATE_K=True,
++        LOG_ORDER=log_order,
++        PRE_SCALE=pre_scale,
++        HEADS_PER_PROGRAM=heads_per_program,
++        num_warps=4,
++        num_stages=1,
++    )
