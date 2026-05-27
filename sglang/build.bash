@@ -27,7 +27,7 @@ _PIP_INSTALL() {
 # Python build deps. `setuptools-rust>=1.10` is required for sglang's gRPC
 # Rust extension (rust/sglang-grpc) since v0.5.12; we build with `--no-isolation`
 # so it must be present in the host environment.
-_PIP_INSTALL -U pip setuptools wheel build ninja \
+_PIP_INSTALL -U pip 'setuptools<82' wheel build ninja \
   'scikit-build-core>=0.10' 'setuptools-scm>=8.0' 'setuptools-rust>=1.10'
 
 # protobuf-compiler: needed by tonic-build (via prost-build) when compiling the
@@ -55,6 +55,10 @@ sed -Ei \
   -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
   -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
   python/pyproject.toml
+
+# Surface the Rust toolchain file at the repo root so rustup's CWD-upward
+# walk finds it when setuptools-rust invokes cargo from python/.
+ln -sf rust/sglang-grpc/rust-toolchain.toml .
 
 # Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent).
 (
