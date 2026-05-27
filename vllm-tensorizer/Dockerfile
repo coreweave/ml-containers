@@ -133,7 +133,13 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
+    export NVCC_APPEND_FLAGS='-gencode=arch=compute_103a,code=sm_103a' && \
     export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
+    { \
+      sed -i -E 's@(CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;)(11\.0;)@\110.3;\2@' CMakeLists.txt && \
+      grep -qE 'CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;10\.3;11\.0;' CMakeLists.txt \
+      || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
+    } && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
     if [ -f 'use_existing_torch.py' ]; then \
