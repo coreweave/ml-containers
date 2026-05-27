@@ -12,22 +12,6 @@ _PIP_INSTALL() {
 }
 
 _PIP_INSTALL /wheels/*.whl
-if [ -x /wheels/libdecord.so ]; then
-  apt-get -qq update && apt-get -q install --no-install-recommends -y \
-    libavfilter7 libavformat58 && \
-  apt-get clean
-  cp /wheels/libdecord.so /usr/local/lib/ && ldconfig
-fi
-
-_PIP_INSTALL \
-  'aiohttp' 'fastapi' \
-  'hf_transfer' 'huggingface_hub' 'interegular' 'modelscope' \
-  'msgspec' 'orjson' 'packaging' 'pillow' 'prometheus-client>=0.20.0' \
-  'psutil' 'pydantic' 'python-multipart' 'pyzmq>=25.1.2' \
-  'torchao>=0.9.0' 'uvicorn' 'uvloop' \
-  "cuda-python==$(echo "${CUDA_VERSION}" | cut -d. -f1-2)" 'outlines==0.1.11' \
-  'llguidance>=0.7.11,<0.8.0' \
-  'xgrammar==0.1.32'
 
 # Make PyTorch's shared libs (libc10.so etc.) visible to the dynamic linker
 # so that torchao's CUDA extensions can load them at runtime.

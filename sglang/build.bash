@@ -24,10 +24,21 @@ _PIP_INSTALL() {
   "$@"
 }
 
-_PIP_INSTALL -U pip setuptools wheel build ninja 'scikit-build-core>=0.10' 'setuptools-scm>=8.0'
-# Do not install cmake via pip — the base image provides cmake from the Kitware
-# PPA (3.x). pip's cmake package installs 4.x which removed backward compat
-# with cmake_minimum_required(VERSION < 3.5) used by some sub-project deps.
+# Python build deps. `setuptools-rust>=1.10` is required for sglang's gRPC
+# Rust extension (rust/sglang-grpc) since v0.5.12; we build with `--no-isolation`
+# so it must be present in the host environment.
+_PIP_INSTALL -U pip 'setuptools<82' wheel build ninja \
+  'scikit-build-core>=0.10' 'setuptools-scm>=8.0' 'setuptools-rust>=1.10'
+
+# protobuf-compiler: needed by tonic-build (via prost-build) when compiling the
+# sglang-grpc Rust crate.
+apt-get -qq update && apt-get -q install --no-install-recommends -y \
+  protobuf-compiler
+
+# rustup only; --default-toolchain none defers to rust-toolchain.toml on first cargo run.
+curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup.rs \
+  | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+export PATH="/root/.cargo/bin:${PATH}"
 
 # sglang (includes sgl-kernel)
 : "${SGLANG_COMMIT:?}"
@@ -39,16 +50,17 @@ git checkout "${SGLANG_COMMIT}"
 
 # Relax exact torch-family version pins to be compatible with the base image
 sed -Ei \
-  -e 's@"torch==[0-9]+\.[0-9]+\.[0-9]+"@"torch>=2.8.0"@' \
-  -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.8.0"@' \
-  -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.9.0"@' \
+  -e 's@"torch==[0-9]+\.[0-9]+\.[0-9]+"@"torch>=2.11.0"@' \
+  -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.11.0"@' \
+  -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
   -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
   python/pyproject.toml
 
-# Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent)
-# Use pip wheel instead of python -m build to skip dep-validation checks that
-# fail with --no-isolation when the base image's torch/setuptools versions
-# don't satisfy scikit-build-core's internally-declared constraints.
+# Surface the Rust toolchain file at the repo root so rustup's CWD-upward
+# walk finds it when setuptools-rust invokes cargo from python/.
+ln -sf rust/sglang-grpc/rust-toolchain.toml .
+
+# Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent).
 (
 cd sgl-kernel
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 silences the cmake 4.x breakage on any
@@ -62,46 +74,8 @@ CMAKE_BUILD_PARALLEL_LEVEL="${_CMAKE_PARALLEL}" \
   python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
 )
 
-# Build sglang python package
+# Build sglang python package (includes setuptools-rust extension sglang-grpc).
 _BUILD python |& _LOG sglang.log
 )
-
-# decord and xgrammar aren't available on PyPI for ARM64
-
-if [ ! "$(uname -m)" = 'x86_64' ]; then
-  # xgrammar (for sglang)
-  _PIP_INSTALL nanobind
-  (
-  git clone --depth 1 --recursive --filter=blob:none -b v0.1.32 https://github.com/mlc-ai/xgrammar
-  cd xgrammar
-  # Use pip wheel --no-build-isolation --no-deps (same as sgl-kernel) to skip
-  # the build-dep version check: xgrammar pins nanobind==2.5.0 exactly but we
-  # install whatever is current; scikit-build-core still picks up CMAKE_ARGS.
-  CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -GNinja \
-    -Dnanobind_DIR=$(python3 -c 'import nanobind; print(nanobind.cmake_dir())')" \
-  CMAKE_BUILD_PARALLEL_LEVEL=$(nproc) \
-    python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG xgrammar.log
-  )
-
-  # decord (for sglang)
-  : "${DECORD_COMMIT:?}"
-  (
-  apt-get -qq update && apt-get -q install --no-install-recommends -y \
-    build-essential python3-dev python3-setuptools \
-    make cmake ffmpeg \
-    libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev
-  git clone --recursive --filter=blob:none https://github.com/dmlc/decord
-  cd decord
-  git checkout "${DECORD_COMMIT}"
-  (
-  mkdir build && cd build
-  cmake -S.. -B. -DUSE_CUDA=0 -DCMAKE_BUILD_TYPE=Release -GNinja |& _LOG decord.log
-  cmake --build . --parallel "$(nproc)" |& _LOG decord.log
-  cp libdecord.so /wheels/libdecord.so
-  )
-  cd python
-  _BUILD . |& _LOG decord.log
-  )
-fi
 
 apt-get clean
