@@ -876,5 +876,7 @@ RUN <<-"EOT" python3
 	        break
 EOT
 
+COPY --link --chmod=555 distro-pkg-divert.py /opt/distro-pkg-divert
+
 COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/
 COPY --link --from=uv-downloader /opt/uv.toml /etc/uv/uv.toml
