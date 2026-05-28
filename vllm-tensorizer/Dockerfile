@@ -80,10 +80,13 @@ RUN printf '%s\n' \
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
 ARG VLLM_COMMIT
+COPY patches/kv4bit-mla-05ac829.patch /tmp/kv4bit-mla-05ac829.patch
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/vllm && \
     cd vllm && \
     git checkout "${VLLM_COMMIT}" && \
+    git apply /tmp/kv4bit-mla-05ac829.patch && \
+    git diff --check && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
