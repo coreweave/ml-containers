@@ -38,13 +38,28 @@ RUN ARCH=$(uname -m) && \
     | tar xz --strip-components=1 -C /opt/ \
       "uv-${ARCH}-unknown-linux-gnu/uv" "uv-${ARCH}-unknown-linux-gnu/uvx"
 
-# Make uv play nice with the system Python installation
+
+# Config files for uv and pip
+FROM scratch AS conf
+# Avoid auto-downloading Python versions other than the container's Python,
+# and turn off the default package cache
 COPY <<-"EOT" /opt/uv.toml
 	python-downloads = "never"
+	no-cache = true
 
 	[pip]
-	system = true
+	break-system-packages = true
 EOT
+
+# Avoid warnings about running as root or modifying the system environment,
+# and turn off the default package cache
+COPY <<-"EOT" /etc/pip.conf
+	[global]
+	root-user-action = ignore
+	break-system-packages = true
+	no-cache-dir = true
+EOT
+
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
@@ -179,6 +194,8 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
 FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
 ENV DEBIAN_FRONTEND=noninteractive
 
+COPY --link --from=conf / /
+
 # ninja-build and lld are optional but improve the build.
 # Remove PEP 668 marker since containers are often single-purpose
 # and thus do not inherently need to be pushed into venv isolation.
@@ -196,7 +213,7 @@ RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
     if ! command -v pip3 >/dev/null 2>&1; then \
       wget -qO- 'https://bootstrap.pypa.io/get-pip.py' | /usr/bin/python3; \
     fi && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' wheel packaging build && \
+    /usr/bin/python3 -m pip install --upgrade pip 'setuptools<82' wheel packaging build && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip "$(command -v pip3)" 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
@@ -228,7 +245,7 @@ RUN apt-get -qq update && apt-get -qq install -y \
     apt-get -qq update && \
     apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
     apt-get clean && \
-    python3 -m pip install --no-cache-dir 'cmake==3.31.6'
+    python3 -m pip install 'cmake==3.31.6'
 
 # Setup for sccache and its wrappers.
 # Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
@@ -378,8 +395,8 @@ RUN chmod 755 /build/build-wheel.sh
 
 ## Build torch
 RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch/ \
-    pip3 install --no-cache-dir --upgrade numpy && \
-    cd pytorch && pip3 install --no-cache-dir -r requirements.txt
+    python3 -m pip install --upgrade numpy && \
+    cd pytorch && python3 -m pip install -r requirements.txt
 
 # Build tool & library paths, shared for all libraries to be built
 ENV CMAKE_PREFIX_PATH=/usr/bin/ \
@@ -397,14 +414,14 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     if [ "$BUILD_TRITON" = '1' ]; then \
-      pip3 install --no-cache-dir pybind11 lit && \
+      python3 -m pip install pybind11 lit && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
       if [ -f 'triton/python/setup.py' ]; then \
         /build/build-wheel.sh triton/python; \
       else \
         /build/build-wheel.sh triton; \
       fi && \
-      pip3 install --no-cache-dir dist/*.whl; \
+      python3 -m pip install dist/*.whl; \
     fi
 
 ARG BUILD_TORCH_VERSION
@@ -530,7 +547,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     /build/build-wheel.sh
 SHELL ["/bin/sh", "-c"]
-RUN pip3 install --no-cache-dir --upgrade dist/torch*.whl
+RUN python3 -m pip install --upgrade dist/torch*.whl
 
 FROM builder-base AS torchvision-builder
 RUN rm ./dist/*
@@ -538,7 +555,7 @@ RUN rm ./dist/*
 ## Build torchvision
 ARG BUILD_TORCH_VISION_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
-RUN pip3 install --no-cache-dir --upgrade \
+RUN python3 -m pip install --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
@@ -563,7 +580,7 @@ RUN rm ./dist/*
 ## Build torchaudio
 ARG BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
-RUN pip3 install --no-cache-dir --upgrade \
+RUN python3 -m pip install --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
@@ -698,6 +715,8 @@ ENV TORCH_CUDA_ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}"
 FROM final-${TARGETARCH}
 ENV DEBIAN_FRONTEND=noninteractive
 
+COPY --link --from=conf / /
+
 # Install core packages.
 # Remove PEP 668 marker since containers are often single-purpose
 # and thus do not inherently need to be pushed into venv isolation.
@@ -716,7 +735,7 @@ RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
     if ! command -v pip3 >/dev/null 2>&1; then \
       wget -qO- 'https://bootstrap.pypa.io/get-pip.py' | /usr/bin/python3; \
     fi && \
-    /usr/bin/python3 -m pip install --no-cache-dir --upgrade pip 'setuptools<82' && \
+    /usr/bin/python3 -m pip install --upgrade pip 'setuptools<82' && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip "$(command -v pip3)" 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
@@ -805,8 +824,8 @@ WORKDIR /usr/src/app
 
 # Install custom PyTorch wheels.
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
-    pip3 install --no-cache-dir -U numpy packaging && \
-    pip3 install --no-cache-dir -U ./*.whl
+    python3 -m pip install -U numpy packaging && \
+    python3 -m pip install -U ./*.whl
 
 # Install FA4.
 # FA4 is installed as a pure Python wheel that JIT-compiles device code
@@ -821,7 +840,7 @@ RUN if [ -z "${BUILD_FLASH_ATTN_4_VERSION}" ]; then exit 0; fi && \
       printf 'flash-attn-4%s @ git+https://github.com/Dao-AILab/flash-attention.git@%s#subdirectory=flash_attn/cute' \
         "${EXTRA}" "${BUILD_FLASH_ATTN_4_VERSION}"; \
     )" && \
-    pip3 install --no-cache-dir "${FA4_PACKAGE}"
+    python3 -m pip install "${FA4_PACKAGE}"
 
 # Make a symlink to flash-attn v3 where TransformerEngine expects it,
 # and modify the installation record so that pip uninstall knows how to
@@ -879,4 +898,3 @@ EOT
 COPY --link --chmod=555 distro-pkg-divert.py /opt/distro-pkg-divert
 
 COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/
-COPY --link --from=uv-downloader /opt/uv.toml /etc/uv/uv.toml
