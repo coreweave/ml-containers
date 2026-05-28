@@ -18,7 +18,7 @@ ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
 
-ARG SCCACHE_VERSION="0.14.0"
+ARG SCCACHE_VERSION="0.15.0"
 
 ARG UV_VERSION="0.11.16"
 
