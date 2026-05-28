@@ -1,6 +1,6 @@
 include:
   - vllm-repo: 'https://github.com/alexeldeib/vllm'
-    vllm-commit: 'e15252249ec4eaa6e6677ccee0bad87e9d6b41d2'
+    vllm-commit: '2dd2d7adec900312c1ea377f0c7d22bf5a0cd351'
     flashinfer-commit: 'v0.6.8'
     lmcache-commit: 'v0.4.2'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch:ace-sm-10x-955f3dd-nccl-cuda12.9.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
