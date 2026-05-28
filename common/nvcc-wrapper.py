@@ -13,6 +13,10 @@ Checking for SIGKILL or SIGSEGV is implemented by checking for either:
 subprocesses internally, and ``sh`` usually resolves to
 the ``dash`` shell within Ubuntu container images.
 
+This also injects an ``sccache`` wrapper around ``nvcc`` where available.
+``sccache`` error messages indicating unknown compiler failures or
+cache corruption also trigger a retry, optionally without using the cache.
+
 This wrapper also has the ability to filter out some -gencode flags.
 Gencode flags to filter out should be identified by their code parameter
 in a semicolon-delimited list stored in the NVCC_WRAPPER_FILTER_CODES
@@ -26,7 +30,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from typing import BinaryIO, Final, FrozenSet, Iterable, List, Sequence, Set
+from typing import BinaryIO, Final, FrozenSet, Iterable, List, NamedTuple, Sequence, Set
 
 NVCC_PATH: Final[str] = shutil.which("nvcc")
 if NVCC_PATH is None:
@@ -57,10 +61,28 @@ RETRY_RET_CODES: Final[FrozenSet[int]] = frozenset({
     255,
 })
 
+# When sccache cannot read an output file it wanted to put in the cache,
+# it prints this line. Retrying the nvcc invocation usually works around it.
+RETRY_STDERR_SUBSTRING: Final[bytes] = b"sccache: caused by: failed to open file"
+
+# This matches gcc errors referencing any of sccache's tracked
+# intermediate files. Such a file goes missing only when sccache
+# extracted an incomplete cache entry, so the wrapper retries with
+# SCCACHE_RECACHE=1 to bypass the bad entry.
+RECACHE_STDERR_RE: Final[re.Pattern[bytes]] = re.compile(
+    rb"\.(?:cudafe1\.[^:]+|cpp[14]\.ii):\d+:\d+: fatal error:.*: No such file or directory"
+)
+
+
+class MonitorResult(NamedTuple):
+    retry: bool
+    recache: bool
+
 
 async def main(args) -> int:
     args = transform_args(args)
     ret: int = 0
+    recaching: bool = False
     for attempt in range(1, WRAPPER_ATTEMPTS + 1):
         if attempt > 1:
             print(
@@ -77,8 +99,12 @@ async def main(args) -> int:
                 print("NVCC wrapper: warning: Final attempt; appending --ptxas-options=--opt-level=0")
                 args.append("--ptxas-options=--opt-level=0")
         cmd = (SCCACHE_SH, NVCC_PATH, *args) if SCCACHE_SH else (NVCC_PATH, *args)
+        env = {**os.environ, "SCCACHE_RECACHE": "1"} if recaching else None
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            *cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
         )
         restart_signals: tuple = await asyncio.gather(
             monitor_stream(proc.stdout, sys.stdout.buffer),
@@ -86,8 +112,11 @@ async def main(args) -> int:
         )
         ret = await proc.wait()
         del proc
-        if ret == 0 or not any(restart_signals) and ret not in RETRY_RET_CODES:
+        retry_observed = any(r.retry for r in restart_signals)
+        if ret == 0 or not retry_observed and ret not in RETRY_RET_CODES:
             break
+        if not recaching and any(r.recache for r in restart_signals):
+            recaching = True
     else:
         print(
             "NVCC wrapper: info:"
@@ -106,13 +135,17 @@ async def monitor_stream(
         b"Segmentation fault (core dumped)",
         b"Killed",
     ),
-) -> bool:
+    retry_substring: bytes = RETRY_STDERR_SUBSTRING,
+    recache_re: re.Pattern[bytes] = RECACHE_STDERR_RE,
+) -> MonitorResult:
     found: bool = False
+    recache: bool = False
     while line := await stream.readline():
-        found = found or line.strip() in watch_for
+        found = found or line.strip() in watch_for or retry_substring in line
+        recache = recache or recache_re.search(line) is not None
         output.write(line)
         output.flush()
-    return found
+    return MonitorResult(retry=found or recache, recache=recache)
 
 
 def transform_args(args: Sequence[str]) -> List[str]:
