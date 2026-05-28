@@ -35,6 +35,7 @@ jobs:
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.tag-suffix }}
       cache-key: ${{ matrix.cache-key }}
+      platforms: linux/amd64
       build-contexts: |
         common=common
       object-storage-secrets: true
