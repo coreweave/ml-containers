@@ -144,7 +144,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
       || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
     } && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
-    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
+    python3 -m pip install --no-cache-dir \
+      py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools 'setuptools-rust>=1.9.0' && \
     if [ -f 'use_existing_torch.py' ]; then \
       python3 use_existing_torch.py; \
     else \
