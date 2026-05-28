@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 CoreWeave
+#
+# SPDX-License-Identifier: MIT
+
 """Move apt-installed Python packages out of dist-packages so a pip install
 of the same name can take over the import namespace. Each file moves to
 <stash-root>/<pkg>/<original-path>, with a dpkg diversion registered so
