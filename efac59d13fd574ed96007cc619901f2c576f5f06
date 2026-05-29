@@ -1,0 +1,33 @@
+## Conversation
+User asked: "gemma4 MTP needs transformers 5.9.0, please adjust vllm-tensorizer/Dockerfile". Planned in plan mode, plan approved. Then user asked to create branch abatilo/bump-transformers, run /git-commit, and they will review before asking to open a PR. So: committed but NOT pushed, no PR opened yet.
+
+## Actions
+- Read vllm-tensorizer/Dockerfile (full).
+- Launched an Explore agent to confirm scope of `transformers` references repo-wide.
+  - Found: only pin for vllm-tensorizer build is line 346 (`transformers==5.5.4`).
+  - Other repo refs (unrelated to this build): megatron/requirements.txt `transformers==5.3.0`; sd-inference/Dockerfile sed bump to 4.57.3. Left untouched.
+  - Constraints mechanism: freeze.sh emits only torch/torchaudio/torchvision/xformers (+ click appended) into /tmp/constraints.txt. transformers is NOT in constraints, so `-c /tmp/constraints.txt` on the final pip install imposes no competing bound on transformers. No conflict.
+- Edits to vllm-tensorizer/Dockerfile:
+  - Line 332 comment: "Gemma 4 needs transformers > 5.5.0" -> "Gemma 4 MTP needs transformers 5.9.0"
+  - Line 346 pin: `transformers==5.5.4` -> `transformers==5.9.0`
+  - Kept line 333 (Kimi K2.5 fix in 5.5.4) since 5.9.0 > 5.5.4 still includes it.
+- Verified with `git diff` — exactly 2 line changes, nothing else.
+- Created branch abatilo/bump-transformers off main (was on main, clean).
+- Committed via git-commit skill. Conventional-commit style with scope confirmed from `git log --oneline -20` (e.g. build(vllm-tensorizer): for 6ac56a9 sm_103a).
+
+## Errors & Mistakes
+None.
+
+## Dead Ends
+None.
+
+## Hints for Future Agents
+- `==` is an EXACT pin: if transformers 5.9.0 is not yet published on PyPI, the final `pip install` (Dockerfile lines 343-349) will hard-fail. I could not verify PyPI availability (no network in session). Flagged to user; worth confirming before merge.
+- Do NOT touch megatron/requirements.txt or sd-inference/Dockerfile transformers refs — they are separate images/builds, unrelated to this request.
+- Not pushed, no PR. User explicitly wants to review first, then will ask to open the PR.
+
+## Codebase Discoveries
+- vllm-tensorizer's only transformers version control is the explicit pin on the final install line; vLLM's own pyproject transformers range is otherwise whatever it declares (the sed at lines 200-202 strips only torch/xformers pins, not transformers).
+
+## Open Questions
+- Is transformers 5.9.0 actually released on PyPI? Needs confirmation before build/merge.
