@@ -125,8 +125,34 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       --depth 1 --filter=tree:0
 
 
+# vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
+# rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95)
+# plus protoc. Build it in a dedicated stage and copy the single binary into
+# the wheel build below, mirroring upstream's docker/Dockerfile so the heavy
+# wheel stage doesn't need cargo. setup.py detects the precompiled binary and
+# skips the local cargo build.
+FROM builder-base AS vllm-rust-builder
+ENV CARGO_BUILD_JOBS=4 \
+    CC=gcc CXX=g++ \
+    PATH="/root/.cargo/bin:${PATH}"
+RUN apt-get -qq update && \
+    apt-get -q install --no-install-recommends --no-upgrade -y \
+      curl ca-certificates unzip build-essential pkg-config perl && \
+    apt-get clean && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain none
+RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/workspace/rust/target \
+    bash tools/install_protoc.sh && \
+    VLLM_RS_TARGET_PATH=/tmp/vllm-rs bash build_rust.sh && \
+    install -D -m755 /tmp/vllm-rs /out/vllm-rs
+
+
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=bind,from=vllm-rust-builder,source=/out/vllm-rs,target=/opt/vllm-rs \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
@@ -141,7 +167,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
       || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
     } && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
-    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
+    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' \
+      grpcio-tools 'setuptools-rust>=1.9.0' && \
     if [ -f 'use_existing_torch.py' ]; then \
       python3 use_existing_torch.py; \
     else \
@@ -149,6 +176,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
         e489ad7a210f4234db696d1f2749d5f3662fa65b:use_existing_torch.py \
         | python3 -; \
     fi && \
+    install -D -m755 /opt/vllm-rs vllm/vllm-rs && \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
@@ -292,9 +320,14 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
+# vLLM 0.22 pins nvidia-cutlass-dsl==4.5.2 (which renamed cutlass.base_dsl.Arch
+# -> arch) but only floors quack-kernels (>=0.3.3). A drifted quack still imports
+# the old `Arch` and crashes DeepSeek-V4's cute-DSL indexer at load. Pin quack to
+# the release vLLM 0.22.0 was cut against. Revisit on the next vLLM bump.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
-    echo 'click != 8.3.0' >> /tmp/constraints.txt
+    echo 'click != 8.3.0' >> /tmp/constraints.txt && \
+    echo 'quack-kernels==0.4.1' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
