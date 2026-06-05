@@ -368,6 +368,8 @@ ARG TARGETPLATFORM
 # * llguidance bumped to 1.7 — vLLM's pin (<1.4) lacks JSON Schema "format": "uri" support
 #   (added in llguidance v1.6.0; mirrors upstream vllm-project/vllm#42150)
 
+# ray[cgraph]>=2.48.0 will unconditionally install cupy-cuda12x. Uninstall it and install cupy-cuda13x if CUDA major version is 13.
+
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
     else \
@@ -379,6 +381,10 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       'transformers==5.9.0' 'nixl==1.0.0' 'nixl-cu12==1.0.0' \
       'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
-    rm /tmp/constraints.txt
+    rm /tmp/constraints.txt && \
+    if [ "$(echo $CUDA_VERSION | cut -d. -f1)" -eq "13" ]; then \
+      python3 -m pip uninstall -y cupy-cuda12x && \
+      python3 -m pip install --no-cache-dir --force-reinstall --no-deps cupy-cuda13x; \
+    fi
 
 EXPOSE 8080
