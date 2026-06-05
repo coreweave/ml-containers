@@ -16,10 +16,13 @@ WORKDIR /app
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates libssl-dev && \
+    apt-get install -y redis-server && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/modelexpress/target/release/modelexpress-server .
-
+COPY --chmod=+x entrypoint.sh .
 EXPOSE 8001
+ENV REDIS_URL=redis://localhost:6379
+ENV MX_METADATA_BACKEND=redis
 
-CMD ["./modelexpress-server", "--port", "8001"]
+CMD ["./entrypoint.sh"]
