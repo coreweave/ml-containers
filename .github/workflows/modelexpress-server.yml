@@ -1,0 +1,13 @@
+on:
+  push:
+    paths:
+      - "modelexpress-server/**"
+      - ".github/workflows/modelexpress-server.yml"
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: modelexpress-server
+      folder: modelexpress-server
