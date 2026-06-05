@@ -18,7 +18,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/modelexpress-server .
+COPY --from=builder /app/modelexpress/target/release/modelexpress-server .
 
 EXPOSE 8001
 
