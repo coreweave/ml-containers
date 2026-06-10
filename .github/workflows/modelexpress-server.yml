@@ -22,3 +22,4 @@ jobs:
       folder: modelexpress-server
       build-args: |
         MODELEXPRESS_COMMIT=${{ matrix.modelexpress-commit }}
+        MODELEXPRESS_PORT=${{ matrix.modelexpress-port }}

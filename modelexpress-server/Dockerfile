@@ -23,7 +23,9 @@ RUN apt-get update && \
 
 COPY --from=builder /app/modelexpress/target/release/modelexpress-server .
 COPY --chmod=+x entrypoint.sh .
-EXPOSE 8001
+ARG MODELEXPRESS_PORT
+EXPOSE ${MODELEXPRESS_PORT}
+ENV MODELEXPRESS_PORT=${MODELEXPRESS_PORT}
 ENV REDIS_URL=redis://localhost:6379
 ENV MX_METADATA_BACKEND=redis
 
