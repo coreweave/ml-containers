@@ -6,8 +6,10 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+ARG MODELEXPRESS_COMMIT
+
 RUN  git clone https://github.com/ai-dynamo/modelexpress.git && \
-  cd modelexpress && git checkout 6cf440700e9341ce17718a51b981dbccf81b6c57 && \
+  cd modelexpress && git checkout ${MODELEXPRESS_COMMIT} && \
   cargo build --release --bin modelexpress-server
 
 FROM ubuntu:24.04 AS runtime
