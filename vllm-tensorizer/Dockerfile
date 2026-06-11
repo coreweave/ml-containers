@@ -277,39 +277,35 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,tar
     mkdir -p /nvshmem_libs && \
     cp /tmp/deepep_build/nvshmem/lib/libnvshmem*.so* /nvshmem_libs/
 
+# Build a NIXL wheel linked against HPC-X's multi-threaded UCX (/opt/hpcx/ucx/mt). The PyPI
+# nixl-cuNN wheels bundle their own UCX, which clashes with this image's HPC-X UCX and can't
+# register GPU memory. UCX+POSIX are the only plugins needed; CUDA arch stays at NIXL's default
+# (sm_80+) to keep the wheel multi-arch.
 FROM builder-base AS nixl-builder
 RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends --no-upgrade -y \
-      build-essential pkg-config && \
+      build-essential pkg-config git && \
     apt-get clean && \
-    python3 -m pip install --no-cache-dir meson ninja pybind11 cmake
+    python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
-ARG NIXL_TAG='0.2.0'
-ARG NIXL_UCX_HOME='/opt/hpcx/ucx'
+ARG NIXL_TAG='v1.2.0'
+ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
-    mkdir /tmp/nixl && \
-    cd /tmp/nixl && \
-    wget "https://github.com/ai-dynamo/nixl/archive/refs/tags/${NIXL_TAG}.tar.gz" -qO- \
-    | tar --strip-components=1 -xzf - && \
     [ -d "${NIXL_UCX_HOME}" ] && \
-    CUDA_TARGET="$(find /usr/local/cuda/targets -mindepth 1 -maxdepth 1 -type d | head -1)" && \
-    meson setup build --prefix=/opt/nixl \
-      -Ducx_path="${NIXL_UCX_HOME}" \
-      -Dgds_path="${CUDA_TARGET}" \
-      -Dcudapath_inc="${CUDA_TARGET}/include" \
-      -Dcudapath_lib="${CUDA_TARGET}/lib" \
-      -Dcudapath_stub="${CUDA_TARGET}/lib/stubs" && \
-    cd build && \
-    ninja && \
-    ninja install && \
-    cd ../.. && \
-    rm -r /tmp/nixl && \
-    echo '/opt/nixl/lib/python3/dist-packages' > /usr/lib/python3/dist-packages/nixl.pth
+    git clone --depth 1 --branch "${NIXL_TAG}" https://github.com/ai-dynamo/nixl /tmp/nixl && \
+    # Rename the dist to nixl-cu<major> matching this image's CUDA (NIXL hardcodes nixl-cu12), so the
+    # `nixl` meta's nixl-cu<major> pin is met by our build and no prebuilt (bundled-UCX) wheel is pulled.
+    CUDA_MAJOR="$(nvcc --version | sed -n 's/.*release \([0-9]\{1,\}\).*/\1/p' | head -1)" && \
+    sed -i -E "s/^name = \"nixl-cu[0-9]+\"/name = \"nixl-cu${CUDA_MAJOR}\"/" /tmp/nixl/pyproject.toml && \
+    python3 -m pip wheel --no-cache-dir --no-build-isolation --no-deps /tmp/nixl -w /wheels \
+      -C setup-args="-Ducx_path=${NIXL_UCX_HOME}" \
+      -C setup-args="-Denable_plugins=UCX,POSIX" && \
+    rm -rf /tmp/nixl
 
 FROM ${FINAL_BASE_IMAGE} AS base
 
@@ -353,9 +349,6 @@ RUN --mount=type=bind,from=deepep-builder,source=/wheels,target=/tmp/wheels \
 COPY --link --from=deepep-builder /nvshmem_libs/ /usr/local/lib/
 RUN ldconfig
 
-COPY --link --from=nixl-builder /opt/nixl /opt/nixl
-COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib/python3/dist-packages/nixl.pth
-
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
 
@@ -364,7 +357,8 @@ ARG TARGETPLATFORM
 
 # * Gemma 4 MTP needs transformers 5.9.0
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
-# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) — pin both to 1.0.0
+# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) - verified 
+#   no crash on this image with vllm 0.22
 # * llguidance bumped to 1.7 — vLLM's pin (<1.4) lacks JSON Schema "format": "uri" support
 #   (added in llguidance v1.6.0; mirrors upstream vllm-project/vllm#42150)
 
@@ -378,7 +372,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
-      'transformers==5.9.0' 'nixl==1.0.0' 'nixl-cu12==1.0.0' \
+      'transformers==5.9.0' \
       'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt && \
@@ -386,5 +380,28 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       python3 -m pip uninstall -y cupy-cuda12x && \
       python3 -m pip install --no-cache-dir --force-reinstall --no-deps cupy-cuda13x; \
     fi
+
+# Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
+# `nixl>=1.1.0`) pull the bundled-UCX wheel; purge those, install our wheel + the `nixl` meta
+# (the pure-python dispatcher) --no-deps so no bundled-UCX wheel comes back.
+RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
+    rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
+    python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
+    python3 -m pip install --no-cache-dir --no-deps nixl && \
+    # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
+    # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
+    sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
+    # Assert the UCX plugin links HPC-X's MT UCX (LD_LIBRARY_PATH below selects it at runtime).
+    P="$(find /usr/local/lib/python3.12/dist-packages -name 'libplugin_UCX.so' | head -1)" && \
+    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P" | grep -q "/opt/hpcx/ucx/mt/lib/libucp.so.0" || \
+      { echo "NIXL UCX plugin not linked to HPC-X MT UCX:"; LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P"; exit 1; } && \
+    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c "import nixl; print('nixl import OK')"
+
+# Prepend MT UCX so its libucp wins over the base image's non-MT /opt/hpcx/ucx/lib.
+ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
+
+# Re-prepend on login shells too (HPC-X's profile.d regenerates LD_LIBRARY_PATH; zz- sorts last).
+RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx-mt.sh
 
 EXPOSE 8080
