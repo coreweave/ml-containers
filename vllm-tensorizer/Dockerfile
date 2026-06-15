@@ -197,7 +197,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
-      'nvidia-cudnn-frontend>=1.13.0,<1.19.0' \
+      'nvidia-cudnn-frontend>=1.19.1' \
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       'apache-tvm-ffi==0.1.9' && \
@@ -316,10 +316,11 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.22 pins nvidia-cutlass-dsl==4.5.2 (which renamed cutlass.base_dsl.Arch
+# vLLM 0.23 still pins nvidia-cutlass-dsl==4.5.2 (which renamed cutlass.base_dsl.Arch
 # -> arch) but only floors quack-kernels (>=0.3.3). A drifted quack still imports
-# the old `Arch` and crashes DeepSeek-V4's cute-DSL indexer at load. Pin quack to
-# the release vLLM 0.22.0 was cut against. Revisit on the next vLLM bump.
+# the old `Arch` and crashes DeepSeek-V4's cute-DSL indexer at load. cutlass-dsl is
+# unchanged from 0.22.0, so keep quack pinned to the same known-good 0.4.1 release.
+# Revisit on the next vLLM bump.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
