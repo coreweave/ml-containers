@@ -22,7 +22,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/modelexpress/target/release/modelexpress-server .
-COPY --chmod=+x entrypoint.sh .
+COPY --chmod=755 entrypoint.sh .
 ARG MODELEXPRESS_PORT
 EXPOSE ${MODELEXPRESS_PORT}
 ENV MODELEXPRESS_PORT=${MODELEXPRESS_PORT}
