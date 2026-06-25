@@ -91,10 +91,12 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
 ARG FLASHINFER_COMMIT
+COPY patches/flashinfer-trtllm-ragged-empty-kv.patch /tmp/flashinfer-trtllm-ragged-empty-kv.patch
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/flashinfer-ai/flashinfer && \
     cd flashinfer && \
     git checkout "${FLASHINFER_COMMIT}" && \
+    git apply --unidiff-zero -v --stat --apply /tmp/flashinfer-trtllm-ragged-empty-kv.patch && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
