@@ -127,10 +127,9 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 # vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
 # rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95)
-# plus protoc. Build it in a dedicated stage and copy the single binary into
-# the wheel build below, mirroring upstream's docker/Dockerfile so the heavy
-# wheel stage doesn't need cargo. setup.py detects the precompiled binary and
-# skips the local cargo build.
+# plus protoc. v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
+# via setuptools-rust. Build both in a dedicated stage and copy the artifacts
+# into the wheel build below so the heavy wheel stage doesn't need cargo.
 FROM builder-base AS vllm-rust-builder
 ENV CARGO_BUILD_JOBS=4 \
     CC=gcc CXX=g++ \
@@ -140,19 +139,22 @@ RUN apt-get -qq update && \
       curl ca-certificates unzip build-essential pkg-config perl && \
     apt-get clean && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --default-toolchain none
+    | sh -s -- -y --profile minimal --default-toolchain none && \
+    python3 -m pip install --no-cache-dir \
+      'setuptools>=77.0.3,<81.0.0' 'setuptools-rust>=1.9.0' wheel
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
     bash tools/install_protoc.sh && \
-    VLLM_RS_TARGET_PATH=/tmp/vllm-rs bash build_rust.sh && \
-    install -D -m755 /tmp/vllm-rs /out/vllm-rs
+    bash build_rust.sh && \
+    install -D -m755 vllm/vllm-rs /out/vllm-rs && \
+    cp vllm/_rust_*.so /out/
 
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
-    --mount=type=bind,from=vllm-rust-builder,source=/out/vllm-rs,target=/opt/vllm-rs \
+    --mount=type=bind,from=vllm-rust-builder,source=/out,target=/opt/rust-artifacts \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
@@ -176,7 +178,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
         e489ad7a210f4234db696d1f2749d5f3662fa65b:use_existing_torch.py \
         | python3 -; \
     fi && \
-    install -D -m755 /opt/vllm-rs vllm/vllm-rs && \
+    install -D -m755 /opt/rust-artifacts/vllm-rs vllm/vllm-rs && \
+    cp /opt/rust-artifacts/_rust_*.so vllm/ && \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
