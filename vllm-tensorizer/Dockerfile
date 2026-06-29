@@ -358,7 +358,7 @@ ARG TARGETPLATFORM
 
 # * Gemma 4 MTP needs transformers 5.9.0
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
-# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) - verified 
+# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) - verified
 #   no crash on this image with vllm 0.22
 # * llguidance bumped to 1.7 — vLLM's pin (<1.4) lacks JSON Schema "format": "uri" support
 #   (added in llguidance v1.6.0; mirrors upstream vllm-project/vllm#42150)
