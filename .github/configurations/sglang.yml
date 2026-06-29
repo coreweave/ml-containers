@@ -1,6 +1,6 @@
 sglang-commit:
-  - '28b095c01005d4a3a2a5b637b7d028b07fba31b2'
+  - '49e384ce9d304648e9959666ecb8ce8cd98d0deb'
 base-image:
   - 'ghcr.io/coreweave/ml-containers/torch-extras:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
 tag:
-  - 'v0.5.13-cuda13.2.1-torch2.11.0'
+  - 'v0.5.14-cuda13.2.1-torch2.11.0'
