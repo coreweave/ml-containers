@@ -198,11 +198,16 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     [ -n "${CUDA_VERSION}" ] && \
+    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.5.2' && \
+    if [ "${CUDA_VERSION%%.*}" = "13" ]; then \
+      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.5.2'; \
+    fi && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
       'nvidia-cudnn-frontend>=1.19.1' \
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
+      "${CUTLASS_DSL_PACKAGE}" \
       'apache-tvm-ffi==0.1.9' && \
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
