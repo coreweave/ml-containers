@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ace Eldeib <aeldeib@coreweave.com>
+Date: Thu, 2 Jul 2026 01:10:00 -0400
+Subject: [PATCH] Fix FlashInfer TRTLLM DeepSeek no-group routing weights
+
+GLM-5.2 uses FlashInfer TRTLLM NvFP4 MoE through the DeepSeekV3 no-group
+routing path. That path selects experts with `sigmoid(router_logit) +
+routing_bias`, then normalizes the selected experts with the unbiased sigmoid
+scores.
+
+The block-per-token routing kernel already preserves that separation: it writes
+the biased selection key to shared memory and writes the unbiased sigmoid into
+an auxiliary shared-memory array consumed by `ScaledSumNormalizePostprocess`.
+The warp-per-token routing path did not. It selected top-k using the biased
+score, then tried to recover the unbiased sigmoid as `selected_score - bias`.
+
+That reconstruction is lossy for GLM-5.2. The model can produce tiny sigmoid
+scores around 1e-8 to 1e-7 with routing correction biases around 12. In fp32,
+adding the tiny sigmoid to the large bias rounds back to the bias, so
+subtracting the bias later yields zero. When every selected expert in a row
+collapses that way, `ScaledSumNormalizePostprocess` computes `0 / 0`, produces
+NaN expert weights, and GLM decode can collapse into repeated punctuation.
+
+Keep expert selection unchanged, but recompute the selected experts' unbiased
+sigmoid scores from the original logits before the warp-path normalization.
+This matches the existing block-per-token auxiliary path and the Python routing
+reference: selection uses `sigmoid + bias`; final weights use `sigmoid`.
+
+Also set the same denominator epsilon already used by the adjacent MiniMax2
+path. The epsilon is only a final guard; the main correctness fix is preserving
+the unbiased sigmoid for normalization.
+
+Signed-off-by: Ace Eldeib <aeldeib@coreweave.com>
+---
+ .../trtllm/fused_moe/RoutingCustomPolicy.cuh | 30 +++++++++++++++++--
+ csrc/trtllm_fused_moe_runner.cu              |  1 +
+ 2 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh b/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
+index 934dcbf71..5f1f6a6ae 100644
+--- a/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
++++ b/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
+@@ -434,6 +434,24 @@ struct ScaledSumNormalizePostprocess {
+     }
+   }
+ 
++  template <typename DataType, typename InputType, int K, typename ParamsT>
++  __forceinline__ __device__ static void applyWithScores(
++      cg::thread_block_tile<WarpSize> const& warp, DataType (&warpTopKScore)[K],
++      int32_t const (&warpTopKExpertIdx)[K], int32_t laneIdx, int32_t topK,
++      InputType const* ptrScores, ParamsT const& params) {
++    float sigmoidScore = 0.f;
++    if (laneIdx < topK) {
++      int32_t const expertIdx = warpTopKExpertIdx[laneIdx];
++      sigmoidScore = sigmoid_accurate(static_cast<float>(ptrScores[expertIdx]));
++    }
++
++    float sum = cg::reduce(warp, sigmoidScore, cg::plus<float>());
++    if (laneIdx < topK) {
++      warpTopKScore[laneIdx] =
++          static_cast<DataType>(sigmoidScore * params.routeScale / (sum + params.sumEpsilon));
++    }
++  }
++
+   /// Block-per-token variant: read un-biased sigmoid directly from smemAux
+   /// (written by SigmoidBiasPreprocess::applyToSmem) instead of reloading bias
+   /// and subtracting.  Saves one global memory read + one FMA per top-K lane.
+@@ -566,8 +584,14 @@ struct TopKExpertSelect {
+     topk::reduceTopK(warp, warpTopKScore, warpTopKExpertIdx, score, idx, minScore, topK);
+ 
+     // Apply postprocess (e.g. renormalize, softmax over top-K, scaled renormalize, ...)
+-    PostprocessPolicy_::apply(warp, warpTopKScore, warpTopKExpertIdx, laneIdx, topK,
+-                              params.mExpertSelectParams.mPostprocessParams);
++    if constexpr (std::is_same_v<PostprocessPolicy_, ScaledSumNormalizePostprocess>) {
++      PostprocessPolicy_::template applyWithScores<DataType, InputType, K>(
++          warp, warpTopKScore, warpTopKExpertIdx, laneIdx, topK, ptrScores,
++          params.mExpertSelectParams.mPostprocessParams);
++    } else {
++      PostprocessPolicy_::apply(warp, warpTopKScore, warpTopKExpertIdx, laneIdx, topK,
++                                params.mExpertSelectParams.mPostprocessParams);
++    }
+   }
+ };
+ 
+diff --git a/csrc/trtllm_fused_moe_runner.cu b/csrc/trtllm_fused_moe_runner.cu
+index 6e7c97395..f2d949d51 100644
+--- a/csrc/trtllm_fused_moe_runner.cu
++++ b/csrc/trtllm_fused_moe_runner.cu
+@@ -76,6 +76,7 @@ void Runner::run(void* routingLogits, void* routingBias, int32_t numTokens, int3
+     routingData.mPtrRoutingBias = routingBias;
+     routingData.mDtypeBias = dtypeBias;
+     routingData.mRouteScale = routedScalingFactor;
++    routingData.mSumEpsilon = 1e-20f;
+ 
+     routingData.mPtrScores = expertIds == nullptr ? routingLogits : nullptr;
+     routingData.mPtrTopKIds = expertIds;
+-- 
+2.50.0
