@@ -409,3 +409,36 @@ ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
 RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx-mt.sh
 
 EXPOSE 8080
+
+
+# NVIDIA Dynamo wheels layered on top of the vLLM image above. Built from the
+# same Dockerfile so the vLLM and Dynamo images are versioned and updated
+# together, allowing them to be rolled back in lockstep.
+FROM base AS dynamo
+
+ARG DYNAMO_VERSION
+
+USER root
+RUN python3 -m pip install --no-cache-dir --extra-index-url https://pypi.nvidia.com \
+        "ai-dynamo==${DYNAMO_VERSION:?}" \
+        "blake3>=1.0.0,<2.0.0" \
+        "librosa>=0.10.0" \
+        "ray>=2.55.0" \
+        "soundfile>=0.13.1" \
+        "uvloop"
+
+# Build-time smoke test. Also re-verify nixl imports: Dynamo's deps are installed
+# unconstrained on top of base's pinned runtime, and base goes to lengths to keep
+# the bundled-UCX nixl wheel out (see the nixl-builder swap above) — fail fast here
+# if Dynamo perturbed it.
+RUN python3 -c "import dynamo.frontend, dynamo.vllm; print('dynamo+vllm import ok')" && \
+    python3 -m dynamo.frontend --help >/dev/null && \
+    python3 -c "import vllm; print('vllm version:', vllm.__version__)" && \
+    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" \
+      python3 -c "import nixl; print('nixl import OK')"
+
+# Keep workdir compatible with NVIDIA's vllm-runtime image for DGD specs
+WORKDIR /workspace
+
+LABEL com.coreweave.dynamo.version="${DYNAMO_VERSION}" \
+      com.coreweave.dynamo.nixl="none"
