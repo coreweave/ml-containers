@@ -33,6 +33,7 @@ jobs:
     with:
       image-name: vllm-tensorizer
       folder: vllm-tensorizer
+      target: base
       tag-suffix: ${{ matrix.tag-suffix }}
       cache-key: ${{ matrix.cache-key }}
       build-contexts: |
@@ -42,5 +43,33 @@ jobs:
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         LMCACHE_COMMIT=${{ matrix.lmcache-commit }}
+        BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
+        FINAL_BASE_IMAGE=${{ matrix.final-base-image }}
+
+  # dynamo-vllm layers NVIDIA Dynamo on top of the vLLM image above, built from
+  # the same Dockerfile (target: dynamo) so the two images stay version-locked.
+  # Runs after `build` so it can reuse vllm-tensorizer's build cache and only
+  # build the thin Dynamo layer rather than recompiling vLLM from scratch.
+  build-dynamo:
+    uses: ./.github/workflows/build.yml
+    needs: [get-config, build]
+    strategy:
+      matrix: ${{ fromJSON(needs.get-config.outputs.config) }}
+    secrets: inherit
+    with:
+      image-name: dynamo-vllm
+      folder: vllm-tensorizer
+      target: dynamo
+      tag-suffix: ${{ matrix.tag-suffix }}
+      cache-key: ${{ matrix.cache-key }}
+      extra-cache-from-image-name: vllm-tensorizer
+      build-contexts: |
+        common=common
+      object-storage-secrets: true
+      build-args: |
+        VLLM_COMMIT=${{ matrix.vllm-commit }}
+        FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
+        LMCACHE_COMMIT=${{ matrix.lmcache-commit }}
+        DYNAMO_VERSION=${{ matrix.dynamo-version }}
         BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
         FINAL_BASE_IMAGE=${{ matrix.final-base-image }}

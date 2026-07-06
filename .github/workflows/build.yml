@@ -9,6 +9,10 @@ on:
       image-name:
         required: true
         type: string
+      target:
+        required: false
+        description: "Dockerfile stage to build (passed as --target). Defaults to the final stage."
+        type: string
       build-args:
         required: false
         type: string
@@ -18,6 +22,13 @@ on:
       cache-key:
         required: false
         description: "Optional sub-key to append to the image name for build layer caching"
+        type: string
+      extra-cache-from-image-name:
+        required: false
+        description: >
+          Optional image name whose build cache is added as a read-only cache-from
+          source. Use to share base layers with another image built from the same
+          Dockerfile (e.g. a derived image reusing the parent's compiled layers).
         type: string
       platforms:
         required: false
@@ -129,6 +140,13 @@ jobs:
           KEY="${{ matrix.arch }}-${{ inputs.image-name }}"
           [ -z "${{ inputs.cache-key }}" ] || KEY="${KEY}-${{ inputs.cache-key }}"
           echo "ref=${{ needs.prepare.outputs.registry }}/buildcache:${KEY}" >> "$GITHUB_OUTPUT"
+          # Cache is only shared when this build's cache-key matches the
+          # producer's, so the computed ref equals the one the producer wrote.
+          if [ -n "${{ inputs.extra-cache-from-image-name }}" ]; then
+            EXTRA_KEY="${{ matrix.arch }}-${{ inputs.extra-cache-from-image-name }}"
+            [ -z "${{ inputs.cache-key }}" ] || EXTRA_KEY="${EXTRA_KEY}-${{ inputs.cache-key }}"
+            echo "extra_ref=${{ needs.prepare.outputs.registry }}/buildcache:${EXTRA_KEY}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push by digest
         id: docker-build
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294  # v7.0.0
@@ -138,6 +156,7 @@ jobs:
         with:
           context: ${{ inputs.folder }}
           build-contexts: ${{ inputs.build-contexts }}
+          target: ${{ inputs.target }}
           build-args: |-
             ${{ inputs.build-args }}
           labels: ${{ needs.prepare.outputs.labels }}
@@ -146,7 +165,9 @@ jobs:
           secrets: |
             ${{ inputs.object-storage-secrets && format('s3_access_key_id={0}', secrets.SCCACHE_S3_ACCESS_KEY_ID) || '' }}
             ${{ inputs.object-storage-secrets && format('s3_secret_access_key={0}', secrets.SCCACHE_S3_SECRET_ACCESS_KEY) || '' }}
-          cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
+          cache-from: |
+            type=registry,ref=${{ steps.cache.outputs.ref }}
+            ${{ steps.cache.outputs.extra_ref && format('type=registry,ref={0}', steps.cache.outputs.extra_ref) || '' }}
           cache-to: type=registry,ref=${{ steps.cache.outputs.ref }},mode=max
       - name: Export digest
         id: export
