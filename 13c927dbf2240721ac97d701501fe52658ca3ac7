@@ -1,0 +1,23 @@
+## Conversation
+User asked to bump vLLM to https://github.com/vllm-project/vllm/tree/v0.25.0rc1 (session named "bump vllm for dspark support"). Planned in plan mode, then executed via /goal.
+
+## Actions
+Resolved v0.25.0rc1 -> b2dec4ac5a7942fdac7e687175bebba2f1d43575 via git ls-remote. Verified against raw.githubusercontent.com at that commit: requirements/cuda.txt (torch==2.11.0 matches base images; flashinfer-python==0.6.13 pin), CMakeLists.txt (CUDA 13 arch list still lacks 10.3 so the Dockerfile sed at vllm-tensorizer/Dockerfile:170 still applies and its grep guard matches), rust-toolchain.toml (still channel 1.95), build_rust.sh + tools/build_rust.py (artifacts still vllm/vllm-rs and vllm/_rust_*.so), tools/install_protoc.sh exists, pyproject build-system unchanged, nvidia-cutlass-dsl still ==4.5.2 with quack-kernels only floored (>=0.3.3) so the quack==0.4.1 pin stays. Edited .github/configurations/vllm-tensorizer.yml (both vllm-commit entries) and two stale Dockerfile comments (quack block, llguidance bullet).
+
+## Errors & Mistakes
+None.
+
+## Dead Ends
+None.
+
+## Hints for Future Agents
+- Repo pins vLLM by exact commit SHA, not tag (PR #178 precedent); tag-suffix in CI derives from vllm-commit.
+- FlashInfer stays at v0.6.14 + flashinfer-v0.6.14-deepseekv3-no-group-routing.patch (PR #179); vLLM's own flashinfer pin gets overwritten in the final stage by our built wheels.
+- v0.25.0rc1 adds new runtime deps (tilelang, humming-kernels[cu13], PyNvVideoCodec, tokenspeed-mla, torchcodec, numba 0.65, fastsafetensors) installed from PyPI in the final stage; arm64/cu12 wheel availability was NOT pre-verified — if CI fails, look there first.
+- The CMakeLists sed guard exits the build loudly if the arch-list shape changes upstream.
+
+## Codebase Discoveries
+vLLM 0.25 now requires llguidance>=1.7.0,<1.8.0 itself, so the explicit install in the final stage mirrors upstream instead of overriding a <1.4 pin; comment updated accordingly.
+
+## Open Questions
+Whether the new v0.25 PyPI deps have arm64 wheels — resolved by watching the CI matrix builds.
