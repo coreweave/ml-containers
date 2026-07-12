@@ -1,0 +1,86 @@
+## Conversation
+The user asked to replace GitHub PR https://github.com/coreweave/ml-containers/pull/181. The old PR was on branch `abatilo/vllm-0.25.0rc1` and upgraded the image build to vLLM's `v0.25.0rc1` tag. The user explicitly wanted PR #181 closed, the old branch deleted, and a new PR opened for the official `v0.25.0` release from https://github.com/vllm-project/vllm. They asked that everything else remain stylistically the same and that `alexeldeib` and `JustinPerlman` be tagged in the same way as before. Investigation showed that "tagged" meant requested as reviewers, not literal @mentions in the body or comments. PR #181 also requested the `coreweave/inference` team, so preserving the PR's style and review routing means requesting that team too. The user explicitly requested `create_goal()`; a goal and a seven-step task plan were created before implementation.
+
+The intent was not to mutate the existing rc PR in place. It was to preserve the old review/build record, retire the rc-specific PR and branch, and recreate the same narrowly scoped proposal against the official final release.
+
+## Actions
+1. Read the complete repo-explore skill at `/Users/abatilo/abatilo/vimrc/codex_skills/repo-explore/SKILL.md`, including `references/update-reference.md` and `references/version-detection.md`. Read the complete git-commit skill at `/Users/abatilo/abatilo/vimrc/codex_skills/git-commit/SKILL.md`.
+2. Searched `/Users/abatilo/.codex/memories/MEMORY.md` for `ml-containers`, `vllm-0.25`, PR 181, and the old branch name. There were no relevant entries, so no project assumptions were taken from memory.
+3. Verified the local checkout at `/Users/abatilo/work/ml-containers` was clean on `main`, with `main` and `origin/main` at `c8208e4707f32868515ffda5a2793aea07f500a0`. Confirmed there is no checked-in `AGENTS.md`; the prompt-supplied instructions are the governing repository instructions.
+4. Read recent history with `git log --show-notes`, listed local notes, fetched the remote note namespace into the separate read-only ref `refs/notes/origin-commits`, and read the full note on old PR commit `13c927dbf2240721ac97d701501fe52658ca3ac7`. Using a separate ref avoided overwriting local notes while still satisfying the requirement to inspect remote agent context.
+5. Inspected PR #181 with `gh pr view`, GitHub REST endpoints for pull metadata, issue events, review requests, comments, reviews, commits, files, check runs, and workflow run 28944020569. Exact old state:
+   - title: `feat(vllm): Upgrade to vLLM v0.25.0rc1`
+   - base: `main` at `c8208e4`
+   - head: `abatilo/vllm-0.25.0rc1` at `13c927d`
+   - one commit; two changed files; 5 insertions and 5 deletions
+   - no labels, assignees, milestone, reviews, inline comments, or human discussion
+   - requested reviewers: `alexeldeib` and `JustinPerlman`
+   - requested team: `coreweave/inference`
+   - all nine checks in workflow run 28944020569 succeeded, including amd64 and arm64 builds for both CUDA matrix entries and both manifest merges.
+6. Fetched and inspected the old PR branch and confirmed it is exactly one commit ahead of current `main`; merge base is `c8208e4`. Read its exact diff and compared it with prior vLLM bumps, especially `2038c04 feat(vllm): Use exact commit for vLLM`, `1c8470f feat(vllm): Upgrade to vLLM v0.24.0`, `f2a1d18`, and the FlashInfer routing work in `62c073e`.
+7. Ran Chesterton's Fence checks with `git blame`, commit diffs, notes, workflow inspection, and source inspection before carrying forward the Dockerfile comments and exact-SHA convention. These checks established that both matrix rows must move together; FlashInfer `v0.6.14` and its GLM routing patch must remain; the Rust build stage and artifacts must remain; the guarded CUDA 10.3 patch is intentional; `quack-kernels==0.4.1` prevents a known CUTLASS DSL API mismatch; and explicit llguidance 1.7 protects JSON Schema URI support.
+8. Used the repo-explore cache at `/Users/abatilo/.cache/codex/repos/vllm-project/vllm`. Verified GitHub's live `refs/tags/v0.25.0` and official release API. The tag is lightweight, not annotated: the GitHub ref object type is `commit`, and `git ls-remote` returns no peeled `^{}` row. The official tag points to `702f4814fe54fabff350d43cb753ae3e47c0c276`. The GitHub release was published at `2026-07-11T20:06:44Z`, is not a draft, and is not a prerelease.
+9. Checked out the official SHA in the cache and verified `git status --short --branch`, `git rev-parse HEAD`, and an exact-match safe ref. The clean detached checkout is at `702f4814fe54fabff350d43cb753ae3e47c0c276`; the safe local ref is `refs/codex/upstream-tags/v0.25.0`, and `refs/remotes/origin/releases/v0.25.0` points to the same SHA.
+10. Compared `v0.25.0rc1` commit `b2dec4ac5a7942fdac7e687175bebba2f1d43575` with final `702f4814fe54fabff350d43cb753ae3e47c0c276`. Final is 14 commits ahead. Among the build/dependency files audited for the rc PR, only `requirements/cuda.txt` changed: `PyNvVideoCodec==2.1.0` became the tested `PyNvVideoCodec==2.0.4` pin.
+11. Reverified the exact final-release source instead of blindly copying the rc conclusions:
+    - `requirements/cuda.txt:7-15`: torch 2.11.0, torchaudio 2.11.0, torchvision 0.26.0, FlashInfer 0.6.13, and PyNvVideoCodec 2.0.4.
+    - `requirements/cuda.txt:24-26`: `nvidia-cutlass-dsl[cu13]==4.5.2` and `quack-kernels>=0.3.3`.
+    - `requirements/common.txt:24`: llguidance remains `>=1.7.0,<1.8.0`.
+    - `CMakeLists.txt:105-117`: the CUDA 13 list still has 10.0 followed by 11.0 and omits 10.3, so the guarded ml-containers sed remains necessary and structurally valid.
+    - `rust-toolchain.toml:1-2`: Rust channel remains 1.95.
+    - `build_rust.sh`, `tools/build_rust.py`, `setup.py`, and `tools/install_protoc.sh`: build entrypoints, `vllm/vllm-rs`, `vllm/_rust_*.so`, setuptools-rust, and protoc expectations remain valid.
+    - `pyproject.toml:1-14`: the build system still uses setuptools, setuptools-scm, and setuptools-rust with torch 2.11.0.
+12. Ran a simplicity-first planning check. Chosen path: create one fresh commit from current `main` on `abatilo/vllm-0.25.0`, reproduce PR #181's exact two-file shape, substitute the official exact SHA, and preserve the already-correct comment edits. No new abstraction, dependency, or prototype was justified.
+13. Fetched current `origin/main` again and verified no remote branch named `abatilo/vllm-0.25.0` existed. Created the local branch from `main`.
+14. Edited only:
+    - `.github/configurations/vllm-tensorizer.yml:2,7`: replaced the v0.24 commit in both CUDA matrix entries with `702f4814fe54fabff350d43cb753ae3e47c0c276`.
+    - `vllm-tensorizer/Dockerfile:330,374-375`: carried forward PR #181's comment-only vLLM 0.25/quack and llguidance explanation updates with no build-instruction change.
+15. Validated the change:
+    - `git diff --check` passed.
+    - exact diff scope assertion passed: two files, 5 additions, 5 deletions.
+    - parsed `.github/configurations/vllm-tensorizer.yml` with the installed yq and jq; asserted two rows, identical official vLLM SHA, FlashInfer v0.6.14, LMCache v0.4.7, matching builder/final images, and exactly CUDA 12.9.1 plus 13.2.1.
+    - mechanically compared the new files with PR #181 after substituting its rc SHA with the final SHA; result was exact equivalence.
+    - reran `git ls-remote` and GitHub release API assertions; official SHA/release checks passed.
+    - asserted the upstream Torch, FlashInfer, CUTLASS, Quack, llguidance, CUDA-arch, Rust, and protoc fences directly against commit `702f4814f`; all passed.
+16. Staged only the two intended files, reran the staged diff check, and created this atomic commit with the repository's Conventional Commit style.
+
+## Errors & Mistakes
+1. A broad source-search command included the unquoted shell glob `Makefile*` under zsh. Because this checkout has no matching Makefile, zsh aborted that command with the exact error:
+   `zsh:1: no matches found: Makefile*`
+   The useful source context printed before the glob failure was retained, and the file/search portion was retried with explicit `rg --files -g` patterns. No files were changed by the failed command.
+2. The first YAML assertion copied the GitHub workflow's Mike Farah yq syntax:
+   `yq e '.include' -oj -I0 .github/configurations/vllm-tensorizer.yml`
+   This machine actually has the Python/jq-style `yq 3.4.3`. It exited 4 with:
+   `yq: error: argument files: can't open '.include': [Errno 2] No such file or directory: '.include'`
+   The assertion was rerun successfully as `yq -c '.include' ... | jq -e ...`. This was a validation-command mismatch, not a YAML defect.
+3. The repo-explore cache contained a stale local `refs/tags/v0.25.0` at `e12b91b032daed2afc34d77cca20902cef957b3c`. A normal `git fetch --all --tags --prune` reported `would clobber existing tag`. Plain `git describe --tags` was therefore misleading and printed `v0.25.0rc3-2-g702f4814f` even at the official final commit. The stale tag was not force-deleted or overwritten. The official identity was instead established from GitHub's live ref and release APIs plus `git ls-remote`, then stored in the non-conflicting `refs/codex/upstream-tags/v0.25.0`. Future agents must not trust the cache's plain `refs/tags/v0.25.0` until they deliberately repair it.
+
+## Dead Ends
+1. Updating PR #181 in place was rejected because it would violate the user's explicit request to close the rc PR, delete the rc branch, and open a separate final-release PR.
+2. Cherry-picking or amending the rc commit was considered but not used. Applying the verified two-file change directly from current `main` creates a clean final-release commit without carrying rc-specific commit identity or relying on an intermediate rewrite.
+3. A full local multi-architecture Docker build was not attempted. It is not a practical proportional local check for this exact-SHA/config plus comment-only change. The repository workflow is the authoritative integration test and will build amd64 and arm64 for both CUDA rows after push. The old rc PR's complete four-build matrix was green, but that success is evidence for rc1 only, not a substitute for the new final-release CI.
+
+## Hints for Future Agents
+- This repository pins vLLM by exact commit SHA, not by a tag string. Do not replace the value with `v0.25.0`; both rows must use `702f4814fe54fabff350d43cb753ae3e47c0c276`.
+- The configured full SHA feeds both `VLLM_COMMIT` and the image tag suffix in `.github/workflows/vllm-tensorizer.yml`. Expected suffixes contain the full SHA followed by either `cuda13.2.1-ubuntu24.04` or `cuda12.9.1-ubuntu24.04`.
+- Preserve FlashInfer `v0.6.14` and `vllm-tensorizer/flashinfer-v0.6.14-deepseekv3-no-group-routing.patch`. Upstream vLLM 0.25 pins 0.6.13, but ml-containers intentionally stays ahead for the GLM routing fix.
+- Preserve the guarded CMake sed around `vllm-tensorizer/Dockerfile:167-172`. CUDA 13's upstream list still omits 10.3; the guard is designed to fail loudly when upstream changes its list shape.
+- Preserve the Rust stage, setuptools-rust input, protoc installation, `vllm/vllm-rs`, and `vllm/_rust_*.so` copies. They are required by vLLM 0.24+ and remain present in 0.25.
+- Preserve `quack-kernels==0.4.1` unless a later source/CI investigation proves the CUTLASS DSL compatibility issue resolved. vLLM 0.25 still fixes CUTLASS DSL at 4.5.2 while only flooring Quack at 0.3.3.
+- Preserve explicit `llguidance>=1.7.0,<1.8.0` for this release; it exactly mirrors vLLM 0.25 and protects URI-format schema support.
+- The final release deliberately downgraded PyNvVideoCodec from 2.1.0 to a tested 2.0.4 wheel. Do not "upgrade" it when diagnosing dependency resolution without reading upstream PR #48056/history.
+- The old reviewers were GitHub review requests, not @mentions. To preserve behavior, request `alexeldeib`, `JustinPerlman`, and team `coreweave/inference` on the replacement PR.
+- Read this note and PR #181's note together before future changes; the old note contains the initial rc compatibility audit and this note records the final-release delta.
+- When using the vLLM repo-explore cache, prefer `refs/codex/upstream-tags/v0.25.0` or the explicit SHA over the stale plain local tag.
+
+## Codebase Discoveries
+- `.github/configurations/vllm-tensorizer.yml` contains exactly two build rows, currently CUDA 13.2.1 and 12.9.1. The reusable workflow expands each into amd64 and arm64 builds, then merges each pair into a multiarch manifest.
+- `.github/workflows/read-configuration.yml` uses a different yq implementation/syntax than the locally installed `/Users/abatilo/.local/bin/yq 3.4.3`; local validation commands must account for that.
+- CODEOWNERS maps the vLLM configuration/workflow paths to `@coreweave/inference`, but PR #181 also had explicit user review requests for Ace and Justin.
+- vLLM uses setuptools-scm dynamic versioning. A fresh source checkout containing the official lightweight tag should build package version 0.25.0 even though ml-containers records the exact commit.
+- The official final tag is 14 commits after rc1. Of the previously audited build/dependency inputs, only the tested PyNvVideoCodec pin changed; the rest of the rc build fences remain applicable.
+- PR #181 had no human review discussion to preserve. Its only comments were successful workflow image announcements from GitHub Actions.
+
+## Open Questions
+- The replacement PR number, final review-request state, and final CI run are not known at commit creation time. After pushing, close PR #181, delete `origin/abatilo/vllm-0.25.0rc1`, push `abatilo/vllm-0.25.0`, open the replacement PR with the same body structure updated for final v0.25.0/PyNvVideoCodec 2.0.4, and request `alexeldeib`, `JustinPerlman`, and `coreweave/inference`.
+- New final-release CI must still prove all four architecture/CUDA builds. The official tested PyNvVideoCodec 2.0.4 pin reduces one risk identified on rc1, but successful final-release builds are still pending.
