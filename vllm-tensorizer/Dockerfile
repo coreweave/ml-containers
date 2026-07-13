@@ -88,6 +88,17 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       --depth 1 --filter=tree:0
 
 
+FROM alpine/curl:8.17.0 AS arctic-inference-downloader
+ARG ARCTIC_INFERENCE_VERSION="0.1.1"
+ARG ARCTIC_INFERENCE_SHA256="36857e2fbe3ead34821a04be98dfab95086050c1e38199c8fdfe308234fdcf63"
+WORKDIR /src
+RUN curl -fsSLo arctic-inference.tar.gz \
+      "https://files.pythonhosted.org/packages/2a/d2/3bcebda042d08cfa0f35a2bbc6dd168d60fea60b6678824665c7a3665418/arctic_inference-${ARCTIC_INFERENCE_VERSION}.tar.gz" && \
+    echo "${ARCTIC_INFERENCE_SHA256}  arctic-inference.tar.gz" | sha256sum -c - && \
+    tar -xzf arctic-inference.tar.gz --strip-components=1 && \
+    rm arctic-inference.tar.gz
+
+
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
 ARG FLASHINFER_COMMIT
@@ -187,6 +198,17 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
       /opt/build.sh
+
+WORKDIR /wheels
+
+
+FROM builder-base AS arctic-inference-builder
+# Build without isolation so the suffix-only extension links against the image's
+# Python ABI. ARCTIC_INFERENCE_PRECOMPILED_OPS remains unset: those optional
+# CUDA operators are unrelated to suffix decoding and would increase build time.
+RUN python3 -m pip install --no-cache-dir nanobind==2.9.2 grpcio-tools
+RUN --mount=type=bind,from=arctic-inference-downloader,source=/src,target=/workspace,rw \
+    /opt/build.sh
 
 WORKDIR /wheels
 
@@ -339,6 +361,10 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
+
+RUN --mount=type=bind,from=arctic-inference-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
+    python3 -c "from arctic_inference.suffix_decoding import SuffixDecodingCache; SuffixDecodingCache(24)"
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
