@@ -386,6 +386,7 @@ RUN --mount=type=bind,from=arctic-inference-builder,source=/wheels,target=/tmp/w
 RUN --mount=type=bind,from=speculators-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     python3 -c "from speculators.models.dflash import DFlashDraftModel; print(DFlashDraftModel.__name__)"
+COPY --link --from=speculators-downloader /git/speculators/scripts/ /opt/speculators/scripts/
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
