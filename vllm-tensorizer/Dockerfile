@@ -99,6 +99,15 @@ RUN curl -fsSLo arctic-inference.tar.gz \
     rm arctic-inference.tar.gz
 
 
+FROM alpine/git:2.36.3 AS speculators-downloader
+ARG SPECULATORS_REPOSITORY="https://github.com/alexeldeib/speculators.git"
+ARG SPECULATORS_COMMIT="264e83cf1f694a45308425b0c6e4d4f530523b10"
+WORKDIR /git
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      "${SPECULATORS_REPOSITORY}" speculators && \
+    git -C speculators checkout "${SPECULATORS_COMMIT}"
+
+
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
 ARG FLASHINFER_COMMIT
@@ -210,6 +219,13 @@ RUN python3 -m pip install --no-cache-dir nanobind==2.9.2 grpcio-tools
 RUN --mount=type=bind,from=arctic-inference-downloader,source=/src,target=/workspace,rw \
     PIP_CONSTRAINT=/opt/constraints.txt \
       python3 -m pip wheel --no-build-isolation --no-deps --wheel-dir /wheels .
+
+WORKDIR /wheels
+
+
+FROM builder-base AS speculators-builder
+RUN --mount=type=bind,from=speculators-downloader,source=/git/speculators,target=/workspace,rw \
+    /opt/build.sh
 
 WORKDIR /wheels
 
@@ -366,6 +382,10 @@ RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=arctic-inference-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
     python3 -c "from arctic_inference.suffix_decoding import SuffixDecodingCache; SuffixDecodingCache(24)"
+
+RUN --mount=type=bind,from=speculators-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
+    python3 -c "from speculators.models.dflash import DFlashDraftModel; print(DFlashDraftModel.__name__)"
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
