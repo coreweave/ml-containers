@@ -224,6 +224,8 @@ WORKDIR /wheels
 
 
 FROM builder-base AS speculators-builder
+RUN python3 -m pip install --no-cache-dir \
+    'setuptools>=82.0.1' 'setuptools-git-versioning>=2.0,<3'
 RUN --mount=type=bind,from=speculators-downloader,source=/git/speculators,target=/workspace,rw \
     /opt/build.sh
 
