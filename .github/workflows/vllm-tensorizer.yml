@@ -39,6 +39,7 @@ jobs:
         common=common
       object-storage-secrets: true
       build-args: |
+        VLLM_REPOSITORY=${{ matrix.vllm-repository }}
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         LMCACHE_COMMIT=${{ matrix.lmcache-commit }}
