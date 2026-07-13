@@ -208,7 +208,8 @@ FROM builder-base AS arctic-inference-builder
 # CUDA operators are unrelated to suffix decoding and would increase build time.
 RUN python3 -m pip install --no-cache-dir nanobind==2.9.2 grpcio-tools
 RUN --mount=type=bind,from=arctic-inference-downloader,source=/src,target=/workspace,rw \
-    /opt/build.sh
+    PIP_CONSTRAINT=/opt/constraints.txt \
+      python3 -m pip wheel --no-build-isolation --no-deps --wheel-dir /wheels .
 
 WORKDIR /wheels
 
