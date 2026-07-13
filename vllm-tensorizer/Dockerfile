@@ -101,7 +101,7 @@ RUN curl -fsSLo arctic-inference.tar.gz \
 
 FROM alpine/git:2.36.3 AS speculators-downloader
 ARG SPECULATORS_REPOSITORY="https://github.com/alexeldeib/speculators.git"
-ARG SPECULATORS_COMMIT="d8e162e113a3303987552d5834ef19c1ab67f11f"
+ARG SPECULATORS_COMMIT="d861f7dcd9bd415e916d7de1d9f02a928c6f503c"
 WORKDIR /git
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       "${SPECULATORS_REPOSITORY}" speculators && \
