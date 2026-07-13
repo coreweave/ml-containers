@@ -327,7 +327,7 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.23 still pins nvidia-cutlass-dsl==4.5.2 (which renamed cutlass.base_dsl.Arch
+# vLLM 0.25 still pins nvidia-cutlass-dsl==4.5.2 (which renamed cutlass.base_dsl.Arch
 # -> arch) but only floors quack-kernels (>=0.3.3). A drifted quack still imports
 # the old `Arch` and crashes DeepSeek-V4's cute-DSL indexer at load. cutlass-dsl is
 # unchanged from 0.22.0, so keep quack pinned to the same known-good 0.4.1 release.
@@ -371,8 +371,8 @@ ARG TARGETPLATFORM
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
 # * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) - verified
 #   no crash on this image with vllm 0.22
-# * llguidance bumped to 1.7 — vLLM's pin (<1.4) lacks JSON Schema "format": "uri" support
-#   (added in llguidance v1.6.0; mirrors upstream vllm-project/vllm#42150)
+# * llguidance pin mirrors vLLM 0.25's own requirement (>=1.7.0,<1.8.0); kept explicit so
+#   JSON Schema "format": "uri" support (llguidance v1.6.0+) can't regress on future bumps
 
 # ray[cgraph]>=2.48.0 will unconditionally install cupy-cuda12x. Uninstall it and install cupy-cuda13x if CUDA major version is 13.
 
