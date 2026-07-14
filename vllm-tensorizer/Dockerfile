@@ -400,7 +400,7 @@ RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
     python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
-    python3 -m pip install --no-cache-dir --no-deps nixl && \
+    python3 -m pip install --no-cache-dir --no-deps 'nixl==1.2.0' && \
     # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
     # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
     sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
@@ -408,7 +408,8 @@ RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     P="$(find /usr/local/lib/python3.12/dist-packages -name 'libplugin_UCX.so' | head -1)" && \
     LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P" | grep -q "/opt/hpcx/ucx/mt/lib/libucp.so.0" || \
       { echo "NIXL UCX plugin not linked to HPC-X MT UCX:"; LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P"; exit 1; } && \
-    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c "import nixl; print('nixl import OK')"
+    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c \
+      "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is None; print('matching nixl dispatcher/backend import OK; incompatible nixl_ep absent')"
 
 # Prepend MT UCX so its libucp wins over the base image's non-MT /opt/hpcx/ucx/lib.
 ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
