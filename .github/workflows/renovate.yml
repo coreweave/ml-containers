@@ -1,29 +1,68 @@
 ---
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
-name: Renovate dry run
+name: Renovate
 
 on:
   workflow_dispatch:
     inputs:
-      checkoutRef:
-        description: Git ref containing the Renovate configuration to validate
+      dryRun:
+        description: Dry run
+        default: "true"
         required: true
-        type: string
+        type: choice
+        options:
+          - "false"
+          - "true"
       logLevel:
         description: Log level
-        default: debug
+        default: info
         required: false
         type: string
+  schedule:
+    - cron: "17 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - .github/renovate.json5
+      - .github/workflows/renovate.yml
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   renovate:
-    uses: coreweave/actions/.github/workflows/run-renovate.yml@workflows-v2
-    secrets: inherit
-    with:
-      checkout-ref: ${{ inputs.checkoutRef }}
-      dry-run: "true"
-      log-level: ${{ inputs.logLevel }}
+    runs-on: ubuntu-latest
+    env:
+      LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
+      RENOVATE_AUTODISCOVER: true
+      RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository }}
+      RENOVATE_BASE_BRANCH_PATTERNS: ${{ inputs.dryRun == 'true' && format('["{0}"]', github.ref_name) || null }}
+      RENOVATE_DRY_RUN: ${{ inputs.dryRun == 'true' && 'full' || null }}
+      RENOVATE_PLATFORM: github
+      RENOVATE_PLATFORM_COMMIT: enabled
+      RENOVATE_REQUIRE_CONFIG: ${{ inputs.dryRun == 'true' && 'ignored' || null }}
+    steps:
+      - name: Generate Renovate token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.ORG_RENOVATE_CLIENTID }}
+          private-key: ${{ secrets.ORG_RENOVATE_PRIVATEKEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ github.event.repository.name }}
+            renovate-config
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Renovate
+        uses: renovatebot/github-action@abd08c7549b2a864af5df4a2e369c43f035a6a9d # 46.1.5
+        with:
+          configurationFile: .github/renovate.json5
+          env-regex: ".*"
+          renovate-version: 43.83.2
+          token: ${{ steps.app-token.outputs.token }}
