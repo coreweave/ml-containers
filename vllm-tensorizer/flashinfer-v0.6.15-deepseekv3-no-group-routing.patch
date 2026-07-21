@@ -26,15 +26,36 @@ sigmoid scores from the original logits before the warp-path normalization.
 This matches the existing block-per-token auxiliary path and the Python routing
 reference: selection uses `sigmoid + bias`; final weights use `sigmoid`.
 
-Also set the same denominator epsilon already used by the adjacent MiniMax2
-path. The epsilon is only a final guard; the main correctness fix is preserving
-the unbiased sigmoid for normalization.
-
 Signed-off-by: Ace Eldeib <aeldeib@coreweave.com>
+
+--- REBASE NOTE (bump to flashinfer v0.6.15, this session) ---
+Original patch (against v0.6.14) had two hunks: this one
+(RoutingCustomPolicy.cuh, warp-per-token `applyWithScores`) and a second hunk
+in csrc/trtllm_fused_moe_runner.cu that set `routingData.mSumEpsilon = 1e-20f;`
+as a denominator-floor guard.
+
+The second hunk no longer applies against v0.6.15 and has been dropped from
+this patch: upstream flashinfer's v0.6.14->v0.6.15 diff independently adds the
+identical line (`routingData.mSumEpsilon = 1e-20f;`) at the same call site,
+with an equivalent explanatory comment ("Floor the renorm denominator ...
+1e-20f matches DeepSeek-V3's reference gate ... and the MiniMax2 branch") —
+verified by fetching the real v0.6.15 source and diffing directly. That fix is
+now redundant, not just textually conflicting.
+
+This first hunk (below) still applies cleanly against v0.6.15 (1-line offset,
+verified via `git apply` against the real v0.6.15 source tree). NOT verified:
+whether it is still *necessary* or *correct* given upstream also generalized
+the surrounding postprocess-dispatch architecture in this version (new
+`kNeedsAux` / `applyWithAux` / `PolicyPairNeedsAux` trait system replacing the
+narrower block-per-token-only special-casing that existed in v0.6.14). This
+needs a look from whoever owns this patch (Ace Eldeib) before merging —
+flagging explicitly rather than guessing, since this is GLM-5.2 numerical
+correctness territory, not the GB300/dflash hang this branch's version bump is
+otherwise testing.
 ---
- .../trtllm/fused_moe/RoutingCustomPolicy.cuh | 30 +++++++++++++++++--
- csrc/trtllm_fused_moe_runner.cu              |  1 +
- 2 files changed, 29 insertions(+), 2 deletions(-)
+
+ .../trtllm/fused_moe/RoutingCustomPolicy.cuh | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
 
 diff --git a/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh b/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
 index 934dcbf71..5f1f6a6ae 100644
@@ -43,7 +64,7 @@ index 934dcbf71..5f1f6a6ae 100644
 @@ -434,6 +434,24 @@ struct ScaledSumNormalizePostprocess {
      }
    }
- 
+
 +  template <typename DataType, typename InputType, int K, typename ParamsT>
 +  __forceinline__ __device__ static void applyWithScores(
 +      cg::thread_block_tile<WarpSize> const& warp, DataType (&warpTopKScore)[K],
@@ -67,7 +88,7 @@ index 934dcbf71..5f1f6a6ae 100644
    /// and subtracting.  Saves one global memory read + one FMA per top-K lane.
 @@ -566,8 +584,14 @@ struct TopKExpertSelect {
      topk::reduceTopK(warp, warpTopKScore, warpTopKExpertIdx, score, idx, minScore, topK);
- 
+
      // Apply postprocess (e.g. renormalize, softmax over top-K, scaled renormalize, ...)
 -    PostprocessPolicy_::apply(warp, warpTopKScore, warpTopKExpertIdx, laneIdx, topK,
 -                              params.mExpertSelectParams.mPostprocessParams);
@@ -81,18 +102,6 @@ index 934dcbf71..5f1f6a6ae 100644
 +    }
    }
  };
- 
-diff --git a/csrc/trtllm_fused_moe_runner.cu b/csrc/trtllm_fused_moe_runner.cu
-index 6e7c97395..f2d949d51 100644
---- a/csrc/trtllm_fused_moe_runner.cu
-+++ b/csrc/trtllm_fused_moe_runner.cu
-@@ -76,6 +76,7 @@ void Runner::run(void* routingLogits, void* routingBias, int32_t numTokens, int3
-     routingData.mPtrRoutingBias = routingBias;
-     routingData.mDtypeBias = dtypeBias;
-     routingData.mRouteScale = routedScalingFactor;
-+    routingData.mSumEpsilon = 1e-20f;
- 
-     routingData.mPtrScores = expertIds == nullptr ? routingLogits : nullptr;
-     routingData.mPtrTopKIds = expertIds;
--- 
+
+--
 2.50.0
