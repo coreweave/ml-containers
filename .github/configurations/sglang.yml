@@ -1,6 +1,8 @@
 sglang-commit:
+  # renovate-release: datasource=github-releases depName=sgl-project/sglang currentValue=v0.5.15 versioning=pep440
   - 'f63458b5beaceabbd9d749b9fc956370e1b649e6'
 base-image:
   - 'ghcr.io/coreweave/ml-containers/torch-extras:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
 tag:
+  # renovate-release-tag: datasource=github-releases depName=sgl-project/sglang versioning=pep440
   - 'v0.5.15-cuda13.2.1-torch2.11.0'
