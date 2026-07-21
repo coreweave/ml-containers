@@ -135,7 +135,8 @@ FROM downloader-base AS flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
 # Cherry-pick a patch for FA2 to coexist with FA4, cf. flash-attention#2331
 RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}" && \
-    git -C flash-attention cherry-pick -n 4219765dfdd8913bfe26134f748dd5ffcedd3c39
+    git -C flash-attention cherry-pick -n 4219765dfdd8913bfe26134f748dd5ffcedd3c39 && \
+    sed -i -E 's@(-std=|/std:)c\+\+17@\1c++20@g' flash-attention/setup.py
 
 FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
