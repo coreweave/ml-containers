@@ -1,0 +1,29 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Renovate dry run
+
+on:
+  workflow_dispatch:
+    inputs:
+      checkoutRef:
+        description: Git ref containing the Renovate configuration to validate
+        required: true
+        type: string
+      logLevel:
+        description: Log level
+        default: debug
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  renovate:
+    uses: coreweave/actions/.github/workflows/run-renovate.yml@workflows-v2
+    secrets: inherit
+    with:
+      checkout-ref: ${{ inputs.checkoutRef }}
+      dry-run: "true"
+      log-level: ${{ inputs.logLevel }}
