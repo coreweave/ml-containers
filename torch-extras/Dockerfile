@@ -30,7 +30,8 @@ ARG DEEPSPEED_VERSION
 RUN git clone --filter=blob:none --depth 1 \
       -b "v${DEEPSPEED_VERSION}" \
       https://github.com/microsoft/DeepSpeed deepspeed && \
-    rm -rf deepspeed/.git
+    rm -rf deepspeed/.git && \
+    sed -i -E 's@(-std=|/std:)c\+\+17@\1c++20@g' deepspeed/op_builder/*.py
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
