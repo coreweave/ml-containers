@@ -2,7 +2,7 @@
 
 ARG BASE_IMAGE
 ARG DEEPSPEED_VERSION="0.18.8"
-ARG APEX_COMMIT="5c8860f1dc79f9edc3c1ba4050fe841207834564"
+ARG APEX_COMMIT="becbb77cea4cb54f2929f7c938a0a6f7dd1fdc39"
 ARG DEEPSPEED_KERNELS_COMMIT="e77acc40b104696d4e73229b787d1ef29a9685b1"
 ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
 ARG XFORMERS_VERSION="0.0.35"
@@ -30,7 +30,8 @@ ARG DEEPSPEED_VERSION
 RUN git clone --filter=blob:none --depth 1 \
       -b "v${DEEPSPEED_VERSION}" \
       https://github.com/microsoft/DeepSpeed deepspeed && \
-    rm -rf deepspeed/.git
+    rm -rf deepspeed/.git && \
+    sed -i -E 's@(-std=|/std:)c\+\+17@\1c++20@g' deepspeed/op_builder/*.py
 
 FROM alpine/git:2.36.3 as apex-downloader
 WORKDIR /git
@@ -42,11 +43,6 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
-
-# Port of NVIDIA/apex#1985 to fix compilation with PyTorch > v2.11
-RUN sed -i 's@\blerp\b@_lerp@g' \
-      apex/apex/contrib/csrc/optimizers/multi_tensor_distopt_adam_kernel.cu
-
 
 FROM alpine/git:2.36.3 as ds-kernels-downloader
 WORKDIR /git

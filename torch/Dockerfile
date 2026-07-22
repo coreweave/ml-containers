@@ -2,13 +2,13 @@
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:13.2.0-devel-ubuntu22.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:13.2.0-base-ubuntu22.04"
 
-ARG BUILD_TORCH_VERSION="2.12.0"
-ARG BUILD_TORCH_VISION_VERSION="0.27.0"
+ARG BUILD_TORCH_VERSION="2.13.0"
+ARG BUILD_TORCH_VISION_VERSION="0.28.0"
 ARG BUILD_TORCH_AUDIO_VERSION="2.11.0"
 ARG BUILD_TRANSFORMERENGINE_VERSION="2.12"
 ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
 ARG BUILD_FLASH_ATTN_3_VERSION="15270e66dc88d70d08f6ba6003eb17e7307149b0"
-ARG BUILD_FLASH_ATTN_4_VERSION="6c4f74fb338e0c3cdb07ac6f5eab5f54fc367c15"
+ARG BUILD_FLASH_ATTN_4_VERSION="2409214a03797b168f648ea30df1adbc09ce658a"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
@@ -135,7 +135,8 @@ FROM downloader-base AS flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
 # Cherry-pick a patch for FA2 to coexist with FA4, cf. flash-attention#2331
 RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}" && \
-    git -C flash-attention cherry-pick -n 4219765dfdd8913bfe26134f748dd5ffcedd3c39
+    git -C flash-attention cherry-pick -n 4219765dfdd8913bfe26134f748dd5ffcedd3c39 && \
+    sed -i -E 's@(-std=|/std:)c\+\+17@\1c++20@g' flash-attention/setup.py
 
 FROM downloader-base AS flash-attn-3-downloader
 ARG BUILD_FLASH_ATTN_3_VERSION
