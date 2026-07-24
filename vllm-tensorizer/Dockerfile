@@ -97,9 +97,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout "${FLASHINFER_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
-COPY flashinfer-v0.6.14-deepseekv3-no-group-routing.patch /git/patch
-RUN git -C flashinfer apply -v --stat --apply /git/patch && \
-    rm /git/patch
 
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
