@@ -1,14 +1,14 @@
 include:
-  # renovate-release: datasource=github-releases depName=vllm-project/vllm currentValue=v0.25.1 versioning=pep440
-  - vllm-commit: '752a3a504485790a2e8491cacbb35c137339ad34'
+  # renovate-release: datasource=github-releases depName=vllm-project/vllm currentValue=v0.26.0 versioning=pep440
+  - vllm-commit: '568afb3a13806beb53bb2e6bd518269357b237c0'
     flashinfer-commit: 'v0.6.14'
     lmcache-commit: 'v0.4.7'
     flashkda-commit: 'a3e42bbbece3bb38f7c426b880315294a336e82f'
     llm-multimodal-commit: '15adba5e025d8636ba4a334fb379b1371f6196a1'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
     final-base-image: 'ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
-  # renovate-release: datasource=github-releases depName=vllm-project/vllm currentValue=v0.25.1 versioning=pep440
-  - vllm-commit: '752a3a504485790a2e8491cacbb35c137339ad34'
+  # renovate-release: datasource=github-releases depName=vllm-project/vllm currentValue=v0.26.0 versioning=pep440
+  - vllm-commit: '568afb3a13806beb53bb2e6bd518269357b237c0'
     flashinfer-commit: 'v0.6.14'
     lmcache-commit: 'v0.4.7'
     flashkda-commit: 'a3e42bbbece3bb38f7c426b880315294a336e82f'
