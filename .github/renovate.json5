@@ -25,9 +25,11 @@
 
   packageRules: [
     {
-      description: "Build released inference updates before requesting review",
+      description: "Build stable inference updates after a six-hour release-age buffer",
       matchDatasources: ["github-releases"],
       matchPackageNames: ["sgl-project/sglang", "vllm-project/vllm"],
+      ignoreUnstable: true,
+      minimumReleaseAge: "6 hours",
       automerge: false,
       prCreation: "not-pending",
       labels: ["dependencies", "inference"],
