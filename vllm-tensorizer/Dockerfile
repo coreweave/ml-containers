@@ -128,6 +128,35 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       --depth 1 --filter=tree:0
 
 
+# vLLM's cmake/external_projects/flashkda.cmake (Kimi K3 support, vllm-project/vllm#50000)
+# does its own FetchContent(GIT_REPOSITORY ...) for FlashKDA from inside the CMake configure
+# step of the vllm-builder stage below, which would otherwise need live network access mid-build.
+# Pre-fetch it here instead, same as every other external source in this file, and point
+# vllm-builder at it via FLASH_KDA_SRC_DIR (which flashkda.cmake already honors in place of
+# FetchContent when set).
+FROM alpine/git:2.36.3 AS flashkda-downloader
+WORKDIR /git
+ARG FLASHKDA_COMMIT='a3e42bbbece3bb38f7c426b880315294a336e82f'
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/vllm-project/FlashKDA && \
+    cd FlashKDA && \
+    git checkout "${FLASHKDA_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=tree:0
+
+
+# vLLM's rust/Cargo.toml (also from vllm-project/vllm#50000) adds `llm-multimodal` as a git
+# dependency on a third-party org (smg-project) we don't otherwise fetch from. Pre-fetch it and
+# have cargo resolve it from the local checkout via a source replacement (see vllm-rust-builder),
+# rather than letting `cargo build` reach out to github.com/smg-project mid-build.
+FROM alpine/git:2.36.3 AS llm-multimodal-downloader
+WORKDIR /git
+ARG LLM_MULTIMODAL_COMMIT='15adba5e025d8636ba4a334fb379b1371f6196a1'
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/smg-project/llm-multimodal && \
+    git -C llm-multimodal checkout "${LLM_MULTIMODAL_COMMIT}"
+
+
 # vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
 # rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95)
 # plus protoc. v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
@@ -146,9 +175,15 @@ RUN apt-get -qq update && \
     python3 -m pip install --no-cache-dir \
       'setuptools>=77.0.3,<81.0.0' 'setuptools-rust>=1.9.0' wheel
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=bind,from=llm-multimodal-downloader,source=/git/llm-multimodal,target=/opt/llm-multimodal-src \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
+    mkdir -p /root/.cargo && \
+    printf '%s\n' \
+      '[source."https://github.com/smg-project/llm-multimodal"]' \
+      'git = "file:///opt/llm-multimodal-src"' \
+    >> /root/.cargo/config.toml && \
     bash tools/install_protoc.sh && \
     bash build_rust.sh && \
     install -D -m755 vllm/vllm-rs /out/vllm-rs && \
@@ -158,6 +193,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=bind,from=vllm-rust-builder,source=/out,target=/opt/rust-artifacts \
+    --mount=type=bind,from=flashkda-downloader,source=/git/FlashKDA,target=/opt/flashkda-src \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
@@ -166,6 +202,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     . /opt/arch_flags.sh && \
     export NVCC_APPEND_FLAGS='-gencode=arch=compute_103a,code=sm_103a' && \
     export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
+    export FLASH_KDA_SRC_DIR='/opt/flashkda-src' && \
     { \
       sed -i -E 's@(CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;)(11\.0;)@\110.3;\2@' CMakeLists.txt && \
       grep -qE 'CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;10\.3;11\.0;' CMakeLists.txt \
@@ -201,9 +238,9 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     [ -n "${CUDA_VERSION}" ] && \
-    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.5.2' && \
+    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.6.0' && \
     if [ "${CUDA_VERSION%%.*}" = "13" ]; then \
-      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.5.2'; \
+      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.6.0'; \
     fi && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
@@ -211,7 +248,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       "${CUTLASS_DSL_PACKAGE}" \
-      'apache-tvm-ffi==0.1.9' && \
+      'apache-tvm-ffi==0.1.10' && \
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
@@ -299,7 +336,7 @@ RUN apt-get -qq update && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
-ARG NIXL_TAG='v1.2.0'
+ARG NIXL_TAG='v1.3.1'
 ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -327,15 +364,13 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.25 still pins nvidia-cutlass-dsl==4.5.2 (which renamed cutlass.base_dsl.Arch
-# -> arch) but only floors quack-kernels (>=0.3.3). A drifted quack still imports
-# the old `Arch` and crashes DeepSeek-V4's cute-DSL indexer at load. cutlass-dsl is
-# unchanged from 0.22.0, so keep quack pinned to the same known-good 0.4.1 release.
-# Revisit on the next vLLM bump.
+# vLLM 0.26 pins nvidia-cutlass-dsl==4.6.0 but only floors quack-kernels (>=0.4.0).
+# Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
+# so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
-    echo 'quack-kernels==0.4.1' >> /tmp/constraints.txt
+    echo 'quack-kernels==0.6.1' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
@@ -371,7 +406,7 @@ ARG TARGETPLATFORM
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
 # * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) - verified
 #   no crash on this image with vllm 0.22
-# * llguidance pin mirrors vLLM 0.25's own requirement (>=1.7.0,<1.8.0); kept explicit so
+# * llguidance pin mirrors vLLM 0.26's own requirement (>=1.7.0,<1.8.0); kept explicit so
 #   JSON Schema "format": "uri" support (llguidance v1.6.0+) can't regress on future bumps
 
 # ray[cgraph]>=2.48.0 will unconditionally install cupy-cuda12x. Uninstall it and install cupy-cuda13x if CUDA major version is 13.
@@ -400,7 +435,7 @@ RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
     python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
-    python3 -m pip install --no-cache-dir --no-deps nixl==1.2.0 && \
+    python3 -m pip install --no-cache-dir --no-deps nixl==1.3.1 && \
     # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
     # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
     sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
@@ -409,7 +444,7 @@ RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P" | grep -q "/opt/hpcx/ucx/mt/lib/libucp.so.0" || \
       { echo "NIXL UCX plugin not linked to HPC-X MT UCX:"; LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P"; exit 1; } && \
     LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c \
-      "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is None; print('matching nixl dispatcher/backend import OK; incompatible nixl_ep absent')"
+      "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is not None; assert util.find_spec('nixl_ep_cu${CUDA_VERSION%%.*}') is None; print('matching NIXL dispatcher/backend import OK; optional CUDA EP backend absent')"
 
 # Prepend MT UCX so its libucp wins over the base image's non-MT /opt/hpcx/ucx/lib.
 ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
