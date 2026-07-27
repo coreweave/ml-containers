@@ -201,9 +201,9 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     [ -n "${CUDA_VERSION}" ] && \
-    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.5.2' && \
+    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.6.0' && \
     if [ "${CUDA_VERSION%%.*}" = "13" ]; then \
-      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.5.2'; \
+      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.6.0'; \
     fi && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
@@ -211,7 +211,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       "${CUTLASS_DSL_PACKAGE}" \
-      'apache-tvm-ffi==0.1.9' && \
+      'apache-tvm-ffi==0.1.10' && \
     export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
@@ -299,7 +299,7 @@ RUN apt-get -qq update && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
-ARG NIXL_TAG='v1.2.0'
+ARG NIXL_TAG='v1.3.1'
 ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -327,15 +327,13 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.25 still pins nvidia-cutlass-dsl==4.5.2 (which renamed cutlass.base_dsl.Arch
-# -> arch) but only floors quack-kernels (>=0.3.3). A drifted quack still imports
-# the old `Arch` and crashes DeepSeek-V4's cute-DSL indexer at load. cutlass-dsl is
-# unchanged from 0.22.0, so keep quack pinned to the same known-good 0.4.1 release.
-# Revisit on the next vLLM bump.
+# vLLM 0.26 pins nvidia-cutlass-dsl==4.6.0 but only floors quack-kernels (>=0.4.0).
+# Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
+# so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
-    echo 'quack-kernels==0.4.1' >> /tmp/constraints.txt
+    echo 'quack-kernels==0.6.1' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
@@ -371,7 +369,7 @@ ARG TARGETPLATFORM
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
 # * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) - verified
 #   no crash on this image with vllm 0.22
-# * llguidance pin mirrors vLLM 0.25's own requirement (>=1.7.0,<1.8.0); kept explicit so
+# * llguidance pin mirrors vLLM 0.26's own requirement (>=1.7.0,<1.8.0); kept explicit so
 #   JSON Schema "format": "uri" support (llguidance v1.6.0+) can't regress on future bumps
 
 # ray[cgraph]>=2.48.0 will unconditionally install cupy-cuda12x. Uninstall it and install cupy-cuda13x if CUDA major version is 13.
@@ -395,21 +393,24 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
 
 # Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
 # `nixl>=1.1.0`) pull the bundled-UCX wheel; purge those, install our wheel + the `nixl` meta
-# (the pure-python dispatcher) --no-deps so no bundled-UCX wheel comes back.
+# (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back. NIXL 1.3's
+# meta also ships a `nixl_ep` dispatcher, but our UCX/POSIX-only build intentionally omits its
+# optional EP kernels. Remove that unusable dispatcher so vLLM does not discover and import it.
 RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
     python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
-    python3 -m pip install --no-cache-dir --no-deps nixl==1.2.0 && \
+    python3 -m pip install --no-cache-dir --no-deps nixl==1.3.1 && \
     # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
     # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
     sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
+    rm -rf /usr/local/lib/python3.12/dist-packages/nixl_ep && \
     # Assert the UCX plugin links HPC-X's MT UCX (LD_LIBRARY_PATH below selects it at runtime).
     P="$(find /usr/local/lib/python3.12/dist-packages -name 'libplugin_UCX.so' | head -1)" && \
     LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P" | grep -q "/opt/hpcx/ucx/mt/lib/libucp.so.0" || \
       { echo "NIXL UCX plugin not linked to HPC-X MT UCX:"; LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P"; exit 1; } && \
     LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c \
-      "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is None; print('matching nixl dispatcher/backend import OK; incompatible nixl_ep absent')"
+      "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is None; assert util.find_spec('nixl_ep_cu${CUDA_VERSION%%.*}') is None; print('matching NIXL dispatcher/backend import OK; optional NIXL EP dispatcher/backend absent')"
 
 # Prepend MT UCX so its libucp wins over the base image's non-MT /opt/hpcx/ucx/lib.
 ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
