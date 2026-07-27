@@ -128,6 +128,35 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       --depth 1 --filter=tree:0
 
 
+# vLLM's cmake/external_projects/flashkda.cmake (Kimi K3 support, vllm-project/vllm#50000)
+# does its own FetchContent(GIT_REPOSITORY ...) for FlashKDA from inside the CMake configure
+# step of the vllm-builder stage below, which would otherwise need live network access mid-build.
+# Pre-fetch it here instead, same as every other external source in this file, and point
+# vllm-builder at it via FLASH_KDA_SRC_DIR (which flashkda.cmake already honors in place of
+# FetchContent when set).
+FROM alpine/git:2.36.3 AS flashkda-downloader
+WORKDIR /git
+ARG FLASHKDA_COMMIT='a3e42bbbece3bb38f7c426b880315294a336e82f'
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/vllm-project/FlashKDA && \
+    cd FlashKDA && \
+    git checkout "${FLASHKDA_COMMIT}" && \
+    git submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=tree:0
+
+
+# vLLM's rust/Cargo.toml (also from vllm-project/vllm#50000) adds `llm-multimodal` as a git
+# dependency on a third-party org (smg-project) we don't otherwise fetch from. Pre-fetch it and
+# have cargo resolve it from the local checkout via a source replacement (see vllm-rust-builder),
+# rather than letting `cargo build` reach out to github.com/smg-project mid-build.
+FROM alpine/git:2.36.3 AS llm-multimodal-downloader
+WORKDIR /git
+ARG LLM_MULTIMODAL_COMMIT='15adba5e025d8636ba4a334fb379b1371f6196a1'
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/smg-project/llm-multimodal && \
+    git -C llm-multimodal checkout "${LLM_MULTIMODAL_COMMIT}"
+
+
 # vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
 # rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95)
 # plus protoc. v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
@@ -146,9 +175,15 @@ RUN apt-get -qq update && \
     python3 -m pip install --no-cache-dir \
       'setuptools>=77.0.3,<81.0.0' 'setuptools-rust>=1.9.0' wheel
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=bind,from=llm-multimodal-downloader,source=/git/llm-multimodal,target=/opt/llm-multimodal-src \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
+    mkdir -p /root/.cargo && \
+    printf '%s\n' \
+      '[source."https://github.com/smg-project/llm-multimodal"]' \
+      'git = "file:///opt/llm-multimodal-src"' \
+    >> /root/.cargo/config.toml && \
     bash tools/install_protoc.sh && \
     bash build_rust.sh && \
     install -D -m755 vllm/vllm-rs /out/vllm-rs && \
@@ -158,6 +193,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=bind,from=vllm-rust-builder,source=/out,target=/opt/rust-artifacts \
+    --mount=type=bind,from=flashkda-downloader,source=/git/FlashKDA,target=/opt/flashkda-src \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
@@ -166,6 +202,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     . /opt/arch_flags.sh && \
     export NVCC_APPEND_FLAGS='-gencode=arch=compute_103a,code=sm_103a' && \
     export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
+    export FLASH_KDA_SRC_DIR='/opt/flashkda-src' && \
     { \
       sed -i -E 's@(CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;)(11\.0;)@\110.3;\2@' CMakeLists.txt && \
       grep -qE 'CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;10\.3;11\.0;' CMakeLists.txt \
