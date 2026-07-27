@@ -42,5 +42,7 @@ jobs:
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         LMCACHE_COMMIT=${{ matrix.lmcache-commit }}
+        FLASHKDA_COMMIT=${{ matrix.flashkda-commit }}
+        LLM_MULTIMODAL_COMMIT=${{ matrix.llm-multimodal-commit }}
         BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
         FINAL_BASE_IMAGE=${{ matrix.final-base-image }}

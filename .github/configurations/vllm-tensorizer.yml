@@ -3,11 +3,26 @@ include:
   - vllm-commit: '752a3a504485790a2e8491cacbb35c137339ad34'
     flashinfer-commit: 'v0.6.14'
     lmcache-commit: 'v0.4.7'
+    flashkda-commit: 'a3e42bbbece3bb38f7c426b880315294a336e82f'
+    llm-multimodal-commit: '15adba5e025d8636ba4a334fb379b1371f6196a1'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
     final-base-image: 'ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
   # renovate-release: datasource=github-releases depName=vllm-project/vllm currentValue=v0.25.1 versioning=pep440
   - vllm-commit: '752a3a504485790a2e8491cacbb35c137339ad34'
     flashinfer-commit: 'v0.6.14'
     lmcache-commit: 'v0.4.7'
+    flashkda-commit: 'a3e42bbbece3bb38f7c426b880315294a336e82f'
+    llm-multimodal-commit: '15adba5e025d8636ba4a334fb379b1371f6196a1'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda12.9.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
     final-base-image: 'ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda12.9.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
+  # EXPERIMENTAL: vllm-project/vllm#50000 (Kimi K3) is unmerged upstream (open, needs-rebase,
+  # dirty mergeable_state) - this pins vllm-commit directly to the PR's branch head, which can
+  # be rebased/force-pushed out from under this SHA at any time. Not renovate-managed. Remove
+  # this entry once #50000 merges and the production entries above are bumped past it instead.
+  - vllm-commit: '658f2f56e557e8141f8726b4626c51496d78d914'
+    flashinfer-commit: 'v0.6.14'
+    lmcache-commit: 'v0.4.7'
+    flashkda-commit: 'a3e42bbbece3bb38f7c426b880315294a336e82f'
+    llm-multimodal-commit: '15adba5e025d8636ba4a334fb379b1371f6196a1'
+    builder-base-image: 'ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
+    final-base-image: 'ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1'
