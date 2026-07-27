@@ -418,7 +418,7 @@ RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
         ln -s "${NIXL_UCX_LIBS}/ucx" "${MODULE_DIR}"; \
       done && \
       LD_LIBRARY_PATH="/opt/nixl-ucx/lib:${LD_LIBRARY_PATH}" python3 -c \
-        "from importlib import util; from importlib.metadata import version; import nixl, nixl_ep; assert version('nixl') == version('nixl-cu13') == '1.3.1'; assert util.find_spec('nixl_ep_cu13') is not None; print('matching CUDA 13 NIXL dispatcher/backend/EP import OK')" && \
+        "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu13') == '1.3.1'; assert util.find_spec('nixl_ep') is not None; assert util.find_spec('nixl_ep_cu13') is not None; print('matching CUDA 13 NIXL dispatcher/backend/EP packages present; native EP import requires a GPU driver')" && \
       printf 'export LD_LIBRARY_PATH=/opt/nixl-ucx/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx.sh; \
     else \
       python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
