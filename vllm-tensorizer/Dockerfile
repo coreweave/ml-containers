@@ -393,29 +393,50 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
 
 # Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
 # `nixl>=1.1.0`) pull the bundled-UCX wheel; purge those, install our wheel + the `nixl` meta
-# (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back. NIXL 1.3's
-# meta also ships a `nixl_ep` dispatcher, but our UCX/POSIX-only build intentionally omits its
-# optional EP kernels. Remove that unusable dispatcher so vLLM does not discover and import it.
+# (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back.
+#
+# CUDA 13 is an exception: its PyPI backend also includes the NIXL EP kernels, which require
+# UCX device APIs newer than HPC-X 2.26's UCX 1.20. Keep that wheel's UCX 1.21 core libraries
+# and load its matching modules as one coherent stack; mixing either half with HPC-X makes UCX
+# miss CUDA support and NIXL fail VRAM registration. CUDA 12 retains the established MT-UCX
+# source build and intentionally omits the unusable EP dispatcher.
 RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
-    python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
-    python3 -m pip install --no-cache-dir --no-deps nixl==1.3.1 && \
-    # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
-    # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
-    sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
-    rm -rf /usr/local/lib/python3.12/dist-packages/nixl_ep && \
-    # Assert the UCX plugin links HPC-X's MT UCX (LD_LIBRARY_PATH below selects it at runtime).
-    P="$(find /usr/local/lib/python3.12/dist-packages -name 'libplugin_UCX.so' | head -1)" && \
-    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P" | grep -q "/opt/hpcx/ucx/mt/lib/libucp.so.0" || \
-      { echo "NIXL UCX plugin not linked to HPC-X MT UCX:"; LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P"; exit 1; } && \
-    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c \
-      "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is None; assert util.find_spec('nixl_ep_cu${CUDA_VERSION%%.*}') is None; print('matching NIXL dispatcher/backend import OK; optional NIXL EP dispatcher/backend absent')"
+    if [ "${CUDA_VERSION%%.*}" = 13 ]; then \
+      python3 -m pip install --no-cache-dir --no-deps nixl-cu13==1.3.1 nixl==1.3.1 && \
+      NIXL_UCX_LIBS="$(find /usr/local/lib/python3.12/dist-packages -maxdepth 1 -type d -name 'nixl_cu13.libs' -print -quit)" && \
+      test -n "${NIXL_UCX_LIBS}" && \
+      mkdir -p /opt/nixl-ucx/lib && \
+      find "${NIXL_UCX_LIBS}" -maxdepth 1 -type f -name 'libuc*.so*' -exec ln -s '{}' /opt/nixl-ucx/lib/ \; && \
+      for LIB in ucs ucp uct ucm; do \
+        TARGET="$(find "${NIXL_UCX_LIBS}" -maxdepth 1 -type f -name "lib${LIB}-*.so*" -print -quit)" && \
+        test -n "${TARGET}" && ln -s "${TARGET}" "/opt/nixl-ucx/lib/lib${LIB}.so.0"; \
+      done && \
+      for MODULE_DIR in /usr/lib64/ucx /opt/hpcx/ucx/lib/ucx /opt/hpcx/ucx/mt/lib/ucx; do \
+        rm -rf "${MODULE_DIR}" && mkdir -p "$(dirname "${MODULE_DIR}")" && \
+        ln -s "${NIXL_UCX_LIBS}/ucx" "${MODULE_DIR}"; \
+      done && \
+      LD_LIBRARY_PATH="/opt/nixl-ucx/lib:${LD_LIBRARY_PATH}" python3 -c \
+        "from importlib import util; from importlib.metadata import version; import nixl, nixl_ep; assert version('nixl') == version('nixl-cu13') == '1.3.1'; assert util.find_spec('nixl_ep_cu13') is not None; print('matching CUDA 13 NIXL dispatcher/backend/EP import OK')" && \
+      printf 'export LD_LIBRARY_PATH=/opt/nixl-ucx/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx.sh; \
+    else \
+      python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
+      python3 -m pip install --no-cache-dir --no-deps nixl==1.3.1 && \
+      # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
+      # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
+      sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
+      rm -rf /usr/local/lib/python3.12/dist-packages/nixl_ep && \
+      # Assert the UCX plugin links HPC-X's MT UCX (LD_LIBRARY_PATH below selects it at runtime).
+      P="$(find /usr/local/lib/python3.12/dist-packages -name 'libplugin_UCX.so' | head -1)" && \
+      LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P" | grep -q "/opt/hpcx/ucx/mt/lib/libucp.so.0" || \
+        { echo "NIXL UCX plugin not linked to HPC-X MT UCX:"; LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P"; exit 1; } && \
+      LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c \
+        "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is None; assert util.find_spec('nixl_ep_cu${CUDA_VERSION%%.*}') is None; print('matching NIXL dispatcher/backend import OK; optional NIXL EP dispatcher/backend absent')" && \
+      printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx.sh; \
+    fi
 
-# Prepend MT UCX so its libucp wins over the base image's non-MT /opt/hpcx/ucx/lib.
-ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
-
-# Re-prepend on login shells too (HPC-X's profile.d regenerates LD_LIBRARY_PATH; zz- sorts last).
-RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx-mt.sh
+# CUDA 13's NIXL wheel needs its private UCX 1.21; CUDA 12 uses HPC-X's MT UCX.
+ENV LD_LIBRARY_PATH=/opt/nixl-ucx/lib:/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
 
 EXPOSE 8080
