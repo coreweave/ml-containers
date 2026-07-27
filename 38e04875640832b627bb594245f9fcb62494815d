@@ -1,0 +1,83 @@
+## Conversation
+User wanted Kimi-K3 servable on GB300 in inference-dev-eu-n-04a, private-only
+(no public pushes), smallest change set. Built the image via ad-hoc buildx
+--build-arg overrides first; user then noticed the version/dep bumps existed
+only as args, not in code, and asked to rebase onto ace/vllm-0.26.0 (PR #193)
+and encode them properly. This commit is that encoding.
+
+## Actions
+Fetched PR #193 as refs/pull/193/head -> k3/ace-base (75cc069), branched
+abatilo/vllm-kimi-k3 from it, stashed local Dockerfile edits, resolved one
+conflict, added the matrix entry + workflow build-arg.
+
+## Errors & Mistakes
+- Stash pop conflicted: I had made quack-kernels an ARG defaulting to 0.4.1;
+  ace set it to 0.6.1 outright and rewrote the same comment block. Dropped
+  mine entirely -- theirs is simpler and CI-validated.
+- First version of the patch guard was `[ "$X" = "1" ]`. That silently breaks
+  ace's entries: the workflow's build-args block is static, so entries
+  omitting apply-flashinfer-patch render `APPLY_FLASHINFER_PATCH=` (empty),
+  which is != "1" and would have skipped the patch for 0.6.14 builds. Changed
+  to skip only on explicit 0 via `${X:-1}` and verified the truth table for
+  '1'/''/'0'/unset.
+- Claimed `docker/AGENTS.md`'s "no native arm64 builder" blocked arm64 builds.
+  That doc covers the `at` repo's bake builders (picanha/zain), NOT
+  ml-containers CI, which builds arm64 fine -- PR #193 pushed merged
+  multi-arch manifests. Two different build systems; I conflated them.
+
+## Dead Ends
+- FlashInfer private-cubin path for SiTU MoE: public 0.6.15.post1 has no
+  is_private, no FLASHINFER_PRIVATE_CUBIN_DIR and no ActivationType.Situ
+  (checked through v0.6.16rc1 and upstream main). vLLM's
+  trtllm_mxfp4_moe.py:146/264/382 needs all three. Not fixable publicly.
+- tokenspeed-situ on PyPI ("AOT TensorRT-LLM-Gen MXFP4+SiTU MoE kernel
+  bundle") is x86_64-only -- no aarch64 wheel, useless on GB300.
+- COPY --from the upstream image to steal its FlashInfer: their Situ = 10
+  collides with public InvalidType = 10, and SGLang documents that a mixed
+  Python/cubin/JIT-cache install fails at import. Abandoned.
+
+## Hints for Future Agents
+- setuptools_scm reports this branch as 0.23.1rc1.dev1483+g658f2f56e. That is
+  NOT old code. vLLM tags releases off release branches, so no modern tag is
+  an ancestor; `git describe` walks back to v0.23.1rc0, 1483 commits. By
+  content the branch is 204 ahead of / 12 behind v0.26.0. Upstream's own K3
+  image reports 0.1.dev19262 (no tag reachable at all), so neither satisfies
+  the recipe's declared min_vllm_version: 0.26.0.
+- sm_103a lands via NVCC_APPEND_FLAGS + the arch_list sed, NOT via the
+  per-target CMake arch list. `FlashKDA CUDA architectures: 9.0a;10.0a;12.0a`
+  in the log is the CUDA_ARCHS intersection and is misleading -- cuobjdump
+  --list-elf on the built .so is the only trustworthy check. Note
+  NVCC_WRAPPER_FILTER_CODES strips the non-`a` variants.
+- Upstream's vllm/vllm-openai:kimi-k3 has NO sm_103 cubin in _flashkda_C
+  (only sm_90a, sm_100, sm_120) and was built from commit b6bbf29dd, which
+  does not exist publicly. Behavioural differences vs ours are not
+  necessarily our bug.
+- buildx clips its own progress log at 2MiB. Use --progress rawjson or read
+  `buildctl debug histories` in the buildkitd pod instead of wc -l on the log.
+- A --cache-from pointing at a not-yet-existing cache tag is a HARD failure,
+  not a warning. Omit it on the first build.
+
+## Codebase Discoveries
+- sccache-start.sh:27 is `: "${AWS_ACCESS_KEY_ID:?} ${AWS_SECRET_ACCESS_KEY:?}"`
+  -- a hard requirement. Local builds need
+  `--secret id=s3_access_key_id,env=AWS_ACCESS_KEY_ID` (+ secret key). The
+  `default` AWS profile can read s3://ml-dev-ci-cache (604,912 objects under
+  the vllm-tensorizer prefix).
+- Direct buildx invocation needs `--build-context common=../common`; the
+  Dockerfile does `COPY --from=common`, supplied by the workflow's
+  build-contexts.
+- cache-key is derived from cuda+ubuntu only, so the new torch-2.13 entry
+  SHARES cuda13.2.1-ubuntu24.04 with the torch-2.11 entry. Wasteful, not
+  incorrect (BuildKit still matches layer inputs). Adding torch to the
+  cache-key filter would fix it but invalidates ace's warm cache, so left
+  alone deliberately.
+
+## Open Questions
+- Does vLLM's deep_gemm_mega_moe backend pass activation="situ"? SiTU IS
+  public via vllm-project/DeepGEMM branch `situ-activation` (tip 51655f21,
+  2 commits ahead of the pinned f5a76426, asserts
+  `activation == "swiglu" or activation == "situ"` in csrc/apis/mega.hpp).
+  That may be a one-line repin giving SiTU without private FlashInfer.
+- Untested end to end: no weights loaded, no tokens generated. Next gate is
+  2-node --load-format dummy (dummy still allocates full HBM, so it needs all
+  8 GPUs across both nodes; it cannot be a single-node smoke).
