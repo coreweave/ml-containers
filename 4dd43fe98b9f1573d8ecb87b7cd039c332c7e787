@@ -1,0 +1,36 @@
+## Conversation
+User asked whether git-refs could replace the deliberately-untracked K3 pin
+and whether that lets things collapse, with a TODO to revert after K3 reaches
+a supported release. Collapse of the matrix is impossible either way (branch
+vs release, torch 2.13 vs 2.11, flashinfer versions); what collapses is the
+manual re-pin workflow.
+
+## Actions
+Rewrote the K3 entry comment (git-refs marker + retirement TODO), added a
+git-refs packageRule to renovate.json5, verified the repo's own custom-manager
+regex captures all three entries by running it against the file.
+
+## Errors & Mistakes
+First placement of the renovate-release marker left comment paragraphs between
+it and the pin line; the custom manager's matchString requires the digest line
+IMMEDIATELY after the marker, so the K3 entry silently did not match. Caught
+by executing the regex from renovate.json5 against the file before committing.
+
+## Dead Ends
+github-tags as a middle ground: no tag exists on the branch and renovate
+cannot express "first tag containing this commit".
+
+## Hints for Future Agents
+Always verify marker placement by running the matchStrings regex from
+.github/renovate.json5 against the config file; adjacency is load-bearing.
+versioning=loose is fine for git-refs digest bumps (only currentDigest moves).
+Expect red renovate PRs when upstream bumps the FlashInfer floor — that is the
+designed signal that flashinfer-patches/v0.6.15.post1/ needs re-keying.
+
+## Codebase Discoveries
+The custom manager captures depName verbatim as the package name, so git-refs
+entries need the full https URL as depName.
+
+## Open Questions
+Whether branchConcurrentLimit=2 is enough once the kimi-k3 branch churns
+daily; the packageRule can add schedule= throttling if PR noise gets bad.
