@@ -1,0 +1,33 @@
+## Conversation
+Part of the Kimi-K3 GB300 bring-up. The K3 matrix entry needed FlashInfer
+v0.6.15.post1 to SKIP the v0.6.14 patch; the original APPLY_FLASHINFER_PATCH
+boolean was added for that, then deleted in favor of this mechanism once a
+second, version-specific patch (SITU) appeared.
+
+## Actions
+Moved flashinfer-v0.6.14-deepseekv3-no-group-routing.patch under
+flashinfer-patches/v0.6.14/, rewrote the Dockerfile patch step as a find|xargs
+sweep over flashinfer-patches/${FLASHINFER_COMMIT}, deleted the
+APPLY_FLASHINFER_PATCH build-arg from the workflow and the
+apply-flashinfer-patch key from the matrix config.
+
+## Errors & Mistakes
+None in this commit; the predecessor boolean shipped in 38e0487 and its
+"skip only on explicit 0" semantics existed because the workflow renders an
+empty build-arg for matrix entries that omit the key.
+
+## Dead Ends
+The boolean toggle itself: two live configs did genuinely differ, but the
+version already encodes which patches apply, so the knob was redundant.
+
+## Hints for Future Agents
+A FlashInfer version with no flashinfer-patches/<version>/ directory gets no
+patches — that is intentional, not an omission. Patch file names inside a
+version dir sort lexically; number them if order ever matters.
+
+## Codebase Discoveries
+git -C flashinfer apply runs in the flashinfer-downloader stage, so patched
+SOURCE feeds flashinfer-builder; nothing patches installed wheels.
+
+## Open Questions
+None.
