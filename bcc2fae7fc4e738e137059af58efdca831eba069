@@ -1,0 +1,38 @@
+## Conversation
+User asked to prove the new cuda-12.9 entry end to end on GB300 (driver runs
+older userspace fine); first build attempt died in deepgemm-builder.
+
+## Actions
+Probed on a GB300 pod with the cu12.9 base image: (1) trivial kernel at
+-arch=sm_103a compiles under nvcc 12.9 (the load-bearing B300 assumption);
+(2) mqa_logits.cuh compiles under nvcc bare, FAILS under host g++ bare,
+passes under g++ with -include cuda_fp8.h. Upstream fork main already deleted
+the __nv_fp8_e4m3 usage. Fixed via sed in the downloader + DEEPGEMM_SRC_DIR
+for the vendored build; verified deepgemm.cmake normalizes absolute paths and
+hard-fails on a missing dir.
+
+## Errors & Mistakes
+First probe cloned without submodules (--filter=tree:0), so both variants
+failed on cutlass/arch/barrier.h and looked inconclusive; second probe with
+submodules gave the clean split.
+
+## Dead Ends
+Bumping DEEPGEMM_COMMIT past the upstream refactor instead: rejected because
+vLLM's deepgemm.cmake pins f5a76426 for the vendored copy, and the wheel must
+match it (the shadowing rule) -- a newer wheel over an older vendored copy
+recreates the original K3 TypeError class.
+
+## Hints for Future Agents
+The DEEPGEMM_SRC_DIR mount also removes a mid-build network fetch from
+vllm-builder; if the vendored build ever needs a writable source tree it will
+fail loudly on the read-only bind mount. The sed targets line 3's barrier.h
+include; if the pin moves, the grep guard fails the build rather than
+silently skipping.
+
+## Codebase Discoveries
+CUDA 13 header chains include cuda_fp8.h transitively where 12.9's do not --
+expect this class of failure in any cu13-era CUDA code first built on 12.9.
+
+## Open Questions
+Whether the full vllm-builder passes under 12.9 (this fixed the first blocker;
+the 1300-object compile has not yet run to completion on cu12).
