@@ -1,0 +1,34 @@
+## Conversation
+Followed from "why not do the same for cu12.9": the answer was "only if a real
+sm_103-on-old-driver target exists"; user invoked B300 serving and decided
+both entries move to the branch, accepting the loss of the release baseline.
+
+## Actions
+Replaced the v0.26.0 cu12.9 entry with a kimi-k3-branch cu12.9 entry on the
+torch2.13/cu12.9.1 base (existence verified via crane digest 880bed93...).
+Both entries carry the same git-refs marker; verified both match the
+custom-manager regex. Comment records the no-release-baseline decision and
+the UNVALIDATED status of the cu12.9 K3 combination.
+
+## Errors & Mistakes
+None in this commit.
+
+## Dead Ends
+Keeping a third v0.26.0 entry alongside two branch entries was offered as the
+risk-preserving shape; user chose two entries, no release baseline.
+
+## Hints for Future Agents
+Before anyone serves K3 from the cu12.9 image: validate (1) SiTU pool cubin
+load + private-module JIT under a 12.9 runtime, (2) K3 correctness on amd64
+(all existing evidence is arm64/GB300/cu13), (3) the target host driver
+actually predates CUDA 13 userspace, else just use the cu13 image. If a non-K3
+model regresses on either image, there is no longer a release-built image to
+compare against -- rebuild one locally from v0.26.0 pins if needed.
+
+## Codebase Discoveries
+torch-nccl matrix builds cuda 12.9.1 and 13.2.1 for torch 2.13.0, so the
+8c5de3e base family covers both CUDA variants.
+
+## Open Questions
+Whether renovate emits one PR bumping both identical git-refs pins or two;
+expected one (same depName/currentValue), unconfirmed until the first bump.
