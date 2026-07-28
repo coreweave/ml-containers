@@ -1,0 +1,62 @@
+## Conversation
+Goal: serve moonshotai/Kimi-K3 on arm64 GB300 (sm_103) from self-built images.
+K3's SiTU activation is unservable on public FlashInfer; the user found
+flashinfer PR#4180 and asked to incorporate it; that PR proved unbuildable
+(asserts SiTuGlu into an artifact that lacks it), and the working support was
+instead reconstructed from the public vllm/vllm-openai:kimi-k3-arm64 image.
+
+## Actions
+Extracted the 31MB cubin-pool layer and the installed flashinfer package from
+the public upstream image (registry API, anonymous token); diffed wheel vs
+public v0.6.15.post1; ported the private-only delta as a patch; iterated a
+JIT-compile falsification in a GB300 pod until the private module compiled,
+loaded, and exported its *_private FFI symbols; added the pool-downloader
+stage and the force-reinstall fix; validated end-to-end serving (correct
+tokens, 40.3 tok/s AR, 165.2 tok/s with DSpark k=7).
+
+## Errors & Mistakes
+- r4 shipped a rediff of PR#4180 that CANNOT compile against the public
+  artifact (unconditional SiTuGlu static_assert; "has no member SiTuGlu").
+- r5 built the patched wheels and then pip skipped them: the vLLM wheel's
+  requirements pre-installed stock flashinfer-python==0.6.15.post1 and
+  "already satisfied" won at the same version string. Every image r1-r5
+  shipped stock flashinfer; nothing noticed until a backend needed the patch.
+- The agent-extracted patch missed three hunks that carry no private-looking
+  token: module_name threading into gen_jit_spec (without it the AOT
+  short-circuit loads the PUBLIC module -> AttributeError
+  trtllm_bf16_moe_private), the lean-routing #endif closers ("unterminated
+  #else"), and reduceTopKForLane in RoutingKernelTopK.cuh.
+- FlashInferSetCubinCallback was invisible under -fvisibility=hidden until
+  the wheel's cubin_loader.h (visibility("default") macro) was adopted.
+
+## Dead Ends
+- flashinfer PR#4180 as-is: red-CI draft; no published batched_gemm artifact
+  (incl. the newer 17629de-61f1bc7) contains SiTuGlu. Revisit when NVIDIA
+  publishes one.
+- Installing upstream's arm64 wheels directly: flashinfer_jit_cache 0.6.15
+  fails the startswith version check against post1 pins and drags ~490 lines
+  of unrelated post-0.6.15 drift.
+- marlin (correct but 2.9-7.3 tok/s) and triton (MXFP4 wrapper rejects SITU)
+  as fast backends.
+
+## Hints for Future Agents
+- The pool is an OVERLAY, not a replacement: zero SwiGLU fused-act kernels,
+  so never repoint ArtifactPath at it.
+- The private module JIT-compiles at first MoE call (~4 min/node); prewarming
+  it into the image is the known follow-up.
+- vLLM kimi-k3 branch passes is_private=True unconditionally in
+  trtllm_{mxfp4,nvfp4}_moe.py — this API is a hard requirement of the branch.
+- MAX_JOBS defaults to 32; the AOT stage takes ~6h at that on a 128-CPU
+  builder and 73 min at MAX_JOBS=128. sccache-as-ccbin does not cache nvcc
+  device compiles, so this stage never gets faster from S3 cache.
+- Full provenance and diffs: memory reference-k3-private-flashinfer-pool.
+
+## Codebase Discoveries
+_import_deep_gemm prefers site-packages over vllm.third_party (docstring says
+so); the deepseek-ai wheel shadowed vLLM's vendored activation-aware copy,
+which is why deep_gemm_mega_moe failed before the repin.
+
+## Open Questions
+- Whether NVIDIA will publish a SiTuGlu artifact (drop the pool + patch then).
+- License review of redistributing the extracted cubin pool inside our image
+  before this goes wider than dev.
