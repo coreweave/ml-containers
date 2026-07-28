@@ -1,0 +1,36 @@
+## Conversation
+User iterated on matrix design: first asked if bumping flashinfer/torch on the
+prod entries allows two entries (no -- those pins are consequences of the vllm
+source), then explicitly put "cu13 entry = the branch build" back in scope and
+chose the two-entry collapse. Risks (branch code for all cu13 consumers,
+version string 0.23.1rc1.dev+g..., CUDA-variant asymmetry) were raised earlier
+and accepted; the entry comment now carries them.
+
+## Actions
+Rewrote .github/configurations/vllm-tensorizer.yml to two entries: cu13 =
+kimi-k3 branch (git-refs-tracked, SiTU stack), cu12.9 = v0.26.0 release
+(github-releases-tracked, unchanged). Verified both renovate markers match the
+custom-manager regex by executing it against the file.
+
+## Errors & Mistakes
+None in this commit. (Prior commit's lesson still applies: the marker line
+must sit IMMEDIATELY above the vllm-commit line or the regex silently skips.)
+
+## Dead Ends
+Aligning flashinfer/torch across entries to enable a merge: impossible --
+v0.26.0 pins torch 2.11.x and its own flashinfer exactly, so those fields
+cannot move independently of the vllm pin.
+
+## Hints for Future Agents
+The cu13 image now serves EVERY cuda-13 consumer from the kimi-k3 branch, not
+just K3 deployments. If a non-K3 regression appears on cu13, suspect the
+branch delta vs v0.26.0 (204 commits) before anything else. The cu12.9 image
+remains the release baseline for comparison.
+
+## Codebase Discoveries
+None beyond the prior commits' notes.
+
+## Open Questions
+Whether downstream cu13 consumers accept the version string
+0.23.1rc1.dev1483+g658f2f56e; anything gating on vllm>=0.26 via pip metadata
+will misbehave until K3 lands in a release.
