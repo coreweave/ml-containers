@@ -1,0 +1,37 @@
+## Conversation
+Sequence: 3 entries -> 2 (cu13 on branch) -> cu12 also on branch -> cu12 revert
+after measuring that K3 cannot build on CUDA 12 -> team confirmed they are happy
+to drop cu12 entirely, so the variant is deleted. This also answered the open
+question from the revert's note ("who consumes cuda-12.9?"): nobody the team
+cares about.
+
+## Actions
+Rewrote .github/configurations/vllm-tensorizer.yml to a single cuda-13.2.1
+entry. Checked the rest of the repo for cu12 vllm-tensorizer consumers before
+deleting: only unrelated torch-extras workflows and the CUDA-major-conditional
+cupy handling in the Dockerfile reference cuda12. Verified the remaining
+git-refs marker still matches the custom-manager regex and that yaml parses to
+exactly one entry.
+
+## Errors & Mistakes
+None in this commit. Worth recording the arc though: I argued for collapsing
+the matrix on aesthetic grounds before establishing whether the cuda-12 entry
+had a consumer, which produced two commits (24a0e39, d3711ed) and a revert
+(f9180ad) that a single question to the team would have avoided.
+
+## Dead Ends
+K3 on CUDA 12, closed upstream (see f9180ad's note for the full evidence and
+the hasattr fix that would open it).
+
+## Hints for Future Agents
+The matrix now has ONE entry, so any future non-K3 vllm-tensorizer consumer
+needs a new entry rather than an existing one to ride on. There is no longer a
+release-built vllm-tensorizer image at all -- if a regression needs comparing
+against released vLLM, build one from the v0.26.0 pins in this file's history
+(git show f9180ad:.github/configurations/vllm-tensorizer.yml).
+
+## Codebase Discoveries
+Nothing beyond earlier commits' notes.
+
+## Open Questions
+None outstanding for this file; the retirement TODO is the only future work.
