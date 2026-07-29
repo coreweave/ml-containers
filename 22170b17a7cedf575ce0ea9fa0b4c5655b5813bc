@@ -1,0 +1,77 @@
+## Conversation
+Goal: serve moonshotai/Kimi-K3 on arm64 GB300 (sm_103) from self-built images.
+The user found flashinfer#4180 and asked to incorporate it; it proved
+unbuildable, so support was reconstructed from NVIDIA's public Kimi-K3 image
+instead. The matrix shape churned a lot before landing here -- three entries,
+then two, then cu12 on the branch, then cu12 reverted, then cu12 dropped
+entirely once the team confirmed nobody consumes it. History was rewritten to
+hide that churn; this note is the record of it.
+
+## Actions
+- Extracted the 31 MB cubin-pool layer and the installed flashinfer package
+  from public vllm/vllm-openai:kimi-k3-arm64 via the registry API; diffed that
+  package against public v0.6.15.post1 to derive the SiTU patch.
+- Iterated a JIT-compile falsification in a GB300 pod until the private module
+  compiled, loaded, and exported all six *_private FFI entry points.
+- Built and served: correct output at 149.7 tok/s (flashinfer_trtllm TP8 +
+  DSpark k=7, AL~3.9). Non-speculative flashinfer 40.3; deep_gemm_mega_moe
+  TEP8 48.7, +DSpark 97.2; marlin 7.3 (correct but unusable).
+
+## Errors & Mistakes
+- Shipped four images (r1-r5) before noticing pip skipped the patched
+  FlashInfer wheels as "already satisfied"; see the preceding commit.
+- A rediff of flashinfer#4180 was tried first and CANNOT compile: it asserts
+  SiTuGlu into public artifact headers that define only SwiGlu/GeGlu
+  ("KernelRunner.h: has no member SiTuGlu"). Do not resurrect it.
+- The automatic extraction of the private diff missed three hunks that carry no
+  SITU-related token: threading module_name into the final gen_jit_spec call
+  (without it the AOT short-circuit loads the PUBLIC module and raises
+  AttributeError trtllm_bf16_moe_private), the lean-routing #endif closers
+  ("unterminated #else"), and reduceTopKForLane in RoutingKernelTopK.cuh.
+  Each was found only by compiling in-cluster.
+- FlashInferSetCubinCallback was invisible under -fvisibility=hidden until the
+  wheel's cubin_loader.h (visibility("default") macro) was adopted.
+- Argued to collapse the build matrix before checking whether the CUDA 12 entry
+  had a consumer. It did not, but the order was backwards.
+
+## Dead Ends
+- flashinfer#4180 as-is (above).
+- Installing NVIDIA's arm64 wheels directly: flashinfer_jit_cache 0.6.15 fails
+  the startswith version check against post1 pins and drags ~490 lines of
+  unrelated post-0.6.15 drift.
+- K3 on CUDA 12: vLLM gates fused_kda_decode and kimi_k3_attn_res on
+  CUDA >= 13.0 with 10.0f/12.0f arch specs 12.9 cannot emit. Measured failure:
+  "_OpNamespace '_C' object has no attribute 'kimi_k3_attn_res'". nvcc 12.9
+  DOES target sm_103a -- that was not the blocker.
+- marlin and triton as fast backends: marlin is correct but 7.3 tok/s; the
+  MXFP4 wrapper rejects triton for SITU outright.
+
+## Hints for Future Agents
+- The pool is an OVERLAY, not a replacement: zero SwiGLU fused-act kernels, so
+  never repoint ArtifactPath at it.
+- The private module JIT-compiles on the first MoE call, ~4 min per node.
+  Prewarming it into the image is the obvious follow-up and was not done.
+- vLLM's kimi-k3 branch passes is_private=True unconditionally in
+  trtllm_{mxfp4,nvfp4}_moe.py, so this API is a hard requirement of the branch,
+  not an optimisation.
+- MAX_JOBS defaults to 32; the FlashInfer AOT stage takes ~6 h at that on a
+  128-CPU builder and 73 min at MAX_JOBS=128. sccache-as-ccbin does not cache
+  nvcc device compiles, so this stage never speeds up from the S3 cache.
+- Serving needs same-NVLink-domain placement (label
+  ds.coreweave.com/nvlink.domain): both of K3's torch symmetric-memory call
+  sites fail across racks. See the infr repo's commit notes for the full
+  serving contract.
+
+## Codebase Discoveries
+- vllm/utils/deep_gemm.py prefers site-packages `deep_gemm` over the vendored
+  vllm.third_party copy (its docstring says so), which is why the wheel rev had
+  to match cmake's vendored pin.
+- The v0.6.14 deepseekv3-no-group-routing patch was upstreamed in
+  v0.6.15.post1: mSumEpsilon plus the applyWithAux/PolicyTraits specialisation.
+
+## Open Questions
+- License review of redistributing the extracted cubin pool inside our image
+  before this goes wider than dev. sgl-project publishes a byte-identical copy
+  openly, which is the strongest argument that it is fine.
+- Whether NVIDIA will publish a SiTuGlu artifact, which retires this whole
+  commit (see the TODO in the config entry).
