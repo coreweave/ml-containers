@@ -98,6 +98,11 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+# Kimi-K3's MoE activation is SiTU which is not in any official release
+COPY flashinfer-v0.6.15.post1-situ-private-cubin-pool.patch /git/patch
+RUN git -C flashinfer apply -v --stat --apply /git/patch && \
+    rm /git/patch
+
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
@@ -114,11 +119,19 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/bytedance/InfiniStore && \
     git -C InfiniStore checkout "${INFINISTORE_COMMIT}"
 
+# Use the K3 upstream image as the source of K3 SiTu compiled cubins. This is the
+# multi-arch index digest, so each build platform resolves its own architecture
+# instead of dragging in a foreign-arch image; the amd64 and arm64 entries carry
+# byte-identical trees under /opt/flashinfer-local-cubins either way, since the
+# cubins target GPU architectures (sm100f/sm103a) rather than a host one.
+FROM vllm/vllm-openai:kimi-k3@sha256:e90e2603b2781936651ba019804137714367c69e10a7b25a2e57b46995225616 AS upstream-k3
+
+
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='891d57b4db1071624b5c8fa0d1e51cb317fa709f'
+ARG DEEPGEMM_COMMIT='f5a76426fa084087169693fd0cd815223576d6e9'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
-      https://github.com/deepseek-ai/DeepGEMM && \
+      https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
     git checkout "${DEEPGEMM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
@@ -339,6 +352,9 @@ RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels 
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
+
+COPY --link --from=upstream-k3 /opt/flashinfer-local-cubins /opt/flashinfer-local-cubins
+ENV FLASHINFER_PRIVATE_CUBIN_DIR=/opt/flashinfer-local-cubins/20260617_v0613rc1_situ_v0611_barrierfix
 
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
