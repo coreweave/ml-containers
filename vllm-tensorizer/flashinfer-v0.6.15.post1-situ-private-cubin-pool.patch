@@ -1,0 +1,1736 @@
+diff --git a/csrc/fused_moe/trtllm_backend/trtllm_fused_moe_routing_common.cu b/csrc/fused_moe/trtllm_backend/trtllm_fused_moe_routing_common.cu
+index c0677c9..dc5c8d0 100644
+--- a/csrc/fused_moe/trtllm_backend/trtllm_fused_moe_routing_common.cu
++++ b/csrc/fused_moe/trtllm_backend/trtllm_fused_moe_routing_common.cu
+@@ -18,10 +18,14 @@
+ 
+ namespace moe::dev::routing {
+ namespace routingCustom {
+-// Forward declarations of launch functions
+-void launchBlockKernel(Data const& data, uint32_t numThreadsHist, void* stream);
+-void launchDynBlockKernel(Data const& data, uint32_t numThreadsHist, void* stream);
+-void launchClusterKernel(Data const& data, void* stream);
++// Forward declarations of launch functions.
++// Block/DynBlock/Cluster return whether a compiled tier covered (numExperts, topK)
++// and the kernel was actually launched; the definitions live in
++// trtllm_fused_moe_routing_custom.cu. Keep these signatures in sync (the return
++// type is not part of the mangled name, so a mismatch would silently be UB).
++bool launchBlockKernel(Data const& data, void* stream);
++bool launchDynBlockKernel(Data const& data, uint32_t numThreadsHist, void* stream);
++bool launchClusterKernel(Data const& data, void* stream);
+ void launchCoopKernel(Data const& data, int numBlocksCoop, uint32_t numThreadsHist, void* stream);
+ void launchInitExpertCounts(Data const& data, uint32_t numThreadsHist, void* stream);
+ void launchHistogramKernel(Data const& data, int numBlocksHistogram, uint32_t numThreadsHist,
+@@ -83,11 +87,27 @@ void runPostTopKPipeline(DataType const& data, void* stream) {
+       (smMajor >= 9) && (data.mNumTokens <= routingCustom::MaxNumTokensSingleCluster);
+ 
+   if (useDynBlock) {
+-    routingCustom::launchDynBlockKernel(customData, numThreadsHist, stream);
++    bool const launched = routingCustom::launchDynBlockKernel(customData, numThreadsHist, stream);
++    FLASHINFER_CHECK(
++        launched, "runPostTopKPipeline: no compiled tier covers numExperts=", data.mNumExperts,
++        " topK=", data.mTopK,
++        " for the post-topK permutation (dyn-block path). Add a matching Tier<E, K> to "
++        "PolicyTraits<NoOpPreprocess, SoftmaxPostprocess> in RoutingCustomPolicy.cuh.");
+   } else if (useStaticBlock) {
+-    routingCustom::launchBlockKernel(customData, numThreadsHist, stream);
++    bool const launched = routingCustom::launchBlockKernel(customData, stream);
++    FLASHINFER_CHECK(
++        launched, "runPostTopKPipeline: no compiled tier covers numExperts=", data.mNumExperts,
++        " topK=", data.mTopK,
++        " for the post-topK permutation (static-block path). Add a matching Tier<E, K> "
++        "to PolicyTraits<NoOpPreprocess, SoftmaxPostprocess> in RoutingCustomPolicy.cuh.");
+   } else if (useSingleCluster) {
+-    routingCustom::launchClusterKernel(customData, stream);
++    bool const launched = routingCustom::launchClusterKernel(customData, stream);
++    FLASHINFER_CHECK(launched,
++                     "runPostTopKPipeline: no compiled tier covers numExperts=", data.mNumExperts,
++                     " topK=", data.mTopK,
++                     " for the post-topK permutation (single-cluster path). Add a matching "
++                     "Tier<E, K> to (Cluster)PolicyTraits<NoOpPreprocess, SoftmaxPostprocess> in "
++                     "RoutingCustomPolicy.cuh.");
+   } else {
+     // Check if we can use the coop path (more efficient for medium token counts)
+     // Requires SM90+ (grid-sync), numExperts <= 1024.
+diff --git a/csrc/fused_moe/trtllm_backend/trtllm_fused_moe_routing_custom.cu b/csrc/fused_moe/trtllm_backend/trtllm_fused_moe_routing_custom.cu
+index f618778..5a7620e 100644
+--- a/csrc/fused_moe/trtllm_backend/trtllm_fused_moe_routing_custom.cu
++++ b/csrc/fused_moe/trtllm_backend/trtllm_fused_moe_routing_custom.cu
+@@ -297,10 +297,16 @@ __global__ void __launch_bounds__(KernelParams::MaxNumExperts <= 1024 ? KernelPa
+ #endif
+ }
+ 
+-void launchBlockKernel(Data const& data, uint32_t numThreadsHist, void* stream) {
+-  LAUNCH_ROUTING_CUSTOM(data, false, routingIndicesBlockKernel, 1, numThreadsHist,
++// Returns whether a compiled tier covered the runtime (numExperts, topK) and the
++// kernel was actually launched. A false return means no routing output was written;
++// the caller (run) must not proceed to the downstream pipeline in that case.
++bool launchBlockKernel(Data const& data, void* stream) {
++  uint32_t const numThreadsBlock =
++      std::min(1024u, static_cast<uint32_t>(queryDispatchedMaxExperts(data)));
++  LAUNCH_ROUTING_CUSTOM(data, false, routingIndicesBlockKernel, 1, numThreadsBlock,
+                         /*smemSize=*/0,  // No dynamic smem
+                         stream);
++  return queryPolicyHasCompiledTier(data);
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+@@ -625,7 +631,9 @@ __global__ void routingIndicesDynBlockKernel(KernelParams params) {
+ #endif
+ }
+ 
+-void launchDynBlockKernel(Data const& data, uint32_t numThreadsHist, void* stream) {
++// Returns whether a compiled tier covered the runtime (numExperts, topK) and the
++// kernel was actually launched (see launchBlockKernel).
++bool launchDynBlockKernel(Data const& data, uint32_t numThreadsHist, void* stream) {
+   int32_t const maxExperts = queryDispatchedMaxExperts(data);
+   int const numSlots = data.mNumTokens * maxExperts;
+   int const smemSize = numSlots + numSlots * 2 + 128 +
+@@ -634,6 +642,7 @@ void launchDynBlockKernel(Data const& data, uint32_t numThreadsHist, void* strea
+       std::min(std::max(data.mNumTokens * static_cast<int>(WarpSize), maxExperts), 1024);
+ 
+   LAUNCH_ROUTING_CUSTOM(data, false, routingIndicesDynBlockKernel, 1, threads, smemSize, stream);
++  return queryPolicyHasCompiledTier(data);
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+@@ -670,8 +679,13 @@ struct FilterClusterTiers<ClusterBlockDim, TierList<>> {
+ template <int ClusterBlockDim, typename First, typename... Rest>
+ struct FilterClusterTiers<ClusterBlockDim, TierList<First, Rest...>> {
+   using Tail = typename FilterClusterTiers<ClusterBlockDim, TierList<Rest...>>::type;
++  // The ceil-divided scan supports a bounded zero-padded tail. Limit the extra scan work to
++  // four warps and only enable it for the optimized high-expert/high-TopK tier family.
+   static constexpr bool IsValid =
+-      First::kExperts <= ClusterBlockDim || First::kExperts % ClusterBlockDim == 0;
++      First::kExperts <= ClusterBlockDim || First::kExperts % ClusterBlockDim == 0 ||
++      (topk::isInHighExpertLaneOwnedTopKRange(First::kExperts, First::kTopK) &&
++       ((First::kExperts + ClusterBlockDim - 1) / ClusterBlockDim * ClusterBlockDim -
++        First::kExperts) <= 4 * WarpSize);
+   using type = std::conditional_t<IsValid, typename PrependTier<First, Tail>::type, Tail>;
+ };
+ 
+@@ -802,8 +816,10 @@ void launchClusterKernelForTier(Data const& data, void* stream) {
+   }
+ }
+ 
++// Returns whether the cluster tier dispatch found a covering tier (ClusterPolicyTraits
++// is a filtered subset of PolicyTraits, so it may reject a config PolicyTraits covers).
+ template <int ClusterBlockDim, typename PreProc, typename PostProc>
+-void launchClusterKernelForPolicy(Data const& data, void* stream) {
++bool launchClusterKernelForPolicy(Data const& data, void* stream) {
+   using Pairs = typename ClusterPolicyTraits<ClusterBlockDim, PreProc, PostProc>::Pairs;
+   bool dispatched =
+       dispatchTierPairs(static_cast<Pairs*>(nullptr), data, [&](auto eTag, auto kTag) {
+@@ -813,41 +829,55 @@ void launchClusterKernelForPolicy(Data const& data, void* stream) {
+   if (!dispatched) {
+     FLASHINFER_WARN("No tier covers numExperts=%d topK=%d", data.mNumExperts, data.mTopK);
+   }
++  return dispatched;
+ }
+ 
+ template <int ClusterBlockDim>
+-void launchClusterKernelForBlockDim(Data const& data, void* stream) {
++bool launchClusterKernelForBlockDim(Data const& data, void* stream) {
++  bool dispatched = false;
+   dispatchRoutingPolicy(data, [&](auto preProc, auto postProc, char const* /*policyName*/) {
+-    launchClusterKernelForPolicy<ClusterBlockDim, decltype(preProc), decltype(postProc)>(data,
+-                                                                                         stream);
++    dispatched =
++        launchClusterKernelForPolicy<ClusterBlockDim, decltype(preProc), decltype(postProc)>(
++            data, stream);
+   });
++  return dispatched;
+ }
+ 
+-void launchClusterKernel(Data const& data, void* stream) {
++// Returns whether a compiled tier covered the runtime (numExperts, topK) and the
++// kernel was actually launched (see launchBlockKernel).
++bool launchClusterKernel(Data const& data, void* stream) {
++  // Use the wider cluster only for permutation-only launches in the bounded high-expert/high-TopK
++  // range. Score-to-TopK fused clusters retain the general capacity-based dispatch.
++  bool const useWidePermutationCluster =
++      data.mPtrScores == nullptr &&
++      topk::isInHighExpertLaneOwnedTopKRange(data.mNumExperts, data.mTopK) &&
++      data.mNumTokens >= 32 && data.mNumTokens <= 64;
++  if (useWidePermutationCluster) {
++    return launchClusterKernelForBlockDim<ClusterBlockDim512>(data, stream);
++  }
++
+   // Each warp owns one token, so the reduced-thread cluster variants have lower token capacity.
+   // Use them only where the requested token count fits; otherwise keep the original 1024-thread
+   // launch.
+   if (data.mNumTokens <= MaxNumTokensClusterScores256) {
+-    launchClusterKernelForBlockDim<ClusterBlockDim256>(data, stream);
+-    return;
++    return launchClusterKernelForBlockDim<ClusterBlockDim256>(data, stream);
+   }
+   if (data.mNumTokens <= MaxNumTokensClusterScores512) {
+-    launchClusterKernelForBlockDim<ClusterBlockDim512>(data, stream);
+-    return;
++    return launchClusterKernelForBlockDim<ClusterBlockDim512>(data, stream);
+   }
+ 
+   bool const useNoOpSoftmaxScores = data.mPtrScores != nullptr &&
+                                     data.mPreprocessType == RoutingPreprocessType::None &&
+                                     data.mPostprocessType == RoutingPostprocessType::Softmax;
+   if (useNoOpSoftmaxScores) {
+-    launchClusterKernelForPolicy<ClusterBlockDim1024, NoOpPreprocess, SoftmaxPostprocess>(data,
+-                                                                                          stream);
+-    return;
++    return launchClusterKernelForPolicy<ClusterBlockDim1024, NoOpPreprocess, SoftmaxPostprocess>(
++        data, stream);
+   }
+ 
+   LAUNCH_ROUTING_CUSTOM(data, false, routingIndicesClusterKernel, NumBlocksPerCluster, NumThreads,
+                         /*smemSize=*/0,  // No dynamic smem
+                         stream);
++  return queryPolicyHasCompiledTier(data);
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+@@ -914,7 +944,9 @@ __global__ void __launch_bounds__(
+     routingIndicesHistogramScoresKernel(KernelParams params) {
+   using OutputT = typename KernelParams::OutputT;
+   using InputT = typename KernelParams::InputT;
+-  using BaseType = typename KernelParams::ExpertSelectPolicy::template BaseType<InputT>;
++  using ExpertSelect = typename KernelParams::ExpertSelectPolicy;
++  using PostProc = typename ExpertSelect::PostprocessPolicy;
++  using BaseType = typename ExpertSelect::template BaseType<InputT>;
+   static constexpr int NumThreadsBlock =
+       HistogramScoresKernelConfig<typename KernelParams::ExpertSelectPolicy,
+                                   KernelParams::MaxNumExperts,
+@@ -922,6 +954,10 @@ __global__ void __launch_bounds__(
+ 
+   // VecSize stays based on MaxNumExperts — each warp still processes all experts for one token.
+   static constexpr int VecSize = KernelParams::MaxNumExperts / WarpSize;
++  static constexpr bool UseLaneOwnedTopK =
++      topk::isInHighExpertLaneOwnedTopKRange(KernelParams::MaxNumExperts,
++                                             KernelParams::MaxNumTopExperts) &&
++      PostprocessSupportsLaneOwnedTopK<PostProc>::value;
+ 
+   int32_t const laneIdx = cutlass::arch::LaneId();
+   int32_t const warpIdx = threadIdx.x / WarpSize;
+@@ -946,25 +982,35 @@ __global__ void __launch_bounds__(
+ 
+   // in this case, each warp represents a token, and we use a grid-stride loop
+   // over all warps/tokens
+-  BaseType warpTopKScore[KernelParams::MaxNumTopExperts];
+-  int32_t warpTopKExpertIdx[KernelParams::MaxNumTopExperts];
+   for (int tokenIdx = globalWarpIdx; tokenIdx < params.mNumTokens; tokenIdx += globalWarpStride) {
+     auto scoreOffset = tokenIdx * params.mNumExperts;
+ 
+-    KernelParams::ExpertSelectPolicy::template apply<BaseType, InputT, VecSize,
+-                                                     KernelParams::MaxNumTopExperts>(
+-        warp, warpTopKScore, warpTopKExpertIdx, laneIdx, params.mNumExperts, params.mTopK,
+-        params.mPtrScores + scoreOffset, params);
++    BaseType laneTopKScore;
++    int32_t laneTopKExpertIdx;
++    if constexpr (UseLaneOwnedTopK) {
++      ExpertSelect::template applyForLane<BaseType, InputT, VecSize,
++                                          KernelParams::MaxNumTopExperts>(
++          warp, laneTopKScore, laneTopKExpertIdx, laneIdx, params.mNumExperts, params.mTopK,
++          params.mPtrScores + scoreOffset, params);
++    } else {
++      BaseType warpTopKScore[KernelParams::MaxNumTopExperts];
++      int32_t warpTopKExpertIdx[KernelParams::MaxNumTopExperts];
++      ExpertSelect::template apply<BaseType, InputT, VecSize, KernelParams::MaxNumTopExperts>(
++          warp, warpTopKScore, warpTopKExpertIdx, laneIdx, params.mNumExperts, params.mTopK,
++          params.mPtrScores + scoreOffset, params);
++      laneTopKScore = laneIdx < params.mTopK ? warpTopKScore[laneIdx] : BaseType{-INFINITY};
++      laneTopKExpertIdx = laneIdx < params.mTopK ? warpTopKExpertIdx[laneIdx] : -1;
++    }
+ 
+     if (laneIdx < params.mTopK) {
+-      PackedScoreIdx<OutputT> packedScore{static_cast<OutputT>(warpTopKScore[laneIdx]),
+-                                          static_cast<int16_t>(warpTopKExpertIdx[laneIdx])};
++      PackedScoreIdx<OutputT> packedScore{static_cast<OutputT>(laneTopKScore),
++                                          static_cast<int16_t>(laneTopKExpertIdx)};
+       params.mPtrTopKPacked[tokenIdx * params.mTopK + laneIdx] = packedScore;
+       // Routing replay: record selected expert IDs. Layout: [num_tokens, topK]
+       // -- same indexing as mPtrTopKPacked.
+       if (params.mPtrRoutingReplayOut != nullptr) {
+         params.mPtrRoutingReplayOut[tokenIdx * params.mTopK + laneIdx] =
+-            static_cast<int16_t>(warpTopKExpertIdx[laneIdx]);
++            static_cast<int16_t>(laneTopKExpertIdx);
+       }
+     }
+   }
+@@ -978,8 +1024,11 @@ __global__ void __launch_bounds__(
+ #endif  // if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+ }
+ 
+-void launchHistogramScoresKernel(Data const& data, uint32_t maxNumBlocks, uint32_t numThreadsHist,
++// Returns whether a compiled tier covered the runtime (numExperts, topK) and the
++// kernel was actually launched (see launchBlockKernel).
++bool launchHistogramScoresKernel(Data const& data, uint32_t maxNumBlocks, uint32_t numThreadsHist,
+                                  void* stream) {
++  bool launched = false;
+   dispatchRoutingPolicy(data, [&](auto preProc, auto postProc, char const* policyName) {
+     using PreProc = decltype(preProc);
+     using PostProc = decltype(postProc);
+@@ -998,6 +1047,7 @@ void launchHistogramScoresKernel(Data const& data, uint32_t maxNumBlocks, uint32
+                                        /*smemSize=*/0, stream, PreProc, PostProc,
+                                        decltype(eTag)::value, decltype(kTag)::value);
+         });
++    launched = dispatched;
+     if (!dispatched) {
+       FLASHINFER_WARN(
+           "No tier covers numExperts=%d topK=%d for policy %s in "
+@@ -1005,11 +1055,12 @@ void launchHistogramScoresKernel(Data const& data, uint32_t maxNumBlocks, uint32
+           data.mNumExperts, data.mTopK, policyName);
+     }
+   });
++  return launched;
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+ //
+-// 3b. BlockScores kernel — one block per token, block-parallel preprocess + warp-0 sort-based topK.
++// 3b. BlockScores kernel — one block per token with block-parallel preprocess and topK.
+ //
+ // Motivation: for small numTokens with high topK (e.g. Nemotron Super V3:
+ // BS<=256, E=512, K=22), the per-warp-per-token `routingIndicesHistogramScoresKernel`
+@@ -1023,12 +1074,13 @@ void launchHistogramScoresKernel(Data const& data, uint32_t maxNumBlocks, uint32
+ //   Phase 1: parallelise the preprocess across all threads via a grid-stride
+ //            loop (PreprocessPolicy::applyToSmem), writing per-expert topK
+ //            key (and optional aux data) into smem.
+-//   Phase 2: warp 0 alone does the topK via a sort-based reduceTopK with
+-//            N = ceil(MaxNumExperts / WarpSize) elements per lane.
++//   Phase 2: the generic path uses warp 0 for sort-based topK. Bounded
++//            high-expert/high-topK tiers use worker warps over 128-expert
++//            partitions, then warp 0 merges their candidates.
+ //   Phase 3: warp 0 applies the postprocess (PostprocessPolicy::applyWithAux),
+ //            in-place modifying topScores.
+-// Only warp 0 carries the K-sized register arrays, so per-block register
+-// pressure stays low (~64 regs/thread) and occupancy rises to 2 blocks/SM.
++// Only the generic fallback carries final K-sized register arrays. The
++// bounded path keeps one result per lane and uses all required expert warps.
+ //
+ // The kernel is generic in (PreprocessPolicy, PostprocessPolicy).  The
+ // auxiliary smem array is only allocated when the policy pair requires it
+@@ -1066,6 +1118,15 @@ __global__ void __launch_bounds__(kBlockScoresKernelBlockDim)
+   // Sort<N>'s 64-element cap (the static_assert inside topk::reduceTopK).
+   static constexpr int NumChunks = (MaxNumExperts + WarpSize - 1) / WarpSize;
+ 
++  // Enable the hierarchical specialization for the shared high-expert/high-TopK range.
++  // dispatchTierPairs still determines which concrete tiers are instantiated.
++  static constexpr int LaneTopKValuesPerWorkerLane = 4;
++  static constexpr int LaneTopKExpertsPerWorkerWarp = LaneTopKValuesPerWorkerLane * WarpSize;
++  static constexpr int LaneTopKNumWorkerWarps =
++      (MaxNumExperts + LaneTopKExpertsPerWorkerWarp - 1) / LaneTopKExpertsPerWorkerWarp;
++  static constexpr int LaneTopKNumIntermediate = LaneTopKNumWorkerWarps * MaxNumTopExperts;
++  static constexpr int LaneTopKMergeValuesPerLane =
++      (LaneTopKNumIntermediate + WarpSize - 1) / WarpSize;
+   // Compile-time opt-out: the macro dispatch instantiates this kernel across
+   // every (PreProc, PostProc, tier) combination, but we only emit a real
+   // kernel body for policy pairs that implement the block-per-token interface
+@@ -1147,9 +1208,85 @@ __global__ void __launch_bounds__(kBlockScoresKernelBlockDim)
+ 
+     __syncthreads();
+ 
+-    // Phase 2: warp-0 sort-based topK over NumChunks elements per lane.
+-    // Warps 1..N-1 are done and can exit; only warp 0 carries the K-sized
+-    // register arrays from here on.
++    // Phase 2a: bounded hierarchical lane-owned TopK. Worker warps each
++    // reduce a 128-expert partition; warp 0 merges their scalar lane-owned
++    // outputs. No K-element output array is dynamically indexed per thread.
++    if constexpr (topk::isInHighExpertLaneOwnedTopKRange(MaxNumExperts, MaxNumTopExperts) &&
++                  LaneTopKNumWorkerWarps <= kBlockScoresKernelBlockDim / WarpSize &&
++                  LaneTopKMergeValuesPerLane <= 64 &&
++                  PostprocessSupportsLaneOwnedTopK<PostProc>::value) {
++      __shared__ BaseType
++          __attribute((aligned(128))) smemIntermediateScores[LaneTopKNumIntermediate];
++      __shared__ int32_t
++          __attribute((aligned(128))) smemIntermediateExperts[LaneTopKNumIntermediate];
++
++      if (warpIdx < LaneTopKNumWorkerWarps) {
++        BaseType localScores[LaneTopKValuesPerWorkerLane];
++        int32_t localIdx[LaneTopKValuesPerWorkerLane];
++#pragma unroll
++        for (int ii = 0; ii < LaneTopKValuesPerWorkerLane; ++ii) {
++          int const expertIdx = warpIdx * LaneTopKExpertsPerWorkerWarp + ii * WarpSize + laneIdx;
++          localIdx[ii] = expertIdx;
++          localScores[ii] =
++              expertIdx < params.mNumExperts ? smemBiased[expertIdx] : BaseType{invalidScoreFloat};
++        }
++
++        BaseType laneScore;
++        int32_t laneExpert;
++        topk::reduceTopKForLane<MaxNumTopExperts>(
++            warp, laneScore, laneExpert, localScores, localIdx,
++            /*minValue=*/BaseType{invalidScoreFloat}, laneIdx);
++        if (laneIdx < MaxNumTopExperts) {
++          int const intermediateIdx = warpIdx * MaxNumTopExperts + laneIdx;
++          bool const valid = laneIdx < params.mTopK;
++          smemIntermediateScores[intermediateIdx] = valid ? laneScore : BaseType{invalidScoreFloat};
++          smemIntermediateExperts[intermediateIdx] = valid ? laneExpert : MaxNumExperts;
++        }
++      }
++      __syncthreads();
++
++      if (warpIdx != 0) {
++        return;
++      }
++
++      BaseType intermediateScores[LaneTopKMergeValuesPerLane];
++      int32_t intermediateExperts[LaneTopKMergeValuesPerLane];
++#pragma unroll
++      for (int ii = 0; ii < LaneTopKMergeValuesPerLane; ++ii) {
++        int const intermediateIdx = ii * WarpSize + laneIdx;
++        bool const valid = intermediateIdx < LaneTopKNumIntermediate;
++        intermediateScores[ii] =
++            valid ? smemIntermediateScores[intermediateIdx] : BaseType{invalidScoreFloat};
++        intermediateExperts[ii] = valid ? smemIntermediateExperts[intermediateIdx] : MaxNumExperts;
++      }
++
++      BaseType laneTopKScore;
++      int32_t laneTopKExpertIdx;
++      topk::reduceTopKForLane<MaxNumTopExperts>(warp, laneTopKScore, laneTopKExpertIdx,
++                                                intermediateScores, intermediateExperts,
++                                                /*minValue=*/BaseType{invalidScoreFloat}, laneIdx);
++      PostProc::applyForLaneWithAux(warp, laneTopKScore, laneTopKExpertIdx, laneIdx, params.mTopK,
++                                    auxPtr, params.mExpertSelectParams.mPostprocessParams);
++
++      if (laneIdx < params.mTopK) {
++        PackedScoreIdx<OutputT> packedScore{static_cast<OutputT>(laneTopKScore),
++                                            static_cast<int16_t>(laneTopKExpertIdx)};
++        int64_t const outputIdx = int64_t{tokenIdx} * int64_t{params.mTopK} + laneIdx;
++        params.mPtrTopKPacked[outputIdx] = packedScore;
++        if (params.mPtrRoutingReplayOut != nullptr) {
++          params.mPtrRoutingReplayOut[outputIdx] = static_cast<int16_t>(laneTopKExpertIdx);
++        }
++      }
++
++#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
++      if (params.mUsePdl) {
++        cudaTriggerProgrammaticLaunchCompletion();
++      }
++#endif
++      return;
++    }
++
++    // Phase 2b: generic fallback. Warp 0 sorts NumChunks candidates per lane.
+     if (warpIdx != 0) {
+       return;
+     }
+@@ -1195,7 +1332,9 @@ __global__ void __launch_bounds__(kBlockScoresKernelBlockDim)
+   }  // end `if constexpr (kSupported)` else branch
+ }
+ 
+-void launchBlockScoresKernel(Data const& data, void* stream) {
++// Returns whether a compiled tier covered the runtime (numExperts, topK) and the
++// kernel was actually launched (see launchBlockKernel).
++bool launchBlockScoresKernel(Data const& data, void* stream) {
+   // Custom dispatch that does NOT clamp blockDim to the dispatched tier's
+   // expert count (unlike `LAUNCH_ROUTING_CUSTOM`).  The kernel's layout —
+   // kBlockScoresKernelBlockDim threads with a grid-stride loop over experts —
+@@ -1203,6 +1342,7 @@ void launchBlockScoresKernel(Data const& data, void* stream) {
+   // registers and shrink occupancy.  The blockDim is intentionally fixed to
+   // the kernel-side constant so host and device agree (SoftmaxPreprocess
+   // sizes its cub::BlockReduce with the same value at compile time).
++  bool launched = false;
+   dispatchRoutingPolicy(data, [&](auto preProc_, auto postProc_, char const* policyName_) {
+     using PreProc_ = decltype(preProc_);
+     using PostProc_ = decltype(postProc_);
+@@ -1215,6 +1355,7 @@ void launchBlockScoresKernel(Data const& data, void* stream) {
+                                        /*smemSize=*/0, stream, PreProc_, PostProc_,
+                                        decltype(eTag_)::value, decltype(kTag_)::value);
+         });
++    launched = dispatched_;
+     if (!dispatched_) {
+       FLASHINFER_WARN(
+           "No compiled tier covers numExperts=%d topK=%d for policy %s in "
+@@ -1222,6 +1363,7 @@ void launchBlockScoresKernel(Data const& data, void* stream) {
+           data.mNumExperts, data.mTopK, policyName_);
+     }
+   });
++  return launched;
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+@@ -1229,15 +1371,36 @@ void launchBlockScoresKernel(Data const& data, void* stream) {
+ // 4. Coop kernel — cooperative histogram + offsets via grid-sync.
+ //
+ // The coop kernel only performs the post-topK permutation pipeline (histogram, prefix-scan,
+-// index writes). It does NOT compute topK — it reads pre-computed results from mPtrTopKPacked
+-// or mPtrTopKIds. Therefore, only the NumExperts template tier matters (it sizes shared memory
+-// arrays and determines the thread count). The NumTopExperts tier is fixed at NumTop8Experts
+-// because the kernel uses a hardcoded MaxExpandedIdxPerThread=64 and processes all expanded
+-// indices (mNumTokens * mTopK) via a grid-stride loop with runtime bounds checking, regardless
+-// of the compile-time MaxNumTopExperts value.
++// index writes). It does not compute TopK; it reads pre-computed results from mPtrTopKPacked
++// or mPtrTopKIds. The expert tier sizes shared memory and determines the thread count. Most
++// tiers use NumTop8Experts and generic 64-entry per-thread state. Bounded high-expert/high-TopK
++// tiers can use NumTop16Experts with four entries per thread when that state covers
++// mNumTokens * mTopK.
+ //
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
++template <int NumExpertsTier>
++void launchCoopKernelTier(Data const& data, int numBlocksCoop, uint32_t numThreadsHist,
++                          void* stream) {
++  bool useBoundedState = false;
++  if constexpr (topk::isInHighExpertLaneOwnedTopKRange(NumExpertsTier, NumTop16Experts)) {
++    int64_t const expandedIdxSize = int64_t{data.mNumTokens} * int64_t{data.mTopK};
++    int64_t const boundedCapacity = int64_t{4} * int64_t{numBlocksCoop} * int64_t{numThreadsHist};
++    useBoundedState = data.mTopK > NumTop8Experts && data.mTopK <= NumTop16Experts &&
++                      expandedIdxSize <= boundedCapacity;
++  }
++
++  if (useBoundedState) {
++    LAUNCH_ROUTING_WITH_POLICIES(
++        data, /*coopLaunch=*/true, routingIndicesCoopKernel, numBlocksCoop, numThreadsHist,
++        /*smemSize=*/0, stream, NoOpPreprocess, NoOpPostprocess, NumExpertsTier, NumTop16Experts);
++  } else {
++    LAUNCH_ROUTING_WITH_POLICIES(
++        data, /*coopLaunch=*/true, routingIndicesCoopKernel, numBlocksCoop, numThreadsHist,
++        /*smemSize=*/0, stream, NoOpPreprocess, NoOpPostprocess, NumExpertsTier, NumTop8Experts);
++  }
++}
++
+ void launchCoopKernel(Data const& data, int numBlocksCoop, uint32_t numThreadsHist, void* stream) {
+   if (data.mNumExperts <= NumExperts128Experts) {
+     LAUNCH_ROUTING_WITH_POLICIES(data, /*coopLaunch=*/true, routingIndicesCoopKernel, numBlocksCoop,
+@@ -1263,10 +1426,10 @@ void launchCoopKernel(Data const& data, int numBlocksCoop, uint32_t numThreadsHi
+     LAUNCH_ROUTING_WITH_POLICIES(data, /*coopLaunch=*/true, routingIndicesCoopKernel, numBlocksCoop,
+                                  numThreadsHist, /*smemSize=*/0, stream, NoOpPreprocess,
+                                  NoOpPostprocess, NumExperts576Experts, NumTop8Experts);
++  } else if (data.mNumExperts <= NumExperts896Experts) {
++    launchCoopKernelTier<NumExperts896Experts>(data, numBlocksCoop, numThreadsHist, stream);
+   } else if (data.mNumExperts <= NumExperts1024Experts) {
+-    LAUNCH_ROUTING_WITH_POLICIES(data, /*coopLaunch=*/true, routingIndicesCoopKernel, numBlocksCoop,
+-                                 numThreadsHist, /*smemSize=*/0, stream, NoOpPreprocess,
+-                                 NoOpPostprocess, NumExperts1024Experts, NumTop8Experts);
++    launchCoopKernelTier<NumExperts1024Experts>(data, numBlocksCoop, numThreadsHist, stream);
+   } else {
+     TVM_FFI_LOG_AND_THROW(NotImplementedError)
+         << "Coop kernel does not support numExperts > " << NumExperts1024Experts << ", got "
+@@ -1346,7 +1509,6 @@ void run(Data const& data, void* stream) {
+       << MaxSupportedExperts << ".";
+ 
+   static int const smMajor = tensorrt_llm::common::getSMVersion() / 10;
+-  bool const useStaticBlock = data.mNumTokens <= BlockKernelMaxNumTokens;
+   // Gate on the dispatched tier size, not the raw expert count.
+   // Example: a model with 512 experts and topK=22 skips Tier<512,8> (topK too
+   // large) and falls through to Tier<1024,32>.  queryDispatchedMaxExperts()
+@@ -1355,15 +1517,35 @@ void run(Data const& data, void* stream) {
+   // 512, passes) would let it enter a 1024-expert specialization that exceeds
+   // the smem budget.
+   int32_t const dispatchedMaxExperts = queryDispatchedMaxExperts(data);
++
++  // Does the currently-active policy pair implement the block-per-token interface?
++  bool const policySupportsBlockPerToken = queryPolicySupportsBlockPerToken(data);
++  bool preprocessBenefitsFromBlockParallelism = false;
++  dispatchRoutingPolicy(data, [&](auto preProc, auto, char const*) {
++    preprocessBenefitsFromBlockParallelism = decltype(preProc)::kBenefitsFromBlockParallelism;
++  });
++
++  // At the static-block boundary, high-E/high-K TopK has enough parallel work to benefit from
++  // one score block per token. The downstream post-TopK pipeline still uses its single-block
++  // kernel, so this only splits the score selection from permutation. Keep the generic static
++  // kernel for smaller batches, expert counts at or below the dyn-block limit, other K ranges,
++  // and policy pairs without block-per-token support.
++  bool const preferSplitAtStaticBoundary =
++      smMajor >= 9 && data.mNumTokens == BlockKernelMaxNumTokens &&
++      data.mNumExperts > DynBlockKernelMaxNumExperts &&
++      topk::isInHighExpertLaneOwnedTopKRange(data.mNumExperts, data.mTopK) &&
++      policySupportsBlockPerToken && preprocessBenefitsFromBlockParallelism;
++  bool const useStaticBlock =
++      data.mNumTokens <= BlockKernelMaxNumTokens && !preferSplitAtStaticBoundary;
+   bool const useDynBlock = !useStaticBlock && data.mNumTokens <= DynBlockKernelMaxNumTokens &&
+                            dispatchedMaxExperts <= DynBlockKernelMaxNumExperts;
+   bool const useSingleBlock = useStaticBlock || useDynBlock;
+   bool const useSingleCluster =
+       (smMajor >= 9) && (data.mNumTokens <= MaxNumTokensSingleClusterScores);
+ 
+-  // Split-topK path: block-per-token scores kernel + permutation-only cluster
+-  // kernel, the two overlapping via PDL.  This replaces the fused single-
+-  // cluster kernel for configs where it underperforms:
++  // Split-topK path: block-per-token scores kernel + the shared post-TopK pipeline, with PDL
++  // between them. For cluster-sized batches this replaces the fused score-and-permutation
++  // cluster kernel where it underperforms:
+   //
+   //   - Register pressure / spills: the fused kernel has every cluster warp
+   //     carry K-sized per-thread arrays across the cluster barrier.  For
+@@ -1376,10 +1558,10 @@ void run(Data const& data, void* stream) {
+   //   - No PDL overlap: everything happens in one kernel.
+   //
+   // Split-path structure:
+-  //   * routingIndicesBlockScoresKernel writes mPtrTopKPacked
+-  //     (1 block / token, 256 threads, only warp 0 carries K-sized regs).
+-  //   * runPostTopKPipeline selects the cluster kernel with
+-  //     LoadExpertIdxFromGlobal=true → permutation only.
++  //   * routingIndicesBlockScoresKernel writes mPtrTopKPacked with block-parallel preprocessing
++  //     and either generic warp-0 TopK or the bounded worker-warp specialization.
++  //   * runPostTopKPipeline consumes mPtrTopKPacked and selects the existing block, cluster,
++  //     cooperative, or multi-kernel permutation path for the batch size.
+   // The two kernels overlap via cudaTriggerProgrammaticLaunchCompletion()
+   // and cudaGridDependencySynchronize().
+   //
+@@ -1387,6 +1569,7 @@ void run(Data const& data, void* stream) {
+   // `bench_routing_sweep.py` + `bench_routing_analyze.py`):
+   //
+   //   useSplit = useSingleCluster && !useSingleBlock && numExperts >= 160
++  //   plus the bounded high-E/high-K static-block boundary selected above.
+   //
+   // Why this rule (measured on B200 across {Default, Renormalize,
+   // DeepSeekV3_nGrp1, MiniMax2} policies, BS ∈ [17, 256]):
+@@ -1396,8 +1579,8 @@ void run(Data const& data, void* stream) {
+   //     handoff) approximately cancels the single-cluster savings.  Default
+   //     128/8 is ~1.0×; DeepSeekV3 / MiniMax2 128/8 show ~1.11× but
+   //     Renormalize 128/8 is ~1.06× — not worth the complexity.
+-  //   - At numTokens < 17 the block/dynblock kernels already handle small
+-  //     BS optimally; this branch only fires when the cluster path would.
++  //   - Below the cluster range, block/dynblock remains the default; the bounded high-E/high-K
++  //     static-block boundary above is the measured exception.
+   //
+   // Env-var override for benchmarking, applies to *both* the single-cluster
+   // split path and the large-BS topK kernel choice:
+@@ -1422,11 +1605,6 @@ void run(Data const& data, void* stream) {
+     return ForceMode::kAuto;
+   }();
+ 
+-  // Does the currently-active policy pair implement the block-per-token
+-  // interface?  Queried via PolicyPairSupportsBlockPerToken — policies that
+-  // don't opt in (no applyToSmem / applyWithAux specialisation) will force
+-  // this branch to false and fall back to the fused single-cluster kernel.
+-  bool const policySupportsBlockPerToken = queryPolicySupportsBlockPerToken(data);
+   if (forceMode == ForceMode::kOn && !policySupportsBlockPerToken) {
+     FLASHINFER_WARN(
+         "FLASHINFER_ROUTING_FORCE_BLOCK_PER_TOKEN is set but the active routing policy does not "
+@@ -1469,27 +1647,24 @@ void run(Data const& data, void* stream) {
+     // mirrors TRT-LLM's deepseek_v3_topk_kernel (no-groups path) layout:
+     //   - One block per token, kBlockScoresKernelBlockDim threads per block.
+     //   - Block-parallel preprocess (via PreprocessPolicy::applyToSmem).
+-    //   - Warp 0 alone does the sort-based reduceTopK<K, N=ceil(E/32)> plus
+-    //     the postprocess (via PostprocessPolicy::applyWithAux).
+-    //   - Only warp 0 holds the K-sized register arrays, so per-block
+-    //     register pressure stays low and occupancy high.
++    //   - Generic tiers use warp 0 for sort-based TopK and postprocessing.
++    //   - Bounded high-expert/high-TopK tiers partition candidates across worker warps,
++    //     then merge to one final result per lane.
+     //
+-    // Why 256 threads (kBlockScoresKernelBlockDim): larger blocks (e.g. 512)
+-    // would reserve the ~99-register budget across more threads and limit
+-    // occupancy to 1 block/SM.  256 threads gives 2 blocks/SM with the same
+-    // per-warp workload, doubling arithmetic throughput during the preprocess
+-    // phase.  For E=512 the grid-stride loop iterates 2× per thread; for
+-    // E<=256 it iterates once.
++    // The fixed 256-thread block provides eight worker warps while preserving occupancy for
++    // the generic path; each preprocess pass covers experts with a grid-stride loop.
+     //
+-    // The kernel is generic in (PreprocessPolicy, PostprocessPolicy) — any
+-    // registered policy pair in RoutingCustomPolicy.cuh works here.
+-    launchBlockScoresKernel(mutableData, stream);
+-
+-    // Step 2: delegate the permutation pipeline to runPostTopKPipeline, which
+-    //   will pick the cluster kernel (LoadExpertIdxFromGlobal=true branch) for
+-    //   small numTokens.  The cluster kernel in that branch reads topK from
+-    //   mPtrTopKPacked instead of doing topK itself, so it does not carry the
+-    //   K-sized register arrays or suffer from idle-warp barrier waits.
++    // The kernel remains generic across policy pairs that opt into the block-per-token interface.
++    bool const launched = launchBlockScoresKernel(mutableData, stream);
++    FLASHINFER_CHECK(
++        launched, "routingCustom::run: no compiled tier covers numExperts=", data.mNumExperts,
++        " topK=", data.mTopK,
++        " for the active routing policy (block-per-token split path; see preceding "
++        "warning). Add a matching Tier<E, K> to PolicyTraits in RoutingCustomPolicy.cuh.");
++
++    // Step 2: delegate permutation to runPostTopKPipeline. It consumes mPtrTopKPacked without
++    // recomputing TopK, then selects the single-block path at the static boundary or the cluster
++    // path for larger small batches. This keeps K-sized score state out of the permutation kernel.
+     //
+     //   Clear mPtrScores so runPostTopKPipeline takes the pre-computed-topK
+     //   path (we've already written mPtrTopKPacked above).
+@@ -1499,11 +1674,26 @@ void run(Data const& data, void* stream) {
+   }
+ 
+   if (useDynBlock) {
+-    launchDynBlockKernel(mutableData, numThreadsHist, stream);
++    bool const launched = launchDynBlockKernel(mutableData, numThreadsHist, stream);
++    FLASHINFER_CHECK(launched,
++                     "routingCustom::run: no compiled tier covers numExperts=", data.mNumExperts,
++                     " topK=", data.mTopK,
++                     " for the active routing policy (dyn-block path; see preceding warning). "
++                     "Add a matching Tier<E, K> to PolicyTraits in RoutingCustomPolicy.cuh.");
+   } else if (useStaticBlock) {
+-    launchBlockKernel(mutableData, numThreadsHist, stream);
++    bool const launched = launchBlockKernel(mutableData, stream);
++    FLASHINFER_CHECK(launched,
++                     "routingCustom::run: no compiled tier covers numExperts=", data.mNumExperts,
++                     " topK=", data.mTopK,
++                     " for the active routing policy (static-block path; see preceding warning). "
++                     "Add a matching Tier<E, K> to PolicyTraits in RoutingCustomPolicy.cuh.");
+   } else if (useSingleCluster) {
+-    launchClusterKernel(mutableData, stream);
++    bool const launched = launchClusterKernel(mutableData, stream);
++    FLASHINFER_CHECK(
++        launched, "routingCustom::run: no compiled tier covers numExperts=", data.mNumExperts,
++        " topK=", data.mTopK,
++        " for the active routing policy (single-cluster path; see preceding warning). "
++        "Add a matching Tier<E, K> to (Cluster)PolicyTraits in RoutingCustomPolicy.cuh.");
+   } else {
+     uint32_t const maxNumBlocks = 1024;
+ 
+@@ -1514,13 +1704,9 @@ void run(Data const& data, void* stream) {
+     // there's naturally one warp's worth of work per token.
+     //
+     // For policies that support the block-per-token interface and have E >= 256,
+-    // `routingIndicesBlockScoresKernel` (1 block/token, warp-0 sort-based topK)
+-    // can be faster because:
+-    //   - Only warp 0 carries the K-sized topK register arrays (saves ~40
+-    //     regs/thread for K=22, avoids spills even at large E).
+-    //   - The bitonic-sort reduceTopK over N=ceil(E/32) elements per lane
+-    //     beats the K sequential warp reductions a warp-per-token layout
+-    //     does for high-K configs like Nemotron.
++    // routingIndicesBlockScoresKernel (1 block/token) can be faster because it parallelizes
++    // preprocessing across a block. The generic path confines K-sized output arrays to warp 0;
++    // bounded high-expert/high-TopK tiers use worker warps and lane-owned final results.
+     //
+     // The trade-off is one block per token — at BS = 4096 that's 4096 blocks
+     // vs ~128 blocks for warp-per-token.  Above BS ≈ 1024 block-per-token
+@@ -1545,11 +1731,18 @@ void run(Data const& data, void* stream) {
+     } else if (forceMode == ForceMode::kOff) {
+       useBlockScoresForTopK = false;
+     }
++    bool launched = false;
+     if (useBlockScoresForTopK) {
+-      launchBlockScoresKernel(mutableData, stream);
++      launched = launchBlockScoresKernel(mutableData, stream);
+     } else {
+-      launchHistogramScoresKernel(mutableData, maxNumBlocks, numThreadsHist, stream);
++      launched = launchHistogramScoresKernel(mutableData, maxNumBlocks, numThreadsHist, stream);
+     }
++    FLASHINFER_CHECK(
++        launched,
++        "routingCustom::run: no compiled score-to-topK tier covers numExperts=", data.mNumExperts,
++        " topK=", data.mTopK,
++        " for the active routing policy (large-batch path; see preceding warning). "
++        "Add a matching Tier<E, K> to (Histogram)PolicyTraits in RoutingCustomPolicy.cuh.");
+ 
+     bool const canUseCoop =
+         (smMajor >= 9) && (data.mNumExperts <= 1024) && (data.mPtrPermutedIdxSize != nullptr);
+@@ -1567,7 +1760,10 @@ void run(Data const& data, void* stream) {
+ 
+     if (useCoop) {
+       logCoopLaunchSMCounts(coopLaunchSMCounts);
+-      launchInitExpertCounts(mutableData, numThreadsHist, stream);
++      // Both score-to-TopK kernels above zero the full 2*numExperts histogram.
++      // Stream ordering (or the PDL dependency) makes that state visible to
++      // the cooperative permutation kernel, so a separate init launch would
++      // only repeat the same writes.
+       launchCoopKernel(mutableData, numBlocksCoop, numThreadsHist, stream);
+     } else {
+       uint32_t const expandedIdxSize = data.mNumTokens * data.mTopK;
+diff --git a/csrc/trtllm_fused_moe_kernel_launcher.cu b/csrc/trtllm_fused_moe_kernel_launcher.cu
+index e04cef5..a83cf64 100644
+--- a/csrc/trtllm_fused_moe_kernel_launcher.cu
++++ b/csrc/trtllm_fused_moe_kernel_launcher.cu
+@@ -2791,11 +2791,24 @@ namespace trtllm_cubin_loader {
+ #include <flashinfer/cubin_loader.h>
+ }
+ 
++#ifdef FLASHINFER_PRIVATE_MOE_FFI_NAMES
++// Private local-cubin MoE modules export under distinct *_private symbols with
++// hidden visibility so a public and a private module can coexist in one process.
++TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_bf16_moe_private, trtllm_bf16_moe);
++TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp8_per_tensor_scale_moe_private,
++                              trtllm_fp8_per_tensor_scale_moe);
++TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp8_block_scale_moe_private, trtllm_fp8_block_scale_moe);
++TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp4_block_scale_moe_private, trtllm_fp4_block_scale_moe);
++TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_mxint4_block_scale_moe_private,
++                              trtllm_mxint4_block_scale_moe);
++TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_get_valid_moe_configs_private, trtllm_get_valid_moe_configs);
++#else
+ TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_bf16_moe, trtllm_bf16_moe);
+ TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp8_per_tensor_scale_moe, trtllm_fp8_per_tensor_scale_moe);
+ TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp8_block_scale_moe, trtllm_fp8_block_scale_moe);
+ TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_fp4_block_scale_moe, trtllm_fp4_block_scale_moe);
+ TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_mxint4_block_scale_moe, trtllm_mxint4_block_scale_moe);
+ TVM_FFI_DLL_EXPORT_TYPED_FUNC(trtllm_get_valid_moe_configs, trtllm_get_valid_moe_configs);
++#endif
+ 
+ }  // namespace flashinfer
+diff --git a/csrc/trtllm_fused_moe_runner.cu b/csrc/trtllm_fused_moe_runner.cu
+index 83d985b..f72af81 100644
+--- a/csrc/trtllm_fused_moe_runner.cu
++++ b/csrc/trtllm_fused_moe_runner.cu
+@@ -357,6 +357,10 @@ static inline ActType activationTypeToGatedActType(ActivationType actType) {
+       return ActType::SwiGlu;
+     case ActivationType::Geglu:
+       return ActType::GeGlu;
++#ifdef TLLM_GEN_LOCAL_CUBINS_ABI
++    case ActivationType::Situ:
++      return ActType::SiTuGlu;
++#endif
+     default:
+       FLASHINFER_CHECK(false, "Unsupported gated activation type ",
+                        serializeActivationType(actType), " of enum ",
+diff --git a/flashinfer/fused_moe/core.py b/flashinfer/fused_moe/core.py
+index 17923eb..caa48ac 100644
+--- a/flashinfer/fused_moe/core.py
++++ b/flashinfer/fused_moe/core.py
+@@ -1213,10 +1213,51 @@ def _unpack_trtllm_moe_output(
+ 
+ 
+ @functools.cache
+-def get_trtllm_moe_sm100_module():
+-    module = gen_trtllm_gen_fused_moe_sm100_module()
+-    moe_op = module.build_and_load()
++def get_trtllm_moe_sm100_module(is_private: bool = False):
++    module = gen_trtllm_gen_fused_moe_sm100_module(is_private=is_private)
++    raw_moe_op = module.build_and_load()
+     setup_cubin_loader(str(module.get_library_path()))
++    # Private local-cubin modules (e.g. the SiTU activation pool) export their
++    # FFI entrypoints under a `_private` suffix with hidden visibility, so a
++    # public and a private module can coexist in one process. Remap those to the
++    # unsuffixed names used below, and give the registered custom ops / autotuner
++    # keys a matching suffix to avoid torch.library name collisions.
++    ffi_suffix = "_private" if is_private else ""
++    op_suffix = "_private" if is_private else ""
++    if is_private:
++        moe_op = SimpleNamespace(
++            trtllm_bf16_moe=getattr(raw_moe_op, f"trtllm_bf16_moe{ffi_suffix}"),
++            trtllm_fp8_per_tensor_scale_moe=getattr(
++                raw_moe_op, f"trtllm_fp8_per_tensor_scale_moe{ffi_suffix}"
++            ),
++            trtllm_fp8_block_scale_moe=getattr(
++                raw_moe_op, f"trtllm_fp8_block_scale_moe{ffi_suffix}"
++            ),
++            trtllm_fp4_block_scale_moe=getattr(
++                raw_moe_op, f"trtllm_fp4_block_scale_moe{ffi_suffix}"
++            ),
++            trtllm_mxint4_block_scale_moe=getattr(
++                raw_moe_op, f"trtllm_mxint4_block_scale_moe{ffi_suffix}"
++            ),
++            trtllm_get_valid_moe_configs=getattr(
++                raw_moe_op, f"trtllm_get_valid_moe_configs{ffi_suffix}"
++            ),
++        )
++    else:
++        moe_op = raw_moe_op
++    trtllm_bf16_moe_op_name = f"flashinfer::trtllm_bf16_moe{op_suffix}"
++    trtllm_fp8_per_tensor_scale_moe_op_name = (
++        f"flashinfer::trtllm_fp8_per_tensor_scale_moe{op_suffix}"
++    )
++    trtllm_fp8_block_scale_moe_op_name = (
++        f"flashinfer::trtllm_fp8_block_scale_moe{op_suffix}"
++    )
++    trtllm_fp4_block_scale_moe_op_name = (
++        f"flashinfer::trtllm_fp4_block_scale_moe{op_suffix}"
++    )
++    trtllm_mxint4_block_scale_moe_op_name = (
++        f"flashinfer::trtllm_mxint4_block_scale_moe{op_suffix}"
++    )
+ 
+     class MoERunner(TunableRunner):
+         # Cache valid tactics to reduce the overhead of re-querying the kernel.
+@@ -2865,6 +2906,7 @@ def trtllm_bf16_moe(
+     gemm1_beta: Optional[torch.Tensor] = None,
+     gemm1_clamp_limit: Optional[torch.Tensor] = None,
+     output: Optional[torch.Tensor] = None,
++    is_private: bool = False,
+ ) -> Union[List[torch.Tensor], torch.Tensor]:
+     r"""BF16 MoE operation with autotuning support.
+ 
+@@ -2998,7 +3040,7 @@ def trtllm_bf16_moe(
+         local_num_experts,
+         hidden_states.device,
+     )
+-    result = get_trtllm_moe_sm100_module().trtllm_bf16_moe(
++    result = get_trtllm_moe_sm100_module(is_private=is_private).trtllm_bf16_moe(
+         routing_logits,
+         routing_bias,
+         None,  # topk_ids
+@@ -3066,6 +3108,7 @@ def trtllm_bf16_routed_moe(
+     gemm1_beta: Optional[torch.Tensor] = None,
+     gemm1_clamp_limit: Optional[torch.Tensor] = None,
+     output: Optional[torch.Tensor] = None,
++    is_private: bool = False,
+ ) -> Union[torch.Tensor, List[torch.Tensor]]:
+     r"""Pre-routed BF16 MoE operation with autotuning support.
+ 
+@@ -3201,7 +3244,7 @@ def trtllm_bf16_routed_moe(
+         local_num_experts,
+         hidden_states.device,
+     )
+-    result = get_trtllm_moe_sm100_module().trtllm_bf16_moe(
++    result = get_trtllm_moe_sm100_module(is_private=is_private).trtllm_bf16_moe(
+         None,
+         None,
+         topk_ids,
+@@ -3269,6 +3312,7 @@ def trtllm_fp8_per_tensor_scale_moe(
+     norm_topk_prob: bool = True,
+     routing_replay_out: Optional[torch.Tensor] = None,
+     output: Optional[torch.Tensor] = None,
++    is_private: bool = False,
+ ) -> Union[List[torch.Tensor], torch.Tensor]:
+     r"""FP8 per-tensor-scale MoE operation.
+ 
+@@ -3359,7 +3403,7 @@ def trtllm_fp8_per_tensor_scale_moe(
+         ``[gemm2_output, expert_weights, expanded_idx_to_permuted_idx]``.
+     """
+     _validate_routing_replay_out(routing_replay_out, top_k)
+-    result = get_trtllm_moe_sm100_module().trtllm_fp8_per_tensor_scale_moe(
++    result = get_trtllm_moe_sm100_module(is_private=is_private).trtllm_fp8_per_tensor_scale_moe(
+         routing_logits,
+         routing_bias,
+         hidden_states,
+@@ -3429,6 +3473,7 @@ def trtllm_fp8_block_scale_moe(
+     gemm1_beta: Optional[torch.Tensor] = None,
+     gemm1_clamp_limit: Optional[torch.Tensor] = None,
+     output: Optional[torch.Tensor] = None,
++    is_private: bool = False,
+ ) -> Union[List[torch.Tensor], torch.Tensor]:
+     r"""FP8 block-scaled MoE operation.
+ 
+@@ -3576,7 +3621,7 @@ def trtllm_fp8_block_scale_moe(
+         gemm1_beta,
+         gemm1_clamp_limit,
+     )
+-    result = get_trtllm_moe_sm100_module().trtllm_fp8_block_scale_moe(
++    result = get_trtllm_moe_sm100_module(is_private=is_private).trtllm_fp8_block_scale_moe(
+         routing_logits,
+         None,  # topk_ids - will be computed from routing_logits
+         None,  # expert_weights - will be computed from routing_logits
+@@ -3653,6 +3698,7 @@ def trtllm_fp8_block_scale_routed_moe(
+     gemm1_alpha: Optional[torch.Tensor] = None,
+     gemm1_beta: Optional[torch.Tensor] = None,
+     gemm1_clamp_limit: Optional[torch.Tensor] = None,
++    is_private: bool = False,
+ ) -> Union[List[torch.Tensor], torch.Tensor]:
+     r"""Pre-routed FP8 block-scaled MoE operation.
+ 
+@@ -3791,7 +3837,7 @@ def trtllm_fp8_block_scale_routed_moe(
+         gemm1_beta,
+         gemm1_clamp_limit,
+     )
+-    result = get_trtllm_moe_sm100_module().trtllm_fp8_block_scale_moe(
++    result = get_trtllm_moe_sm100_module(is_private=is_private).trtllm_fp8_block_scale_moe(
+         None,  # routing_logits
+         topk_ids,
+         None,  # expert_weights
+@@ -3871,6 +3917,7 @@ def trtllm_fp4_block_scale_moe(
+     tune_max_num_tokens: int = 8192,
+     norm_topk_prob: bool = True,
+     routing_replay_out: Optional[torch.Tensor] = None,
++    is_private: bool = False,
+ ) -> List[torch.Tensor]:
+     r"""FP4 block-scaled MoE operation.
+ 
+@@ -3988,7 +4035,7 @@ def trtllm_fp4_block_scale_moe(
+         path and fp32 ``DeepSeekV3`` logits.
+     """
+     _validate_routing_replay_out(routing_replay_out, top_k)
+-    return get_trtllm_moe_sm100_module().trtllm_fp4_block_scale_moe(
++    return get_trtllm_moe_sm100_module(is_private=is_private).trtllm_fp4_block_scale_moe(
+         RoutingInputMode.FromLogits,
+         routing_logits,
+         None,
+@@ -4061,6 +4108,7 @@ def trtllm_fp4_block_scale_routed_moe(
+     per_token_scale: Optional[torch.Tensor] = None,
+     output: Optional[torch.Tensor] = None,
+     tune_max_num_tokens: int = 8192,
++    is_private: bool = False,
+ ) -> List[torch.Tensor]:
+     """FP4 block scale MoE operation with pre-computed routing.
+ 
+@@ -4182,7 +4230,7 @@ def trtllm_fp4_block_scale_routed_moe(
+         topk_weights = None
+         routing_mode = RoutingInputMode.PackedPrecomputed
+ 
+-    return get_trtllm_moe_sm100_module().trtllm_fp4_block_scale_moe(
++    return get_trtllm_moe_sm100_module(is_private=is_private).trtllm_fp4_block_scale_moe(
+         routing_mode,
+         None,
+         topk_ids_tensor,
+@@ -4248,6 +4296,7 @@ def trtllm_mxint4_block_scale_moe(
+     tune_max_num_tokens: int = 8192,
+     norm_topk_prob: bool = True,
+     routing_replay_out: Optional[torch.Tensor] = None,
++    is_private: bool = False,
+ ) -> List[torch.Tensor]:
+     r"""MXINT4 block-scaled MoE operation.
+ 
+@@ -4337,7 +4386,7 @@ def trtllm_mxint4_block_scale_moe(
+         ``[gemm2_output, expert_weights, expanded_idx_to_permuted_idx]``.
+     """
+     _validate_routing_replay_out(routing_replay_out, top_k)
+-    return get_trtllm_moe_sm100_module().trtllm_mxint4_block_scale_moe(
++    return get_trtllm_moe_sm100_module(is_private=is_private).trtllm_mxint4_block_scale_moe(
+         routing_logits,
+         routing_bias,
+         None,  # topk_ids
+@@ -4394,6 +4443,7 @@ def trtllm_mxint4_block_scale_routed_moe(
+     gemm1_lora_delta: Optional[torch.Tensor] = None,
+     output: Optional[torch.Tensor] = None,
+     tune_max_num_tokens: int = 8192,
++    is_private: bool = False,
+ ) -> List[torch.Tensor]:
+     """MxInt4 block-scale MoE with pre-computed routing.
+ 
+@@ -4490,7 +4540,7 @@ def trtllm_mxint4_block_scale_routed_moe(
+         ``False``      ``Tensor``          ``[gemm2_output, expert_weights, expanded_idx_to_permuted_idx, gemm1_activation_output]``
+         =============  ==================  =========================================================================
+     """
+-    return get_trtllm_moe_sm100_module().trtllm_mxint4_block_scale_moe(
++    return get_trtllm_moe_sm100_module(is_private=is_private).trtllm_mxint4_block_scale_moe(
+         None,  # routing_logits
+         None,  # routing_bias
+         topk_ids,
+diff --git a/flashinfer/jit/env.py b/flashinfer/jit/env.py
+index 5623022..e44e68e 100644
+--- a/flashinfer/jit/env.py
++++ b/flashinfer/jit/env.py
+@@ -95,6 +95,14 @@ def _get_cubin_dir():
+ 
+ 
+ FLASHINFER_CUBIN_DIR: pathlib.Path = _get_cubin_dir()
++# Optional directory holding a private local-cubin MoE export pool. Required when
++# calling the trtllm-gen MoE APIs with ``is_private=True`` (e.g. the SiTU
++# activation pool); see instruction.md. ``None`` when the env var is unset.
++FLASHINFER_PRIVATE_CUBIN_DIR: pathlib.Path | None = (
++    pathlib.Path(os.environ["FLASHINFER_PRIVATE_CUBIN_DIR"])
++    if os.getenv("FLASHINFER_PRIVATE_CUBIN_DIR")
++    else None
++)
+ 
+ 
+ def _get_aot_dir():
+diff --git a/flashinfer/jit/fused_moe.py b/flashinfer/jit/fused_moe.py
+index 2e6bee2..47e4cab 100644
+--- a/flashinfer/jit/fused_moe.py
++++ b/flashinfer/jit/fused_moe.py
+@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
+ limitations under the License.
+ """
+ 
++import hashlib
+ from typing import List
+ 
+ from . import env as jit_env
+@@ -33,6 +34,7 @@ from .cubin_loader import (
+     verify_symlinked_headers,
+ )
+ from .gemm.cutlass.generate_kernels import generate_gemm_operations
++from .utils import write_bytes_if_different
+ 
+ BMM_EXPORT_HEADERS = [
+     "BatchedGemmEnums.h",
+@@ -243,41 +245,135 @@ def gen_cutlass_fused_moe_module(
+     )
+ 
+ 
+-def gen_trtllm_gen_fused_moe_sm100_module() -> JitSpec:
++def _resolve_private_moe_export_dir() -> tuple:
++    """Locate a private local-cubin MoE export pool from FLASHINFER_PRIVATE_CUBIN_DIR.
++
++    Returns ``(export_dir, header_root)`` where ``export_dir`` holds
++    ``flashinferMetaInfo.h`` plus a ``local/`` directory of cubins, and
++    ``header_root`` holds the TRTLLM-Gen BMM export headers.
++    """
++    private_cubin_dir = jit_env.FLASHINFER_PRIVATE_CUBIN_DIR
++    if private_cubin_dir is None:
++        raise RuntimeError(
++            "is_private=True requires FLASHINFER_PRIVATE_CUBIN_DIR to point at "
++            "a private MoE cubin export directory."
++        )
++
++    candidates = [private_cubin_dir, private_cubin_dir / "moe"]
++    for candidate in candidates:
++        if (candidate / "flashinferMetaInfo.h").is_file():
++            break
++    else:
++        raise RuntimeError(
++            f"FLASHINFER_PRIVATE_CUBIN_DIR={private_cubin_dir!r} does not contain "
++            "a MoE export. Expected either flashinferMetaInfo.h directly in that "
++            "directory, or in its moe/ subdirectory."
++        )
++
++    if not (candidate / "local").is_dir():
++        raise RuntimeError(
++            f"Private MoE export {candidate} is missing local/*.cubin files."
++        )
++
++    header_candidates = [
++        candidate,
++        candidate / "trtllmGen_bmm_export",
++        candidate / "flashinfer" / "trtllm" / "batched_gemm" / "trtllmGen_bmm_export",
++    ]
++    for header_root in header_candidates:
++        if all((header_root / header).is_file() for header in BMM_EXPORT_HEADERS):
++            return candidate, header_root
++
++    raise RuntimeError(
++        f"Private MoE export {candidate} is missing TRTLLM-Gen BMM export headers."
++    )
++
++
++def gen_trtllm_gen_fused_moe_sm100_module(is_private: bool = False) -> JitSpec:
+     # Fetch "flashinferMetaInfo.h" from the online kernel cache. This file
+     # contains the `tllmGenBatchedGemmList` as the list of available kernels
+     # online. It is included when compiling `trtllm_fused_moe_runner.cu`, etc.
+     include_path = f"{ArtifactPath.TRTLLM_GEN_BMM}/include"
+     header_name = "flashinferMetaInfo"
+ 
+-    # Check if checksums.txt exists in the cubin directory
+-    checksum_path = f"{ArtifactPath.TRTLLM_GEN_BMM}/checksums.txt"
+-    checksum = get_artifact(checksum_path, CheckSumHash.TRTLLM_GEN_BMM)
+-    assert checksum, f"Failed to get checksums.txt from {checksum_path}"
+-    meta_hash = get_meta_hash(checksum)
+-
+-    # use `get_artifact` to get "flashinferMetaInfo.h"
+-    metainfo = get_artifact(
+-        f"{include_path}/{header_name}.h",
+-        meta_hash,
+-    )
+-    # make sure "flashinferMetaInfo.h" is downloaded or cached
+-    assert metainfo, f"{header_name}.h not found"
+-
+-    # Fetch BMM export headers via get_artifact() and symlink for C++ includes.
+-    bmm_export_path = f"{include_path}/trtllmGen_bmm_export"
+-    for header in BMM_EXPORT_HEADERS:
+-        h = get_artifact(f"{bmm_export_path}/{header}", get_meta_hash(checksum, header))
+-        assert h, f"{header} not found"
+-    symlink_path = (
+-        jit_env.FLASHINFER_CUBIN_DIR
+-        / "flashinfer"
+-        / "trtllm"
+-        / "batched_gemm"
+-        / "trtllmGen_bmm_export"
+-    )
+-    ensure_symlink(symlink_path, jit_env.FLASHINFER_CUBIN_DIR / bmm_export_path)
+-    verify_symlinked_headers(symlink_path, BMM_EXPORT_HEADERS, checksum)
++    if is_private:
++        # Private local-cubin MoE pool (e.g. the SiTU activation pool). The
++        # metainfo + BMM export headers are read from disk; the module compiles
++        # with hidden FFI symbols so it can coexist with the public module.
++        local_dir, header_root = _resolve_private_moe_export_dir()
++        metainfo = (local_dir / f"{header_name}.h").read_bytes()
++        content_hash = hashlib.sha256(metainfo).hexdigest()[:8]
++        private_include_root = (
++            jit_env.FLASHINFER_CACHE_DIR / "private_cubin_headers" / "moe" / content_hash
++        )
++        header_dest_dir = (
++            private_include_root
++            / "flashinfer"
++            / "trtllm"
++            / "batched_gemm"
++            / "trtllmGen_bmm_export"
++        )
++        write_bytes_if_different(header_dest_dir / f"{header_name}.h", metainfo)
++        for header in BMM_EXPORT_HEADERS:
++            write_bytes_if_different(
++                header_dest_dir / header, (header_root / header).read_bytes()
++            )
++        cubin_path = str((local_dir / "local").resolve())
++        module_name = f"fused_moe_trtllm_sm100_private_hidden_ffi_lean_{content_hash}"
++        extra_cflags = ["-fvisibility=hidden"]
++        extra_cuda_private_cflags = [
++            "-DTLLM_GEN_LOCAL_CUBINS_ABI",
++            "-DFLASHINFER_PRIVATE_MOE_FFI_NAMES",
++            "-DFLASHINFER_PRIVATE_MOE_LEAN_ROUTING",
++            "-Xcompiler=-fvisibility=hidden",
++        ]
++        extra_include_paths = [
++            private_include_root,
++            header_dest_dir,
++            jit_env.FLASHINFER_CSRC_DIR / "nv_internal",
++            jit_env.FLASHINFER_CSRC_DIR / "nv_internal/include",
++        ]
++    else:
++        # Check if checksums.txt exists in the cubin directory
++        checksum_path = f"{ArtifactPath.TRTLLM_GEN_BMM}/checksums.txt"
++        checksum = get_artifact(checksum_path, CheckSumHash.TRTLLM_GEN_BMM)
++        assert checksum, f"Failed to get checksums.txt from {checksum_path}"
++        meta_hash = get_meta_hash(checksum)
++
++        # use `get_artifact` to get "flashinferMetaInfo.h"
++        metainfo = get_artifact(
++            f"{include_path}/{header_name}.h",
++            meta_hash,
++        )
++        # make sure "flashinferMetaInfo.h" is downloaded or cached
++        assert metainfo, f"{header_name}.h not found"
++
++        # Fetch BMM export headers via get_artifact() and symlink for C++ includes.
++        bmm_export_path = f"{include_path}/trtllmGen_bmm_export"
++        for header in BMM_EXPORT_HEADERS:
++            h = get_artifact(
++                f"{bmm_export_path}/{header}", get_meta_hash(checksum, header)
++            )
++            assert h, f"{header} not found"
++        symlink_path = (
++            jit_env.FLASHINFER_CUBIN_DIR
++            / "flashinfer"
++            / "trtllm"
++            / "batched_gemm"
++            / "trtllmGen_bmm_export"
++        )
++        ensure_symlink(symlink_path, jit_env.FLASHINFER_CUBIN_DIR / bmm_export_path)
++        verify_symlinked_headers(symlink_path, BMM_EXPORT_HEADERS, checksum)
++        cubin_path = ArtifactPath.TRTLLM_GEN_BMM
++        module_name = "fused_moe_trtllm_sm100"
++        extra_cflags = []
++        extra_cuda_private_cflags = []
++        extra_include_paths = [
++            jit_env.FLASHINFER_CUBIN_DIR,
++            jit_env.FLASHINFER_CUBIN_DIR / include_path,
++            jit_env.FLASHINFER_CSRC_DIR / "nv_internal",
++            jit_env.FLASHINFER_CSRC_DIR / "nv_internal/include",
++        ]
+ 
+     # currently only support Blackwell
+     nvcc_flags = current_compilation_context.get_nvcc_flags_list(
+@@ -285,7 +381,7 @@ def gen_trtllm_gen_fused_moe_sm100_module() -> JitSpec:
+     )
+ 
+     return gen_jit_spec(
+-        "fused_moe_trtllm_sm100",
++        module_name,
+         [
+             jit_env.FLASHINFER_CSRC_DIR / "nv_internal/cpp/kernels/quantization.cu",
+             jit_env.FLASHINFER_CSRC_DIR / "nv_internal/cpp/common/envUtils.cpp",
+@@ -315,13 +411,10 @@ def gen_trtllm_gen_fused_moe_sm100_module() -> JitSpec:
+             "-DENABLE_FP8",
+             "-DENABLE_FP4",
+             "-DCUTLASS_ENABLE_GDC_FOR_SM100=1",
+-            f'-DTLLM_GEN_GEMM_CUBIN_PATH=\\"{ArtifactPath.TRTLLM_GEN_BMM}\\"',
++            f'-DTLLM_GEN_GEMM_CUBIN_PATH=\\"{cubin_path}\\"',
+         ]
++        + extra_cuda_private_cflags
+         + nvcc_flags,
+-        extra_include_paths=[
+-            jit_env.FLASHINFER_CUBIN_DIR,
+-            jit_env.FLASHINFER_CUBIN_DIR / include_path,
+-            jit_env.FLASHINFER_CSRC_DIR / "nv_internal",
+-            jit_env.FLASHINFER_CSRC_DIR / "nv_internal/include",
+-        ],
++        extra_cflags=extra_cflags,
++        extra_include_paths=extra_include_paths,
+     )
+diff --git a/flashinfer/jit/utils.py b/flashinfer/jit/utils.py
+index befd37d..27e6c59 100644
+--- a/flashinfer/jit/utils.py
++++ b/flashinfer/jit/utils.py
+@@ -30,6 +30,15 @@ def write_if_different(path: pathlib.Path, content: str) -> None:
+         f.write(content)
+ 
+ 
++def write_bytes_if_different(path: pathlib.Path, content: bytes) -> None:
++    if path.exists():
++        stat = path.stat()
++        if stat.st_size == len(content) and path.read_bytes() == content:
++            return
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_bytes(content)
++
++
+ dtype_map = {
+     torch.float16: "half",
+     torch.bfloat16: "nv_bfloat16",
+diff --git a/flashinfer/tllm_enums.py b/flashinfer/tllm_enums.py
+index 6b7e6c8..79ff8a2 100644
+--- a/flashinfer/tllm_enums.py
++++ b/flashinfer/tllm_enums.py
+@@ -48,7 +48,12 @@ class ActivationType(IntEnum):
+     SwigluStep = 7
+     GegluTanh = 8
+     Identity = 9
+-    InvalidType = 10
++    # SiTU fused gated activation (SiTuGlu). Only served by private local-cubin
++    # MoE pools (``is_private=True`` + ``FLASHINFER_PRIVATE_CUBIN_DIR``); see
++    # ``instruction.md``. Value must match ``ActivationType::Situ`` in
++    # ``include/flashinfer/trtllm/fused_moe/runner.h``.
++    Situ = 10
++    InvalidType = 11
+ 
+     # Eval-safe repr — see ``RoutingMethodType.__repr__``.
+     def __repr__(self) -> str:
+@@ -66,6 +71,7 @@ _GATED_ACTIVATION_TYPES = (
+     ActivationType.SwigluBias,
+     ActivationType.SwigluStep,
+     ActivationType.GegluTanh,
++    ActivationType.Situ,
+ )
+ 
+ 
+diff --git a/include/flashinfer/cubin_loader.h b/include/flashinfer/cubin_loader.h
+index 39c2616..1499ce1 100644
+--- a/include/flashinfer/cubin_loader.h
++++ b/include/flashinfer/cubin_loader.h
+@@ -30,11 +30,21 @@
+ // This is a C API so that we can use it with ctypes and don't rely on pybind11,
+ // because pybind11 support of arbitrary callback requires >=python3.11.
+ 
++// Force default visibility on the ctypes entry point so it stays exported even
++// when the module is compiled with -fvisibility=hidden (e.g. private local-cubin
++// MoE modules); otherwise setup_cubin_loader() cannot resolve the symbol.
++#if defined(__GNUC__)
++#define FLASHINFER_CUBIN_LOADER_API __attribute__((visibility("default")))
++#else
++#define FLASHINFER_CUBIN_LOADER_API
++#endif
++
+ // Callback into the python function that will get us the requested cubin.
+ void (*callbackGetCubin)(const char* path, const char* sha256) = nullptr;
+ 
+ // Set the python callback, called by the python code using ctypes.
+-extern "C" void FlashInferSetCubinCallback(void (*callback)(const char* path, const char* sha256)) {
++extern "C" FLASHINFER_CUBIN_LOADER_API void FlashInferSetCubinCallback(
++    void (*callback)(const char* path, const char* sha256)) {
+   callbackGetCubin = callback;
+ }
+ 
+@@ -43,7 +53,8 @@ extern "C" void FlashInferSetCubinCallback(void (*callback)(const char* path, co
+ thread_local std::string current_cubin;
+ 
+ // Called by the callback to set the current cubin.
+-extern "C" void FlashInferSetCurrentCubin(const char* binary, int size) {
++extern "C" FLASHINFER_CUBIN_LOADER_API void FlashInferSetCurrentCubin(const char* binary,
++                                                                      int size) {
+   current_cubin = std::string(binary, size);
+ }
+ 
+diff --git a/include/flashinfer/trtllm/batched_gemm/KernelRunner.h b/include/flashinfer/trtllm/batched_gemm/KernelRunner.h
+index b886d14..80bc7e0 100644
+--- a/include/flashinfer/trtllm/batched_gemm/KernelRunner.h
++++ b/include/flashinfer/trtllm/batched_gemm/KernelRunner.h
+@@ -46,6 +46,12 @@ enum class ActType {
+   // where x0 and x1 are the raw numbers from Gemm, while scaleC and scaleGate are input scales,
+   // beta' = beta / scaleAb, scaleC' = scaleC * scaleAb.
+   GeGlu,
++#ifdef TLLM_GEN_LOCAL_CUBINS_ABI
++  // Private local cubin pools may contain SiTU fused activation kernels.
++  SiTuGlu,
++  // Placeholder for no activation; not implemented in codegen.
++  None,
++#endif
+ };
+ 
+ // Type of the element-wise activation to apply after the Gemm
+diff --git a/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh b/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
+index 896ba04..120da37 100644
+--- a/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
++++ b/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
+@@ -54,6 +54,8 @@ namespace moe::dev::routing {
+ struct NoOpPreprocess {
+   /// Opts into the block-per-token kernel (provides applyToSmem below).
+   static constexpr bool kSupportsBlockPerToken = true;
++  /// Copying scores alone does not amortize an extra kernel at the static-block boundary.
++  static constexpr bool kBenefitsFromBlockParallelism = false;
+ 
+   /// BaseType: when no preprocess is applied, use the input type directly.
+   template <typename InputT>
+@@ -87,6 +89,8 @@ struct NoOpPreprocess {
+ struct SoftmaxPreprocess {
+   /// Opts into the block-per-token kernel (provides applyToSmem below).
+   static constexpr bool kSupportsBlockPerToken = true;
++  /// Block-wide reductions and three score passes benefit from one block per token.
++  static constexpr bool kBenefitsFromBlockParallelism = true;
+ 
+   /// BaseType: softmax is always computed in float for numerical stability.
+   template <typename InputT>
+@@ -162,6 +166,8 @@ struct SoftmaxPreprocess {
+ struct SigmoidPreprocess {
+   /// Opts into the block-per-token kernel (provides applyToSmem below).
+   static constexpr bool kSupportsBlockPerToken = true;
++  /// Per-expert sigmoid work benefits from one block per token at high expert counts.
++  static constexpr bool kBenefitsFromBlockParallelism = true;
+ 
+   /// BaseType: sigmoid is computed in float for numerical stability.
+   template <typename InputT>
+@@ -204,6 +210,8 @@ struct SigmoidPreprocess {
+ struct SigmoidBiasPreprocess {
+   /// Opts into the block-per-token kernel (provides applyToSmem below).
+   static constexpr bool kSupportsBlockPerToken = true;
++  /// Per-expert sigmoid and bias work benefits from one block per token.
++  static constexpr bool kBenefitsFromBlockParallelism = true;
+ 
+   /// BaseType: sigmoid is computed in float for numerical stability.
+   template <typename InputT>
+@@ -393,6 +401,7 @@ struct SumNormalizePostprocess {
+ struct ScaledSumNormalizePostprocess {
+   /// Opts into the block-per-token kernel (provides applyWithAux below).
+   static constexpr bool kSupportsBlockPerToken = true;
++  static constexpr bool kSupportsLaneOwnedTopK = true;
+ 
+   /// Needs per-expert aux data (un-biased sigmoid) in the block-per-token
+   /// kernel — paired with SigmoidBiasPreprocess, which writes the un-biased
+@@ -435,6 +444,41 @@ struct ScaledSumNormalizePostprocess {
+     }
+   }
+ 
++  /// Lane-owned TopK postprocess for warp-per-token kernels. The selected
++  /// score/expert are scalar values owned by laneIdx, so no K-element output
++  /// arrays need to be materialized in local memory.
++  template <typename DataType, typename ParamsT>
++  __forceinline__ __device__ static void applyForLane(cg::thread_block_tile<WarpSize> const& warp,
++                                                      DataType& laneTopKScore,
++                                                      int32_t laneTopKExpertIdx, int32_t laneIdx,
++                                                      int32_t topK, ParamsT const& params) {
++    float const biasVal =
++        laneIdx < topK ? loadScalar(params.ptrRoutingBias, laneTopKExpertIdx, params.dtypeBias)
++                       : 0.f;
++    float const sigmoidScore = laneIdx < topK ? static_cast<float>(laneTopKScore) - biasVal : 0.f;
++    float const sum = cg::reduce(warp, sigmoidScore, cg::plus<float>());
++    if (laneIdx < topK) {
++      laneTopKScore =
++          static_cast<DataType>(sigmoidScore * params.routeScale / (sum + params.sumEpsilon));
++    }
++  }
++
++  /// Lane-owned block-per-token variant. Reads the un-biased sigmoid from
++  /// smemAux just like applyWithAux, but consumes scalar TopK state.
++  template <typename DataType, typename SmemT, typename ParamsT>
++  __forceinline__ __device__ static void applyForLaneWithAux(
++      cg::thread_block_tile<WarpSize> const& warp, DataType& laneTopKScore,
++      int32_t laneTopKExpertIdx, int32_t laneIdx, int32_t topK, SmemT const* smemAux,
++      ParamsT const& params) {
++    float const sigmoidScore =
++        laneIdx < topK ? static_cast<float>(smemAux[laneTopKExpertIdx]) : 0.f;
++    float const sum = cg::reduce(warp, sigmoidScore, cg::plus<float>());
++    if (laneIdx < topK) {
++      laneTopKScore =
++          static_cast<DataType>(sigmoidScore * params.routeScale / (sum + params.sumEpsilon));
++    }
++  }
++
+   /// Block-per-token variant: read un-biased sigmoid directly from smemAux
+   /// (written by SigmoidBiasPreprocess::applyToSmem) instead of reloading bias
+   /// and subtracting.  Saves one global memory read + one FMA per top-K lane.
+@@ -491,6 +535,17 @@ struct PostprocessNeedsAux<PostprocessPolicy_, std::void_t<decltype(PostprocessP
+ template <typename PreprocessPolicy_, typename PostprocessPolicy_>
+ struct PolicyPairNeedsAux : PostprocessNeedsAux<PostprocessPolicy_> {};
+ 
++/// Does a postprocess policy implement the scalar lane-owned TopK interface?
++/// This is intentionally opt-in: adding a new policy cannot silently select a
++/// specialization whose numerical semantics it has not implemented.
++template <typename PostprocessPolicy_, typename = void>
++struct PostprocessSupportsLaneOwnedTopK : std::false_type {};
++
++template <typename PostprocessPolicy_>
++struct PostprocessSupportsLaneOwnedTopK<
++    PostprocessPolicy_, std::void_t<decltype(PostprocessPolicy_::kSupportsLaneOwnedTopK)>>
++    : std::bool_constant<PostprocessPolicy_::kSupportsLaneOwnedTopK> {};
++
+ /// Trait: does a (pre, post) policy pair implement the block-per-token
+ /// interface (`PreProc::applyToSmem` + `PostProc::applyWithAux`) and
+ /// therefore opt in to `routingIndicesBlockScoresKernel`?  A pair opts in
+@@ -569,6 +624,35 @@ struct TopKExpertSelect {
+     PostprocessPolicy_::apply(warp, warpTopKScore, warpTopKExpertIdx, laneIdx, topK,
+                               params.mExpertSelectParams.mPostprocessParams);
+   }
++
++  /// Lane-owned TopK variant. It shares the generic preprocess and exact
++  /// comparison/tie-breaking logic, but returns only the result consumed by
++  /// laneIdx. Callers gate this method with PostprocessSupportsLaneOwnedTopK.
++  template <typename DataType, typename InputType, int VecSize, int K, typename KP>
++  __forceinline__ __device__ static void applyForLane(cg::thread_block_tile<WarpSize> const& warp,
++                                                      DataType& laneTopKScore,
++                                                      int32_t& laneTopKExpertIdx, int32_t laneIdx,
++                                                      int32_t numExperts, int32_t topK,
++                                                      InputType const* ptrScores,
++                                                      KP const& params) {
++    DataType const minScore = DataType{-INFINITY};
++    DataType score[VecSize];
++    int32_t idx[VecSize];
++
++#pragma unroll
++    for (int i = 0; i < VecSize; ++i) {
++      int32_t const expertIdx = i * WarpSize + laneIdx;
++      score[i] = expertIdx < numExperts ? static_cast<DataType>(ptrScores[expertIdx]) : minScore;
++      idx[i] = expertIdx;
++    }
++
++    PreprocessPolicy_::apply(warp, score, idx, numExperts,
++                             params.mExpertSelectParams.mPreprocessParams);
++    topk::reduceTopKForLane<K>(warp, laneTopKScore, laneTopKExpertIdx, score, idx, minScore,
++                               laneIdx);
++    PostprocessPolicy_::applyForLane(warp, laneTopKScore, laneTopKExpertIdx, laneIdx, topK,
++                                     params.mExpertSelectParams.mPostprocessParams);
++  }
+ };
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+@@ -584,6 +668,7 @@ static constexpr int NumExperts256Experts = 256;
+ static constexpr int NumExperts384Experts = 384;
+ static constexpr int NumExperts512Experts = 512;
+ static constexpr int NumExperts576Experts = 576;
++static constexpr int NumExperts896Experts = 896;
+ static constexpr int NumExperts1024Experts = 1024;
+ static constexpr int MaxSupportedExperts = 2048;
+ 
+@@ -619,6 +704,8 @@ inline int32_t getMaxNumExperts(int32_t numExperts) {
+     return NumExperts512Experts;
+   } else if (numExperts <= NumExperts576Experts) {
+     return NumExperts576Experts;
++  } else if (numExperts <= NumExperts896Experts) {
++    return NumExperts896Experts;
+   } else if (numExperts <= NumExperts1024Experts) {
+     return NumExperts1024Experts;
+   } else if (numExperts <= MaxSupportedExperts) {
+@@ -697,6 +784,13 @@ struct PolicyTraits<SoftmaxPreprocess, NoOpPostprocess> {
+ /// None + Softmax (Renormalize): many model configs.
+ template <>
+ struct PolicyTraits<NoOpPreprocess, SoftmaxPostprocess> {
++#ifdef FLASHINFER_PRIVATE_MOE_LEAN_ROUTING
++  // Private SiTU local-cubin JIT only needs the same large-model envelope as
++  // the v0.6.6 SiTU branch: E<=1024 and K<=16, plus small/medium model tiers.
++  // This trims routing-kernel instantiations to keep the private JIT lean.
++  using Pairs = TierList<Tier<128, 4>, Tier<128, 8>, Tier<160, 8>, Tier<256, 8>, Tier<256, 16>,
++                         Tier<512, 8>, Tier<512, 16>, Tier<896, 16>, Tier<1024, 16>>;
++#else
+   using Pairs = TierList<Tier<128, 4>,    // Mixtral 8x7B (topK=2), Qwen2-MoE (topK=4), Arctic
+                                           // (topK=2), DBRX (topK=4), GPT-OSS
+                          Tier<128, 8>,    // DeepSeek-V2-Lite (topK=6), Mixtral 8x22B (topK=2)
+@@ -709,9 +803,11 @@ struct PolicyTraits<NoOpPreprocess, SoftmaxPostprocess> {
+                          Tier<512, 32>,   // 512-expert models with topK 23..32
+                          Tier<576, 8>,    // Customized model with 576 experts
+                          Tier<768, 32>,   // 576..768 experts with high topK
+-                         Tier<1024, 32>,  // 768..1024 experts with high topK
++                         Tier<896, 16>,   // 769..896 experts with topK <=16
++                         Tier<1024, 32>,  // 896..1024 experts with high topK
+                          Tier<2048, 32>   // Large-expert fallback
+                          >;
++#endif
+ };
+ 
+ /// Sigmoid + SumNormalize (SigmoidRenorm: Sigmoid -> TopK -> Renormalize,
+@@ -727,13 +823,19 @@ struct PolicyTraits<SigmoidPreprocess, SumNormalizePostprocess> {
+ /// SigmoidBias + ScaledSumNormalize (DeepSeek nGroup≤1 / MiniMax2 / Kimi-K2 / Nemotron SuperV3).
+ template <>
+ struct PolicyTraits<SigmoidBiasPreprocess, ScaledSumNormalizePostprocess> {
++#ifdef FLASHINFER_PRIVATE_MOE_LEAN_ROUTING
++  using Pairs = TierList<Tier<128, 8>, Tier<256, 8>, Tier<384, 8>, Tier<512, 8>, Tier<896, 16>,
++                         Tier<1024, 16>>;
++#else
+   using Pairs = TierList<Tier<128, 8>,  // Small expert counts (≤128 experts, e.g. DeepSeek-V2-Lite)
+                          Tier<256, 8>,  // MiniMax M2 (256 experts, topK=6)
+                          Tier<384, 8>,  // Kimi K2 (384 experts)
+                          Tier<512, 8>,  // DeepSeek nGroup≤1 (256 experts → E512 fallback)
+                          Tier<512, 22>,  // Nemotron Super V3 (512 experts, topK=22, nGroup≤1)
+-                         Tier<1024, 32>  // Default fallback (expert count may grow beyond 512)
++                         Tier<896, 16>,  // 513..896 experts with topK <=16
++                         Tier<1024, 32>  // Default fallback (expert count may grow beyond 896)
+                          >;
++#endif
+ };
+ 
+ /// None + None (TopK only: no softmax or renormalize).
+@@ -864,6 +966,10 @@ struct DefaultRoutingLaunchConfig {
+     LAUNCH_ROUTING_WITH_POLICIES(data, coopLaunch, kernel, numBlocks, numThreads, smemSize,        \
+                                  stream, NoOpPreprocess, NoOpPostprocess, NumExperts576Experts,    \
+                                  NumTop8Experts);                                                  \
++  } else if (data.mNumExperts <= NumExperts896Experts) {                                           \
++    LAUNCH_ROUTING_WITH_POLICIES(data, coopLaunch, kernel, numBlocks, numThreads, smemSize,        \
++                                 stream, NoOpPreprocess, NoOpPostprocess, NumExperts896Experts,    \
++                                 NumTop8Experts);                                                  \
+   } else if (data.mNumExperts <= NumExperts1024Experts) {                                          \
+     LAUNCH_ROUTING_WITH_POLICIES(data, coopLaunch, kernel, numBlocks, numThreads, smemSize,        \
+                                  stream, NoOpPreprocess, NoOpPostprocess, NumExperts1024Experts,   \
+@@ -884,6 +990,20 @@ struct DefaultRoutingLaunchConfig {
+ // string for diagnostics.
+ template <typename Fn>
+ inline void dispatchRoutingPolicy(Data const& data, Fn&& fn) {
++#ifdef FLASHINFER_PRIVATE_MOE_LEAN_ROUTING
++  // Private lean routing instantiates only the two policies the SiTU pool needs,
++  // trimming compile time / binary size for the private JIT module.
++  if (data.mPreprocessType == RoutingPreprocessType::SigmoidBias) {
++    fn(SigmoidBiasPreprocess{}, ScaledSumNormalizePostprocess{},
++       "SigmoidBiasPreprocess+ScaledSumNormalizePostprocess");
++  } else if (data.mPostprocessType == RoutingPostprocessType::Softmax) {
++    fn(NoOpPreprocess{}, SoftmaxPostprocess{}, "NoOpPreprocess+SoftmaxPostprocess");
++  } else {
++    FLASHINFER_CHECK(false,
++                     "Private lean routing supports only SigmoidBias+ScaledSumNormalize and "
++                     "precomputed/renormalize post-topK routing policies.");
++  }
++#else
+   if (data.mPreprocessType == RoutingPreprocessType::SigmoidBias)
+     fn(SigmoidBiasPreprocess{}, ScaledSumNormalizePostprocess{},
+        "SigmoidBiasPreprocess+ScaledSumNormalizePostprocess");
+@@ -898,6 +1018,7 @@ inline void dispatchRoutingPolicy(Data const& data, Fn&& fn) {
+     fn(NoOpPreprocess{}, SoftmaxPostprocess{}, "NoOpPreprocess+SoftmaxPostprocess");
+   else
+     fn(NoOpPreprocess{}, NoOpPostprocess{}, "NoOpPreprocess+NoOpPostprocess");
++#endif
+ }
+ 
+ // Query the MaxNumExperts that the policy tier dispatch would select for the given data.
+@@ -923,6 +1044,22 @@ inline bool queryPolicySupportsBlockPerToken(Data const& data) {
+   return supports;
+ }
+ 
++// Whether the active (pre, post) policy has a compiled tier covering the runtime
++// (numExperts, topK) under the standard PolicyTraits dispatch — i.e. the tier list
++// LAUNCH_ROUTING_CUSTOM uses (block / dyn-block kernels and the cluster fallback).
++// Mirrors the dispatch predicate exactly (same policy resolution, same tier list,
++// same runtime comparison), so it reports precisely whether that launch would find
++// a tier. Lets host-side launchers surface an uncovered config as a loud error
++// instead of silently skipping the launch and leaving routing outputs uninitialized.
++inline bool queryPolicyHasCompiledTier(Data const& data) {
++  bool covered = false;
++  dispatchRoutingPolicy(data, [&](auto preProc_, auto postProc_, char const* /*policyName*/) {
++    using Pairs_ = typename PolicyTraits<decltype(preProc_), decltype(postProc_)>::Pairs;
++    covered = dispatchTierPairs(static_cast<Pairs_*>(nullptr), data, [](auto, auto) {});
++  });
++  return covered;
++}
++
+ // Top-level dispatch: maps runtime preprocess/postprocess enums to compile-time policy types,
+ // then delegates to the policy tier list using the supplied launch config.
+ #define LAUNCH_ROUTING_CUSTOM_WITH_CONFIG(data, coopLaunch, kernel, numBlocks, numThreads,       \
+diff --git a/include/flashinfer/trtllm/fused_moe/RoutingKernel.cuh b/include/flashinfer/trtllm/fused_moe/RoutingKernel.cuh
+index 6ee03c8..552d297 100644
+--- a/include/flashinfer/trtllm/fused_moe/RoutingKernel.cuh
++++ b/include/flashinfer/trtllm/fused_moe/RoutingKernel.cuh
+@@ -267,12 +267,16 @@ __device__ void routingPermutation(KernelParams params,
+   using OutputT = typename KernelParams::OutputT;
+   using TypePacked = PackedScoreIdx<BaseType>;
+ 
+-  // When MaxNumExperts > NumThreads, each thread handles multiple experts.
++  // When MaxNumExperts > NumThreads, each thread handles multiple experts. Use ceiling division
++  // so non-divisible expert tiers (notably E=896 with 256- or 512-thread cluster blocks) are
++  // represented by a zero-padded tail in the block scan. Every shared-memory/global-memory access
++  // below is guarded by expert < params.mNumExperts, so the padded items exist only in registers
++  // and contribute zero to the scan.
+   static constexpr int MaxNumExperts = KernelParams::MaxNumExperts;
+   static constexpr int ExpertsPerThread =
+-      MaxNumExperts <= NumThreads ? 1 : MaxNumExperts / NumThreads;
+-  static_assert(MaxNumExperts <= NumThreads || MaxNumExperts % NumThreads == 0,
+-                "MaxNumExperts must be <= NumThreads or a multiple of NumThreads");
++      MaxNumExperts <= NumThreads ? 1 : (MaxNumExperts + NumThreads - 1) / NumThreads;
++  static_assert(ExpertsPerThread * NumThreads >= MaxNumExperts,
++                "Thread-local expert slots must cover MaxNumExperts");
+ 
+   static constexpr int MaxNumTokensSingleCluster = NumBlocksPerCluster * NumThreads;
+   // Number of threads in the cluster.
+@@ -968,8 +972,13 @@ __global__ void __launch_bounds__(KernelParams::MaxNumExperts)
+   // needed for the exclusive sum of token offsets
+   using Scan = cub::BlockScan<int32_t, NumThreads, cub::BLOCK_SCAN_WARP_SCANS>;
+   __shared__ typename Scan::TempStorage tempStorage;
+-  // 64 elements -> 128+ registers. Above that we may start to see spilling to local memory.
+-  static constexpr int MaxExpandedIdxPerThread = 64;
++  // Lane-owned high-expert/high-topK tiers use this kernel only while four
++  // expanded indices per thread cover the runtime batch. Keeping the bounded
++  // range explicit lets the compiler scalarize the expert/offset state instead
++  // of spilling the generic 64-entry arrays to local memory.
++  static constexpr int MaxExpandedIdxPerThread =
++      topk::isInHighExpertLaneOwnedTopKRange(MaxNumExperts, KernelParams::MaxNumTopExperts) ? 4
++                                                                                            : 64;
+ 
+   // Initialize grid.
+   cg::grid_group grid = cg::this_grid();
+diff --git a/include/flashinfer/trtllm/fused_moe/RoutingKernelTopK.cuh b/include/flashinfer/trtllm/fused_moe/RoutingKernelTopK.cuh
+index cacc05c..765b778 100644
+--- a/include/flashinfer/trtllm/fused_moe/RoutingKernelTopK.cuh
++++ b/include/flashinfer/trtllm/fused_moe/RoutingKernelTopK.cuh
+@@ -320,6 +320,70 @@ __forceinline__ __device__ void reduceTopK(cg::thread_block_tile<WarpSize> const
+   }
+ };
+ 
++/// Capability envelope for the high-expert lane-owned routing specialization.
++/// This predicate is shared by compile-time tier selection and runtime dispatch;
++/// dispatch tables still decide which concrete tiers are instantiated.
++static constexpr int HighExpertLaneOwnedTopKMinExperts = 512;
++static constexpr int HighExpertLaneOwnedTopKMaxExperts = 1024;
++static constexpr int HighExpertLaneOwnedTopKMinTopExperts = 9;
++static constexpr int HighExpertLaneOwnedTopKMaxTopExperts = 16;
++
++__host__ __device__ constexpr bool isInHighExpertLaneOwnedTopKRange(int numExperts,
++                                                                    int numTopExperts) {
++  return numExperts >= HighExpertLaneOwnedTopKMinExperts &&
++         numExperts <= HighExpertLaneOwnedTopKMaxExperts &&
++         numTopExperts >= HighExpertLaneOwnedTopKMinTopExperts &&
++         numTopExperts <= HighExpertLaneOwnedTopKMaxTopExperts;
++}
++
++// Exact-K variant that returns only the result owned by this lane. The generic
++// reduceTopK interface materializes K scores and K indices per thread even though
++// routing kernels ultimately consume only element laneIdx. For high-K tiers that
++// dynamic lane-indexed array is placed in local memory and can spill the sorted
++// candidates as well. Keeping a single packed result per lane lets nvcc scalarize
++// the output while preserving the same comparison and tie-breaking order.
++template <int K, typename Type, int N>
++__forceinline__ __device__ void reduceTopKForLane(cg::thread_block_tile<WarpSize> const& warp,
++                                                  Type& out, int32_t& outIdx, Type (&value)[N],
++                                                  int32_t (&idx)[N], Type const minValue,
++                                                  int32_t laneIdx) {
++  static_assert(K > 0, "Top K must have K > 0");
++  static_assert(K <= WarpSize, "Top K must have K <= WarpSize");
++  static_assert(N > 0, "Top K must have N > 0");
++  static_assert(N <= 64, "Only support candidates number less than or equal to 64*32=2048");
++  using RedType = TopKRedType<Type>;
++  RedType topK[N];
++#pragma unroll
++  for (int nn = 0; nn < N; ++nn) {
++    topK[nn] = RedType{value[nn], idx[nn]};
++  }
++
++  Sort<N, RedType>::run(topK);
++
++  typename RedType::TypeCmp packedMax{};
++  typename RedType::TypeCmp lanePacked{};
++#pragma unroll
++  for (int kk = 0; kk < K; ++kk) {
++    bool update = kk > 0 && packedMax == topK[0].compVal;
++#pragma unroll
++    for (int nn = 0; nn < N; ++nn) {
++      topK[nn] = update && nn == N - 1 ? RedType{minValue, idx[nn]}
++                 : update              ? topK[nn + 1]
++                                       : topK[nn];
++    }
++    packedMax = topK[0].reduce(warp);
++    if (laneIdx == kk) {
++      lanePacked = packedMax;
++    }
++  }
++
++  if (laneIdx < K) {
++    RedType::unpack(out, outIdx, lanePacked);
++  } else {
++    out = minValue;
++    outIdx = -1;
++  }
++}
+ #undef TOPK_SWAP
+ }  // namespace topk
+ }  // namespace moe::dev::routing
+diff --git a/include/flashinfer/trtllm/fused_moe/runner.h b/include/flashinfer/trtllm/fused_moe/runner.h
+index 1c43a04..63ae22e 100644
+--- a/include/flashinfer/trtllm/fused_moe/runner.h
++++ b/include/flashinfer/trtllm/fused_moe/runner.h
+@@ -168,7 +168,12 @@ enum class ActivationType : int64_t {
+   SwigluStep = 7,
+   GegluTanh = 8,
+   Identity = 9,
+-  InvalidType = 10,  // Must be last
++  // SiTU fused gated activation (SiTuGlu). Only served by private local-cubin
++  // MoE pools; kept numerically in sync with ActivationType.Situ in
++  // flashinfer/tllm_enums.py. Dispatch resolves to ActType::SiTuGlu regardless
++  // of this value (see csrc/trtllm_fused_moe_runner.cu).
++  Situ = 10,
++  InvalidType = 11,  // Must be last
+ };
+ 
+ inline std::string serializeActivationType(ActivationType activationType) {
+@@ -193,6 +198,8 @@ inline std::string serializeActivationType(ActivationType activationType) {
+       return "SwigluStep";
+     case ActivationType::GegluTanh:
+       return "GegluTanh";
++    case ActivationType::Situ:
++      return "Situ";
+     default:
+       return "InvalidActivationType";  // TODO throw error
+   };
+@@ -202,7 +209,8 @@ inline bool isGatedActivation(ActivationType activationType) {
+   return activationType == ActivationType::Swiglu || activationType == ActivationType::Geglu ||
+          activationType == ActivationType::SwigluBias ||
+          activationType == ActivationType::SwigluStep ||
+-         activationType == ActivationType::GegluTanh;
++         activationType == ActivationType::GegluTanh ||
++         activationType == ActivationType::Situ;
+ }
+ 
+ }  // namespace MoE
