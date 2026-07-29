@@ -422,7 +422,7 @@ RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /e
 # installed modelexpress package, which must already exist when patches apply.
 # Pin torch/CUDA/vLLM so the install can't swap them (constraints from `pip list`,
 # not `pip freeze` which emits unusable `@ file://` lines).
-ARG MODELEXPRESS_REF=32922aed5e7c0b6e799eb440d8e512c247c1b580
+ARG MODELEXPRESS_REF=4a337b653ed9f189ab9f43706796dd3d7139e313
 RUN pip list 2>/dev/null | awk 'NR>2 {print $1"=="$2}' \
       | grep -iE '^(torch|torchvision|torchaudio|triton|xformers|vllm|nvidia-[a-z0-9_-]+)==' \
       > /tmp/mx-constraints.txt && \
