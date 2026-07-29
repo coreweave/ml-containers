@@ -1,0 +1,41 @@
+## Conversation
+User pushed the matrix from 3 entries -> 2 (cu13 branch + cu12 branch), then
+asked to prove cu12 end to end on GB300. The proof failed and revealed K3 is
+unbuildable on CUDA 12, so the collapse was reverted. User approved the revert.
+
+## Actions
+Built vllm-k3:arm64-658f2f56-cu1291-r1 (sha256:405bea05) on the cu12.9/torch
+2.13 base -- it BUILDS and passes all static checks (nvcc 12.9 in-image, Situ
+enum, 1696-cubin pool, is_private, DeepGEMM include fix in both copies).
+Deployed it (flashinfer TP8 + DSpark, same-domain pair sg6pg1k4/sg5pg1k4);
+both incarnations died ~8.5 min in at model init. Root-caused to vLLM
+CMakeLists gating. Reverted d3711ed and documented the blocker in the entry.
+
+## Errors & Mistakes
+Deployed the cu12 test WITHOUT arming a log capture first, despite knowing LWS
+RecreateGroupOnPodRestart destroys the failed pod's logs -- lost the first
+incarnation's traceback and had to wait a full second load (~9 min) to see it.
+Arm the capture at apply time for any LWS deployment whose outcome is unknown.
+
+## Dead Ends
+- cu12 for K3, closed by upstream gating (not by anything we can patch safely:
+  lowering the gate also requires rewriting 10.0f/12.0f arch specs).
+- Earlier speculation that sm_103a might not compile under nvcc 12.9: it does
+  (verified with a real kernel on a GB300 pod). That was not the blocker.
+
+## Hints for Future Agents
+If K3-on-CUDA-12 is ever needed: attn_res.py:191 gates the native kernel on
+current_platform.is_device_capability_family(100) only, while kda.py:74 also
+checks hasattr(torch.ops._C, "fused_kda_decode"). Adding the same hasattr
+guard to attn_res would make K3 fall back to its (existing, unreachable)
+Triton path under CUDA 12 -- upstream-worthy, perf unmeasured. The dead cu12
+images remain in the dev registry as vllm-k3{,-infr}:arm64-658f2f56-cu1291-r1.
+
+## Codebase Discoveries
+The cu12.9 vllm entry predates K3 by two releases (present at v0.25.1) and no
+file in the repo documents why it exists -- treat it as load-bearing for an
+unknown consumer until someone identifies them.
+
+## Open Questions
+Who consumes the cuda-12.9 vllm-tensorizer image, and does that consumer still
+need it? Worth asking in the PR rather than assuming.
