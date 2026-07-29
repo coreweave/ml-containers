@@ -212,7 +212,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       "${CUTLASS_DSL_PACKAGE}" \
       'apache-tvm-ffi==0.1.10' && \
-    export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
+    export FLASHINFER_LOCAL_VERSION="$(echo "${CUDA_VERSION}" | sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
     for DIR in . flashinfer-cubin; do ( \
