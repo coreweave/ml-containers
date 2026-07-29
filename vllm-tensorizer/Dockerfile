@@ -418,4 +418,17 @@ ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
 # Re-prepend on login shells too (HPC-X's profile.d regenerates LD_LIBRARY_PATH; zz- sorts last).
 RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx-mt.sh
 
+# Install the ModelExpress client BEFORE patches: patch 0025 also patches the
+# installed modelexpress package, which must already exist when patches apply.
+# Pin torch/CUDA/vLLM so the install can't swap them (constraints from `pip list`,
+# not `pip freeze` which emits unusable `@ file://` lines).
+ARG MODELEXPRESS_REF=32922aed5e7c0b6e799eb440d8e512c247c1b580
+RUN pip list 2>/dev/null | awk 'NR>2 {print $1"=="$2}' \
+      | grep -iE '^(torch|torchvision|torchaudio|triton|xformers|vllm|nvidia-[a-z0-9_-]+)==' \
+      > /tmp/mx-constraints.txt && \
+    cat /tmp/mx-constraints.txt && \
+    MX_SKIP_EXT=1 pip install --no-cache-dir -c /tmp/mx-constraints.txt \
+      "modelexpress @ git+https://github.com/ai-dynamo/modelexpress@${MODELEXPRESS_REF}#subdirectory=modelexpress_client/python" && \
+    python3 -c "from modelexpress import register_modelexpress_loaders; print('modelexpress client OK')"
+
 EXPOSE 8080
