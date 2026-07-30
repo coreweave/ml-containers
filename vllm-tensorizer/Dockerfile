@@ -98,11 +98,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
-# Kimi-K3's MoE activation is SiTU which is not in any official release
-COPY flashinfer-v0.6.15.post1-situ-private-cubin-pool.patch /git/patch
-RUN git -C flashinfer apply -v --stat --apply /git/patch && \
-    rm /git/patch
-
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
@@ -118,14 +113,6 @@ ARG INFINISTORE_COMMIT='553e36296ff1da2630636e7385b56224ff74a47c'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/bytedance/InfiniStore && \
     git -C InfiniStore checkout "${INFINISTORE_COMMIT}"
-
-# Use the K3 upstream image as the source of K3 SiTu compiled cubins. This is the
-# multi-arch index digest, so each build platform resolves its own architecture
-# instead of dragging in a foreign-arch image; the amd64 and arm64 entries carry
-# byte-identical trees under /opt/flashinfer-local-cubins either way, since the
-# cubins target GPU architectures (sm100f/sm103a) rather than a host one.
-FROM vllm/vllm-openai:kimi-k3@sha256:e90e2603b2781936651ba019804137714367c69e10a7b25a2e57b46995225616 AS upstream-k3
-
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
@@ -282,17 +269,18 @@ RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/work
     /opt/build.sh
 
 FROM builder-base AS deepep-builder
-ARG DEEPEP_COMMIT='73b6ea4'
-ARG NVSHMEM_VER='3.3.24'
 # DeepEP requires SM 9.0+ (Hopper/Blackwell). Filter out pre-SM90 arches
 # so Blackwell (10.0) is also supported.
+# Do not pin DeepEP or NVSHMEM here: vLLM's ep_kernels script patches DeepEP's
+# sources and owns their revs. EP_NCCL_ROOT_DIR aims DeepEP at this image's
+# system NCCL; without it DeepEP links a pip NCCL rather than torch's.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/tmp/ep_kernels \
     python3 -m pip install --no-cache-dir uv && \
     . /opt/arch_flags.sh && \
+    ln -sf "/usr/lib/$(uname -m)-linux-gnu"/libnccl.so* /usr/lib/ && \
+    export EP_NCCL_ROOT_DIR=/usr && \
     export NVCC_WRAPPER_FILTER_CODES="sm_80;sm_89;compute_80;compute_89;${NVCC_WRAPPER_FILTER_CODES}" && \
     WORKSPACE=/tmp/deepep_build MODE=wheel \
-    DEEPEP_COMMIT_HASH="${DEEPEP_COMMIT}" \
-    NVSHMEM_VER="${NVSHMEM_VER}" \
     bash /tmp/ep_kernels/install_python_libraries.sh && \
     cp /tmp/deepep_build/dist/*.whl /wheels/ && \
     mkdir -p /nvshmem_libs && \
@@ -353,9 +341,6 @@ RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels 
     python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
 
-COPY --link --from=upstream-k3 /opt/flashinfer-local-cubins /opt/flashinfer-local-cubins
-ENV FLASHINFER_PRIVATE_CUBIN_DIR=/opt/flashinfer-local-cubins/20260617_v0613rc1_situ_v0611_barrierfix
-
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
@@ -366,11 +351,16 @@ RUN --mount=type=bind,from=lmcache-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
+# deep_ep bakes EP_NCCL_ROOT_DIR into the wheel and re-checks it at import time by
+# globbing <root>/lib, so the symlink the build needed has to exist here too.
 RUN --mount=type=bind,from=deepep-builder,source=/wheels,target=/tmp/wheels \
+    ln -sf "/usr/lib/$(uname -m)-linux-gnu"/libnccl.so* /usr/lib/ && \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
 COPY --link --from=deepep-builder /nvshmem_libs/ /usr/local/lib/
-RUN ldconfig
+# deep_ep's import asserts the NCCL it links matches the one loaded, so this has
+# to run after nvshmem is in place and ldconfig has run.
+RUN ldconfig && python3 -c 'import deep_ep; print("deep_ep import OK")'
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
