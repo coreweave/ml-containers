@@ -129,7 +129,7 @@ FROM vllm/vllm-openai:kimi-k3@sha256:e90e2603b2781936651ba019804137714367c69e10a
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='f5a76426fa084087169693fd0cd815223576d6e9'
+ARG DEEPGEMM_COMMIT='a6b593d2826719dcf4892609af7b84ee23aaf32a'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
