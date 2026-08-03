@@ -87,6 +87,11 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+# Local vLLM patch stack — backports that missed releases/v0.26.0.
+COPY vllm-patches/ /git/vllm-patches/
+RUN git -C vllm apply -v --stat --apply /git/vllm-patches/*.patch && \
+    rm -rf /git/vllm-patches
+
 
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
