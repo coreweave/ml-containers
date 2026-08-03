@@ -126,7 +126,10 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='a6b593d2826719dcf4892609af7b84ee23aaf32a'
+# Match _DEEPGEMM_UPSTREAM_TAG in vLLM's cmake/external_projects/deepgemm.cmake
+# at VLLM_COMMIT (vllm-project/DeepGEMM); a stale wheel drifts from the JIT
+# interface vLLM was built against and breaks FP8 MoE GEMMs at serve time.
+ARG DEEPGEMM_COMMIT='f5a76426fa084087169693fd0cd815223576d6e9'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
@@ -279,7 +282,11 @@ RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/work
     /opt/build.sh
 
 FROM builder-base AS deepep-builder
-ARG DEEPEP_COMMIT='73b6ea4'
+# Keep in lockstep with the DEEPEP_COMMIT_HASH default in vLLM's
+# tools/ep_kernels/install_python_libraries.sh at VLLM_COMMIT: that script
+# source-patches DeepEP (e.g. csrc/kernels/backend/symmetric.hpp), so an older
+# pin whose tree lacks those files fails the build. vLLM main expects this ref.
+ARG DEEPEP_COMMIT='d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb'
 ARG NVSHMEM_VER='3.3.24'
 # DeepEP requires SM 9.0+ (Hopper/Blackwell). Filter out pre-SM90 arches
 # so Blackwell (10.0) is also supported.
