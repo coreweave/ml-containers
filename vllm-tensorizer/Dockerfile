@@ -292,6 +292,13 @@ ARG NVSHMEM_VER='3.3.24'
 # so Blackwell (10.0) is also supported.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/tmp/ep_kernels \
     python3 -m pip install --no-cache-dir uv && \
+    # DeepEP's setup.py locates NCCL only via the nvidia-nccl-cuNN pip wheel
+    # (deep_ep/utils/find_pkgs.py) or NCCL_DIR/EP_NCCL_ROOT_DIR. That wheel is
+    # normally present because upstream pip-installs torch (which depends on it),
+    # but this base builds torch+NCCL from source, so provide the wheel here for
+    # its include/nccl.h + lib/libnccl.so*. Isolated to this stage: only the
+    # DeepEP wheel and nvshmem libs are copied into the final image.
+    python3 -m pip install --no-cache-dir "nvidia-nccl-cu${CUDA_VERSION%%.*}" && \
     . /opt/arch_flags.sh && \
     export NVCC_WRAPPER_FILTER_CODES="sm_80;sm_89;compute_80;compute_89;${NVCC_WRAPPER_FILTER_CODES}" && \
     WORKSPACE=/tmp/deepep_build MODE=wheel \
