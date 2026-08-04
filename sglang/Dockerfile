@@ -1,51 +1,20 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
-ARG BUILDER_IMAGE="${BASE_IMAGE}"
-ARG SCCACHE_VERSION="0.14.0"
-
-FROM alpine/curl:8.17.0 AS sccache-downloader
-ARG SCCACHE_VERSION
-RUN ARCH=$(uname -m) && \
-    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
-    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
-    chmod 755 /opt/sccache
-
-FROM ${BUILDER_IMAGE} AS builder
-
-ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
-ARG TARGETPLATFORM
-
-ARG SGLANG_COMMIT
-
-# Setup for sccache and its wrappers.
-COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
-COPY --link --from=common --chmod=755 sccache*.sh /opt/
-COPY --link --from=common sccache.toml /etc/sccache.toml
-RUN sed -Ei 's@^(key_prefix.*)misc@\1sglang@' /etc/sccache.toml
-ENV SCCACHE_CONF=/etc/sccache.toml \
-    CC=/opt/sccache-cc.sh \
-    CXX=/opt/sccache-c++.sh \
-    TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
-
-COPY --link --from=common --chmod=755 nvcc-wrapper.py /opt/nvcc-wrapper.py
-ENV CMAKE_CUDA_COMPILER='/opt/nvcc-wrapper.py' \
-    CUDACXX='/opt/nvcc-wrapper.py'
-
-WORKDIR /build
-COPY build.bash /build/
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && \
-    mkdir /wheels && \
-    ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}" && \
-    [ "$TARGETPLATFORM" != "linux/arm64" ] || ARCH_LIST="9.0 10.0+PTX" && \
-    bash build.bash -a "${ARCH_LIST}" && \
-    rm -rf /build/*
-COPY install.bash /wheels/
+ARG BASE_IMAGE="lmsysorg/sglang:kimi-k3@sha256:6d9594a421be244f2af29d726158ebffe9c3c2b3f39b5b89affd8150a106e187"
 
 FROM ${BASE_IMAGE}
-RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
-    cd /wheels && \
-    bash install.bash
+
+ARG SGLANG_COMMIT
+LABEL org.opencontainers.image.revision="${SGLANG_COMMIT}"
+
+# The published K3 image still contains 0.1.4.post1, while the current K3
+# recipe requires the first DeepGEMM release with K3 SiTU support.
+RUN python3 -m pip install --no-cache-dir --no-deps --force-reinstall \
+      'sgl-deep-gemm==0.1.5.post1'
+
+# Keep this branch a thin, immutable republish of SGLang's complete Kimi-K3
+# image. These checks fail the build if the source overlay, model integration,
+# DeepEP dependency, or published FlashInfer SiTU cubin pool is absent.
+RUN test "${SGLANG_COMMIT}" = "c6ad1f2602f2d485b774d305c84ea56d931fe738" && \
+    test "${SGLANG_TRTLLM_GEN_MOE_CUBIN_POOL}" = "/opt/trtllm_gen_moe_cubin_pool" && \
+    test "$(find "${SGLANG_TRTLLM_GEN_MOE_CUBIN_POOL}" -type f -name '*.cubin' | wc -l)" -eq 1696 && \
+    python3 -c 'from importlib.metadata import version; from importlib.util import find_spec; from sglang.srt.models.kimi_k3 import KimiK3ForConditionalGeneration; expected = "0.6.15.post1"; packages = ("flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"); actual = {package: version(package).split("+", 1)[0] for package in packages}; state = {"model": KimiK3ForConditionalGeneration.__name__, "sglang": version("sglang"), "deep_ep": find_spec("deep_ep") is not None, "deep_gemm": version("sgl-deep-gemm"), "flashinfer": actual}; print(state, flush=True); assert state["deep_ep"], state; assert all(value == expected for value in actual.values()), state; assert state["deep_gemm"] == "0.1.5.post1", state'
