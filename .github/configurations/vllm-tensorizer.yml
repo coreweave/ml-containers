@@ -1,7 +1,8 @@
 include:
-  # renovate-release: datasource=github-releases depName=vllm-project/vllm currentValue=v0.26.0 versioning=pep440
-  - vllm-commit: '568afb3a13806beb53bb2e6bd518269357b237c0'
-    flashinfer-commit: 'v0.6.15.post1'
+  # Kimi-K3 support landed after v0.26.0. Keep this immutable main snapshot out
+  # of Renovate until vLLM publishes the release containing K3.
+  - vllm-commit: '5f2ee2fa8c59d9f9cddd07c79806e6418b0d841a'
+    flashinfer-commit: 'a02d94de5796650ead1c6be27b834c3a063bf45d'
     lmcache-commit: 'v0.4.7'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch:8c5de3e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'
     final-base-image: 'ghcr.io/coreweave/ml-containers/torch:8c5de3e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'

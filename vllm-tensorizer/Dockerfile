@@ -87,12 +87,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
-# Local vLLM patch stack — backports that missed releases/v0.26.0.
-COPY vllm-patches/ /git/vllm-patches/
-RUN git -C vllm apply -v --stat --apply /git/vllm-patches/*.patch && \
-    rm -rf /git/vllm-patches
-
-
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
 ARG FLASHINFER_COMMIT
@@ -102,12 +96,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout "${FLASHINFER_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
-
-# Apply the v0.6.15.post1 FlashInfer patch stack in numbered order.
-COPY flashinfer-patches/ /git/flashinfer-patches/
-RUN git -C flashinfer apply -v --stat --apply /git/flashinfer-patches/*.patch && \
-    rm -rf /git/flashinfer-patches
-
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
@@ -126,7 +114,10 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='a6b593d2826719dcf4892609af7b84ee23aaf32a'
+# Match _DEEPGEMM_UPSTREAM_TAG in vLLM at VLLM_COMMIT. DeepGEMM's
+# runtime-JIT interfaces move with vLLM main, so the separately built wheel
+# must use the same source revision.
+ARG DEEPGEMM_COMMIT='e21c821f39a2056d68067a466c64ddc942200106'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
@@ -279,17 +270,17 @@ RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/work
     /opt/build.sh
 
 FROM builder-base AS deepep-builder
-ARG DEEPEP_COMMIT='73b6ea4'
-ARG NVSHMEM_VER='3.3.24'
 # DeepEP requires SM 9.0+ (Hopper/Blackwell). Filter out pre-SM90 arches
 # so Blackwell (10.0) is also supported.
+# vLLM's installer source-patches DeepEP and owns its DeepEP/NVSHMEM pins.
+# Point it at the image's source-built NCCL instead of pulling a second copy.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/tmp/ep_kernels \
     python3 -m pip install --no-cache-dir uv && \
     . /opt/arch_flags.sh && \
+    ln -sf "/usr/lib/$(uname -m)-linux-gnu"/libnccl.so* /usr/lib/ && \
+    export EP_NCCL_ROOT_DIR=/usr && \
     export NVCC_WRAPPER_FILTER_CODES="sm_80;sm_89;compute_80;compute_89;${NVCC_WRAPPER_FILTER_CODES}" && \
     WORKSPACE=/tmp/deepep_build MODE=wheel \
-    DEEPEP_COMMIT_HASH="${DEEPEP_COMMIT}" \
-    NVSHMEM_VER="${NVSHMEM_VER}" \
     bash /tmp/ep_kernels/install_python_libraries.sh && \
     cp /tmp/deepep_build/dist/*.whl /wheels/ && \
     mkdir -p /nvshmem_libs && \
@@ -334,7 +325,7 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.26 pins nvidia-cutlass-dsl==4.6.0 but only floors quack-kernels (>=0.4.0).
+# vLLM main pins nvidia-cutlass-dsl==4.6.0 but only floors quack-kernels.
 # Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
 # so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
@@ -361,10 +352,11 @@ RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
 RUN --mount=type=bind,from=deepep-builder,source=/wheels,target=/tmp/wheels \
+    ln -sf "/usr/lib/$(uname -m)-linux-gnu"/libnccl.so* /usr/lib/ && \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
 COPY --link --from=deepep-builder /nvshmem_libs/ /usr/local/lib/
-RUN ldconfig
+RUN ldconfig && python3 -c 'import deep_ep; print("deep_ep import OK")'
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
