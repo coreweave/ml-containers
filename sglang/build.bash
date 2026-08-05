@@ -57,8 +57,10 @@ sed -Ei \
   python/pyproject.toml
 
 # Surface the Rust toolchain file at the repo root so rustup's CWD-upward
-# walk finds it when setuptools-rust invokes cargo from python/.
-ln -sf rust/sglang-grpc/rust-toolchain.toml .
+# walk finds it when setuptools-rust invokes cargo from python/. Since sglang
+# PR #32648 the toolchain file lives at the rust/ workspace root, not inside
+# rust/sglang-grpc/ (which would leave a dangling symlink -> "no default toolchain").
+ln -sf rust/rust-toolchain.toml .
 
 # Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent).
 (
