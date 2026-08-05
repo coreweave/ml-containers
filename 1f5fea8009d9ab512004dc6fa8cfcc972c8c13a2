@@ -1,0 +1,65 @@
+## Conversation
+Started from a GLM-5.2 eval-history question, narrowed to baseline (zai FP8) vs
+our NVFP4 self-quant. User then hit a vLLM ValueError on `layer_types` in
+staging and asked whether it was an engine or checkpoint fault, then what newer
+transformers versions were usable. User laid out a 4-repo chain: ml-containers
+(this bump) -> infr (rebuild dynamo-vllm) -> cks-inference-deploy
+(runtime-engines.yaml) -> fix the gh-stack over PRs 1550/1552. Tag alexeldeib on
+every step. This commit is step 1 only.
+
+## Actions
+Probed three cw-infr-oci/dynamo-vllm images (v2.22.0, v2.26.0, v2.29.1) as pods
+on cw598e-use15 using the `infr-image-pull` secret in `default`. Read
+ALLOWED_LAYER_TYPES, dependency metadata, and ran the validator standalone.
+Downloaded transformers wheels 5.9.0-5.14.1 from PyPI and grepped the allowlist,
+then load-tested nvidia/GLM-5.2-NVFP4's real config.json under each version via
+`uv run --with transformers==X`. Edited only the pin + its comment bullet.
+
+## Errors & Mistakes
+Initially concluded from wheel-grepping that 5.13+ REGRESSED (the global
+ALLOWED_LAYER_TYPES shrinks 15 -> 10 entries and loses
+deepseek_sparse_attention). Wrong: actually loading the config under 5.13.1 and
+5.14.1 succeeds, so GlmMoeDsaConfig declares its own permitted types there.
+Grepping the constant is not a valid test; load the config instead.
+
+Also mis-inferred earlier that staging served our smoke checkpoint and that
+`raw/coreweave/GLM-5.2-NVFP4/v1` might hold NVIDIA weights. The init container
+showed the real path: `s3://infr-cwc38d/raw/nvidia/GLM-5.2-NVFP4/aec724e8...`.
+No prefix mixup exists.
+
+## Dead Ends
+Expected `modelopt[hf]`'s `>=4.56,<5.10` pin to block this bump, as it did in
+our quantize image. modelopt is NOT installed in the serving image at all, so it
+imposes nothing. Also could not read the deployed config from S3
+(infr-cwc38d 403 with the cw4637 profile) or exec into the crashing pod
+(`pods/exec` denied) -- fetched the config from HuggingFace by revision instead,
+and it diffed zero keys against our mirrored copy.
+
+## Hints for Future Agents
+The floor is transformers 5.11.0, which is exactly the version NVIDIA used to
+serialize the checkpoint. 5.12.1 was chosen over the 5.14.1 tip deliberately;
+see the commit body. This bump is UNVALIDATED against a real forward pass -- only
+config construction was tested -- so a serve smoke test on Gemma 4 MTP, Kimi
+K2.5/K3 and DeepSeek-V4 is the gate before promotion, since those are the other
+models whose reasons are recorded in the same comment block.
+
+Two lower-scope workarounds exist and may be preferable short-term: repoint the
+deployment at `raw/coreweave/GLM-5.2-NVFP4/v1` (our smoke checkpoint, which
+omits layer_types and serves today on eu-n-04a under v2.26.0), or strip
+`layer_types` from config.json at the model-upload step. Both were verified.
+
+## Codebase Discoveries
+The image chain is ml-containers/vllm-tensorizer -> infr/images/vllm/Dockerfile
+line 28 (`FROM ghcr.io/coreweave/ml-containers/vllm-tensorizer:<mlc-sha>-<vllm-sha>-cuda13.2.1-ubuntu24.04`)
+-> cw-infr-oci/dynamo-vllm:vX.Y.Z -> cks-inference-deploy
+config/values/runtime-engines.yaml `<vllm-ver>+crwv.<n>`. The ml-containers
+commit sha is embedded in the base tag, so this commit's sha must reach infr.
+
+All dynamo-vllm images through the newest (v2.29.1) shipped transformers 5.9.0 --
+the version was not pinned by any dependency, just whatever resolved.
+
+## Open Questions
+Does 5.12.1 break Gemma 4 MTP, Kimi K3 SiTU, or DeepSeek-V4 at runtime? Untested.
+Whether to instead land 5.14.1 is open if maintainers prefer tracking the tip.
+The live staging `glm_52` deployment (2a861d13-c5a7-40a9-b6a4-a4c5471234c6) has
+drifted from committed Terraform on `model.path`; owner unknown.
