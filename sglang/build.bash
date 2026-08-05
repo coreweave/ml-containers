@@ -62,7 +62,7 @@ ln -sf rust/sglang-grpc/rust-toolchain.toml .
 
 # Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent).
 (
-cd sgl-kernel
+cd python/sglang/kernels/aot
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 silences the cmake 4.x breakage on any
 # FetchContent sub-project (e.g. dlpack inside mscclpp) that still declares
 # cmake_minimum_required(VERSION < 3.5).
