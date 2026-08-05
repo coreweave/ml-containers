@@ -1,0 +1,25 @@
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[[package]]
+name = "tailscale-py"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/37/4b9fa8e9af428a4ec39456a51abf322243e778dfb858d9d752ec5a2246b7/tailscale_py-0.4.0-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:a8a696ed66d638d9ffec197d5a1148a38755e6d68243e6037f0f990ee8230f2b", size = 4062179, upload-time = "2026-07-08T21:23:36.326Z" },
+    { url = "https://files.pythonhosted.org/packages/67/28/a771de1b02b3e871ec520b9992f170437609f77bdec25b1cf4fdf3bb6b39/tailscale_py-0.4.0-cp312-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:73eb468795c9320bdc7b3b29b5e72270cb67acd9bc05524dae9a6f80b5e334b3", size = 4449514, upload-time = "2026-07-08T21:23:38.134Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/90/f117fb35d6469ed13f0ee125b904747ae779673c8bae54c4f79f838665a4/tailscale_py-0.4.0-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b41c849a5e671eac589323b224b98d1fb5d54ecdd1c6f28bcbb11ce6e9dce7fc", size = 4706620, upload-time = "2026-07-08T21:23:39.702Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/6d/c65d8ebbd0326f262929e3181072e8f03a34d21a738f65878d0b74c14624/tailscale_py-0.4.0-cp312-abi3-win_amd64.whl", hash = "sha256:eeaa8af55be7291239c9ef0053aa7db7d24a92bb3b7d33795273441495f42579", size = 4433067, upload-time = "2026-07-08T21:23:41.52Z" },
+]
+
+[[package]]
+name = "vllm-tsnet-poc"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "tailscale-py" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tailscale-py", specifier = "==0.4.0" }]
