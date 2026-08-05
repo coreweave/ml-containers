@@ -37,8 +37,11 @@ and it diffed zero keys against our mirrored copy.
 
 ## Hints for Future Agents
 The floor is transformers 5.11.0, which is exactly the version NVIDIA used to
-serialize the checkpoint. 5.12.1 was chosen over the 5.14.1 tip deliberately;
-see the commit body. This bump is UNVALIDATED against a real forward pass -- only
+serialize the checkpoint. First drafted as 5.12.1, then the user said "bump to
+the latest that we can get away with", so it landed on the 5.14.1 tip -- checked
+safe because every 5.14.1 requirement is already satisfied in-image with zero
+transitive upgrades (safetensors sits exactly at its new >=0.8.0 floor). This
+bump is UNVALIDATED against a real forward pass -- only
 config construction was tested -- so a serve smoke test on Gemma 4 MTP, Kimi
 K2.5/K3 and DeepSeek-V4 is the gate before promotion, since those are the other
 models whose reasons are recorded in the same comment block.
@@ -60,6 +63,12 @@ the version was not pinned by any dependency, just whatever resolved.
 
 ## Open Questions
 Does 5.12.1 break Gemma 4 MTP, Kimi K3 SiTU, or DeepSeek-V4 at runtime? Untested.
-Whether to instead land 5.14.1 is open if maintainers prefer tracking the tip.
+Whether maintainers want the tip or a more conservative 5.12.1 is open.
 The live staging `glm_52` deployment (2a861d13-c5a7-40a9-b6a4-a4c5471234c6) has
 drifted from committed Terraform on `model.path`; owner unknown.
+
+## Feedback received
+User rejected the explanatory comment bullet I added above the pin ("don't add
+these superfluous comments"). Reverted so the diff is the one-line pin change;
+all rationale lives in this commit message instead. Do not narrate reasoning in
+this Dockerfile even though it already carries a per-pin comment block.
