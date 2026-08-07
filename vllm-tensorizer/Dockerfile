@@ -286,13 +286,19 @@ ARG NVSHMEM_VER='3.3.24'
 # so Blackwell (10.0) is also supported.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/tmp/ep_kernels \
     python3 -m pip install --no-cache-dir uv && \
-    # DeepEP's setup.py locates NCCL only via the nvidia-nccl-cuNN pip wheel
-    # (deep_ep/utils/find_pkgs.py) or NCCL_DIR/EP_NCCL_ROOT_DIR. That wheel is
-    # normally present because upstream pip-installs torch (which depends on it),
-    # but this base builds torch+NCCL from source, so provide the wheel here for
-    # its include/nccl.h + lib/libnccl.so*. Isolated to this stage: only the
-    # DeepEP wheel and nvshmem libs are copied into the final image.
-    python3 -m pip install --no-cache-dir "nvidia-nccl-cu${CUDA_VERSION%%.*}" && \
+    # DeepEP's setup.py locates NCCL via deep_ep/utils/find_pkgs.py, which honors
+    # EP_NCCL_ROOT_DIR / NCCL_DIR before falling back to a nvidia-nccl-cuNN pip wheel.
+    # This base builds torch+NCCL from source (system lib, no wheel), so build DeepEP
+    # against that SAME system NCCL via a symlink root. (We used to `pip install
+    # nvidia-nccl-cu${major}` here purely to unblock the build — a hack: it's a
+    # byte-different PyPI build of the same 2.30.4, and on cuda13 the cuNN suffix is a
+    # footgun. Building against the system NCCL makes build-NCCL == runtime-NCCL; the
+    # final stage points EP_NCCL_ROOT_DIR at the identical system NCCL there.)
+    NCCL_LIBDIR="/usr/lib/$(uname -m)-linux-gnu" && \
+    mkdir -p /opt/nccl-root/lib /opt/nccl-root/include && \
+    ln -sf /usr/include/nccl.h /opt/nccl-root/include/nccl.h && \
+    for f in "${NCCL_LIBDIR}"/libnccl.so*; do ln -sf "$f" /opt/nccl-root/lib/"$(basename "$f")"; done && \
+    export EP_NCCL_ROOT_DIR=/opt/nccl-root && \
     . /opt/arch_flags.sh && \
     export NVCC_WRAPPER_FILTER_CODES="sm_80;sm_89;compute_80;compute_89;${NVCC_WRAPPER_FILTER_CODES}" && \
     WORKSPACE=/tmp/deepep_build MODE=wheel \
@@ -300,8 +306,10 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,tar
     NVSHMEM_VER="${NVSHMEM_VER}" \
     bash /tmp/ep_kernels/install_python_libraries.sh && \
     cp /tmp/deepep_build/dist/*.whl /wheels/ && \
-    mkdir -p /nvshmem_libs && \
-    cp /tmp/deepep_build/nvshmem/lib/libnvshmem*.so* /nvshmem_libs/
+    # Preserve the FULL nvshmem tree (lib + include), not just the host .so, so the
+    # final stage can expose it as EP_NVSHMEM_ROOT_DIR for internode DeepEP.
+    mkdir -p /nvshmem_root && \
+    cp -a /tmp/deepep_build/nvshmem/. /nvshmem_root/
 
 # Build a NIXL wheel linked against HPC-X's multi-threaded UCX (/opt/hpcx/ucx/mt). The PyPI
 # nixl-cuNN wheels bundle their own UCX, which clashes with this image's HPC-X UCX and can't
@@ -371,8 +379,34 @@ RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=deepep-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
-COPY --link --from=deepep-builder /nvshmem_libs/ /usr/local/lib/
-RUN ldconfig
+# --- DeepEP runtime NCCL discovery (this is what enables has_deep_ep()) --------
+# DeepEP resolves NCCL via deep_ep/utils/find_pkgs.py (EP_NCCL_ROOT_DIR / NCCL_DIR,
+# else a nvidia-nccl-cuNN wheel). This base builds NCCL from source (system lib, no
+# wheel), so without this DeepEP's import fails ("Cannot find package: nccl"),
+# has_deep_ep() is False, and DeepEP's MoE all2all is silently disabled. Point it at
+# the SYSTEM NCCL that torch actually loads via symlinks — NOT a PyPI wheel: a
+# from-source vs PyPI build of 2.30.4 differs byte-for-byte and fails
+# check_nccl_so()'s loaded-vs-linked filecmp. Symlinking the real lib makes that
+# compare file-vs-itself (validated in-image: has_deep_ep() -> True).
+RUN NCCL_LIBDIR="/usr/lib/$(uname -m)-linux-gnu" && \
+    mkdir -p /opt/nccl-root/lib /opt/nccl-root/include && \
+    ln -sf /usr/include/nccl.h /opt/nccl-root/include/nccl.h && \
+    for f in "${NCCL_LIBDIR}"/libnccl.so*; do ln -sf "$f" /opt/nccl-root/lib/"$(basename "$f")"; done
+ENV EP_NCCL_ROOT_DIR=/opt/nccl-root
+
+# NVSHMEM root for INTERNODE DeepEP (multi-node EP). Builder preserves the full tree;
+# expose it on the linker path and point find_nvshmem_root at it (honors
+# EP_NVSHMEM_ROOT_DIR / NVSHMEM_DIR). NOTE: the guard below only validates the NCCL
+# path / has_deep_ep(); internode DeepEP (an nvshmem Buffer) still needs a runtime
+# multi-node smoke-test before relying on it.
+COPY --link --from=deepep-builder /nvshmem_root/ /opt/nvshmem/
+RUN echo /opt/nvshmem/lib > /etc/ld.so.conf.d/nvshmem.conf && ldconfig
+ENV EP_NVSHMEM_ROOT_DIR=/opt/nvshmem
+
+# Build-time guard: fail loudly if DeepEP can't import (e.g. a base NCCL path/layout
+# drift silently reverting has_deep_ep() to False). Importing deep_ep runs its
+# check_nccl_so()+init_jit and needs no GPU (validated on a CPU-only pod).
+RUN python3 -c "import deep_ep; print('DeepEP imports cleanly; has_deep_ep() will be True')"
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
