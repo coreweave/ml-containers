@@ -1,0 +1,20 @@
+## Conversation
+The user asked to bump vllm-tensorizer to the official vLLM v0.27.0rc1 release, pin the exact release SHA and related dependencies, run official and private ARM64 builds, layer infr, and prove coherent GB300 serving before opening the pull requests. The user requested a short commit subject and a one-sentence pull request body.
+
+## Actions
+Verified the live annotated tag and peeled commit with git ls-remote. Read the notes on recent vllm-tensorizer changes. Inspected the exact v0.27.0rc1 source and dependency files in the repo-explore cache. Updated the matrix to the peeled commit 4b25076c818659a40cc213227b52e0b71b5e7021. Removed the obsolete MSA patch. Updated Apache TVM FFI, DeepGEMM, DeepEP, RunAI Model Streamer, and ModelScope constraints. Added the system-NCCL and full-NVSHMEM roots required by DeepEP v2 and an import gate. Verified both FlashInfer patches with git apply --check. Ran git diff --check and a BuildKit Dockerfile check, which completed with no warnings.
+
+## Errors & Mistakes
+The first parallel BuildKit check returned before its detached client output was collected, so its result was not usable. Waited for that client to exit and reran the check directly. The second check exited zero and printed "Check complete, no warnings found."
+
+## Dead Ends
+Did not pin raw vLLM DeepGEMM commit e21c821 because it drops the current image's SM120 line. Did not reuse greg/vllm_for_kimi because it contains unrelated changes and pins a DeepGEMM revision that lacks the current SM120 support. Did not install a PyPI NCCL wheel because DeepEP compares its linked NCCL with the system NCCL loaded by torch.
+
+## Hints for Future Agents
+The v0.27.0rc1 tag object is 03daf2f699b28d1568dc0bc6fb38e6ab6c25e57e, but the matrix must pin the peeled commit 4b25076c818659a40cc213227b52e0b71b5e7021. Keep the private BuildKit client detached and use MAX_JOBS=96 on the existing 136 CPU and 900 GiB k3-k8s builder. Do not recreate that builder. Runtime proof must include TP8, DSpark with seven draft tokens, full CUDA graph capture, pod UID tracking, and counter deltas.
+
+## Codebase Discoveries
+vLLM v0.27.0rc1 already pins MSA 087c161, so the local 0.26 MSA patch cannot apply. DeepEP d4f41e4 requires a discoverable NCCL root and the complete NVSHMEM tree. The CoreWeave torch base provides system NCCL 2.30.4, which meets DeepEP v2's minimum. The separately installed DeepGEMM shadows the copy vendored by vLLM, so its source must support both the Kimi-K3 SiTU API and the image's existing SM120 kernels.
+
+## Open Questions
+The private ARM64 build, official two-architecture CI, infr patch rebase, image capability checks, and GB300 serving test remain pending. ai-dynamo does not yet declare compatibility with vLLM v0.27.0rc1, so the infr Dynamo target remains a separate release gate.
