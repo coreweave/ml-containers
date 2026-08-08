@@ -1,0 +1,1906 @@
+diff --git a/vllm/third_party/kimi_k3/LICENSE b/vllm/third_party/kimi_k3/LICENSE
+new file mode 100644
+index 0000000..0de9f06
+--- /dev/null
++++ b/vllm/third_party/kimi_k3/LICENSE
+@@ -0,0 +1,52 @@
++Kimi K3 License
++
++Copyright (c) 2026 Moonshot AI
++
++Permission is hereby granted, free of charge, to any person (the "Licensee")
++obtaining a copy of this software — including the model weights, parameters,
++configuration files, inference and training code, and associated documentation
++(collectively, the "Software") — to deal in the Software without restriction.
++This includes, without limitation, the rights to use, copy, modify, merge,
++publish, distribute, sublicense, and/or sell copies of the Software; to run,
++deploy, fine-tune, or otherwise modify the Software and create derivative works
++from it; and to permit persons to whom the Software is furnished to do so, in
++each case subject to the following conditions:
++
++1. The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software. Licensee's use of the
++Software must comply with applicable laws and regulations.
++
++2. "Model as a Service" means giving a third party access to language model
++inference or fine-tuning (e.g., via API) in a manner that allows such third
++party to exercise meaningful control over the inputs, parameters, or training
++data. This does not include (a) end-user products with model capabilities solely
++embedded within specific features or harnesses, or (b) mere relaying of requests
++to models hosted by others.
++
++If the Licensee or any of its affiliates operates a Model as a Service business,
++and the aggregate revenue of the Licensee and its affiliates exceeds 20 million
++US dollars (or the equivalent in other currencies) in total over any consecutive
++12 months, the Licensee must enter into a separate agreement with Moonshot AI
++before using the Software or its derivative works for any commercial purpose.
++
++3. If the Software (or any derivative works thereof) is used for any of the
++Licensee's commercial products or services that have more than 100 million
++monthly active users, or more than 20 million US dollars (or equivalent in other
++currencies) in monthly revenue, "Kimi K3" must be prominently displayed on the
++user interface of such product or service.
++
++4. The requirements set forth in Sections 2 and 3 do not apply to: (a) internal
++use of the Software, defined as any use that does not make the Software, its
++outputs, or its underlying capabilities available to third parties; or (b) any
++use of the Software accessed through Moonshot AI's official products or
++certified inference partners.
++
++5. THE SOFTWARE AND ANY OUTPUT AND RESULTS THEREFROM ARE PROVIDED ON AN “AS IS”
++BASIS, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
++LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE
++AND NONINFRINGEMENT. IN NO EVENT SHALL MOONSHOT AI OR ITS AFFILIATES OR
++COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
++IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
++CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++
++For any questions regarding this license, please contact <license@moonshot.ai>.
+diff --git a/vllm/tokenizers/kimi_k3_encoding.py b/vllm/tokenizers/kimi_k3_encoding.py
+new file mode 100644
+index 0000000..4b780a2
+--- /dev/null
++++ b/vllm/tokenizers/kimi_k3_encoding.py
+@@ -0,0 +1,658 @@
++# SPDX-License-Identifier: LicenseRef-Kimi-K3
++# Copyright (c) 2026 Moonshot AI
++"""Kimi K3 XTML encoding helpers.
++
++This module keeps chat rendering in Python.
++Callers that need token IDs should consume ``EncodeSegment`` objects directly:
++structural markers may be encoded as tiktoken special tokens, while user/tool
++text and attribute values are encoded as ordinary text.
++
++Vendored from ``moonshotai/Kimi-K3`` at revision
++``9f62e4e9fffbd0a83ddd60e1c209d828994b3569`` without semantic changes.
++See ``vllm/third_party/kimi_k3/LICENSE``.
++"""
++
++from __future__ import annotations
++
++import json
++from collections.abc import Iterable
++from dataclasses import dataclass
++from typing import Any
++
++OPEN_TOKEN = "<|open|>"
++CLOSE_TOKEN = "<|close|>"
++SEP_TOKEN = "<|sep|>"
++END_OF_MSG_TOKEN = "<|end_of_msg|>"
++IMAGE_PLACEHOLDER = "<|kimi_image_placeholder|>"
++
++_VALID_THINKING_EFFORTS = {"low", "high", "max"}
++
++
++@dataclass(frozen=True)
++class EncodeSegment:
++    text: str
++    allow_special: bool = False
++
++
++class _ImagePromptState:
++    def __init__(self, image_prompts: list[str] | None = None):
++        self.image_prompts = image_prompts
++        self.index = 0
++
++    def next_prompt(self) -> str:
++        if self.image_prompts is None:
++            return IMAGE_PLACEHOLDER
++        if self.index >= len(self.image_prompts):
++            raise ValueError("More image placeholders than image prompts.")
++        prompt = self.image_prompts[self.index]
++        self.index += 1
++        return prompt
++
++    def assert_consumed(self) -> None:
++        if self.image_prompts is None:
++            return
++        if self.index != len(self.image_prompts):
++            raise ValueError(
++                f"image prompt count {len(self.image_prompts)} != "
++                f"consumed placeholder count {self.index}"
++            )
++
++
++def _segment(text: Any, *, allow_special: bool = False) -> list[EncodeSegment]:
++    text = str(text)
++    if not text:
++        return []
++    return [EncodeSegment(text, allow_special=allow_special)]
++
++
++def _control(text: str) -> list[EncodeSegment]:
++    return _segment(text, allow_special=True)
++
++
++def _text(text: Any) -> list[EncodeSegment]:
++    return _segment(text, allow_special=False)
++
++
++def _append_text(
++    segments: list[EncodeSegment],
++    text: Any,
++    image_state: _ImagePromptState,
++) -> None:
++    text = str(text)
++    if text == "":
++        return
++    if image_state.image_prompts is None or IMAGE_PLACEHOLDER not in text:
++        segments.extend(_text(text))
++        return
++
++    parts = text.split(IMAGE_PLACEHOLDER)
++    for i, part in enumerate(parts):
++        segments.extend(_text(part))
++        if i < len(parts) - 1:
++            segments.extend(_segment(image_state.next_prompt(), allow_special=True))
++
++
++def _escape_attr_value(value: Any) -> str:
++    return str(value).replace("&", "&amp;").replace('"', "&quot;")
++
++
++def _attr(key: str, value: Any) -> list[EncodeSegment]:
++    return (
++        _text(f" {key}") + _text('="') + _text(_escape_attr_value(value)) + _text('"')
++    )
++
++
++def _open_tag(tag: str, attrs: Iterable[tuple[str, Any]] = ()) -> list[EncodeSegment]:
++    segments: list[EncodeSegment] = []
++    segments.extend(_control(OPEN_TOKEN))
++    segments.extend(_text(tag))
++    for key, value in attrs:
++        segments.extend(_attr(key, value))
++    segments.extend(_control(SEP_TOKEN))
++    return segments
++
++
++def _close_tag(tag: str) -> list[EncodeSegment]:
++    segments: list[EncodeSegment] = []
++    segments.extend(_control(CLOSE_TOKEN))
++    segments.extend(_text(tag))
++    segments.extend(_control(SEP_TOKEN))
++    return segments
++
++
++def _end_of_msg() -> list[EncodeSegment]:
++    return _control(END_OF_MSG_TOKEN)
++
++
++def _json_compact(value: Any) -> str:
++    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
++
++
++def _is_mapping(value: Any) -> bool:
++    return isinstance(value, dict)
++
++
++def _xtml_type(value: Any) -> str:
++    if isinstance(value, bool):
++        return "boolean"
++    if value is None:
++        return "null"
++    if isinstance(value, int | float) and not isinstance(value, bool):
++        return "number"
++    if isinstance(value, str):
++        return "string"
++    if _is_mapping(value):
++        return "object"
++    return "array"
++
++
++def _xtml_value(value: Any) -> str:
++    if isinstance(value, str):
++        return value
++    return json.dumps(value, ensure_ascii=False)
++
++
++def _get_value(obj: Any, key: str, default: Any = None) -> Any:
++    if isinstance(obj, dict):
++        return obj.get(key, default)
++    return getattr(obj, key, default)
++
++
++def extract_response_schema(response_format: Any) -> Any:
++    if response_format is None:
++        return None
++
++    json_schema = _get_value(response_format, "json_schema")
++    if json_schema is None:
++        return None
++
++    if isinstance(json_schema, dict):
++        return json_schema.get(
++            "schema",
++            json_schema.get("json_schema", json_schema),
++        )
++
++    schema = _get_value(json_schema, "schema")
++    if schema is not None:
++        return schema
++
++    schema = _get_value(json_schema, "json_schema")
++    if schema is not None:
++        return schema
++
++    return json_schema
++
++
++def deep_sort_dict(obj: Any) -> Any:
++    if isinstance(obj, dict):
++        return {k: deep_sort_dict(v) for k, v in sorted(obj.items())}
++    if isinstance(obj, list):
++        return [deep_sort_dict(item) for item in obj]
++    return obj
++
++
++def normalize_tool_arguments(arguments: Any) -> tuple[dict[str, Any], str | None]:
++    if arguments is None:
++        return {}, None
++    if isinstance(arguments, dict):
++        return arguments, None
++    if isinstance(arguments, str):
++        if not arguments.strip():
++            return {}, None
++        try:
++            parsed = json.loads(arguments)
++        except json.JSONDecodeError:
++            return {}, arguments
++        if not isinstance(parsed, dict):
++            raise ValueError("Kimi K3 tool call arguments must be a JSON object.")
++        return parsed, None
++    raise TypeError(
++        "Kimi K3 tool call arguments must be a dict or a JSON object string."
++    )
++
++
++def normalize_message(message: Any) -> Any:
++    if not isinstance(message, dict):
++        return message
++
++    normalized = dict(message)
++
++    tools = normalized.get("tools")
++    if tools is not None:
++        normalized["tools"] = deep_sort_dict(tools)
++
++    tool_calls = normalized.get("tool_calls")
++    if not tool_calls:
++        return normalized
++
++    normalized_calls = []
++    for tool_call in tool_calls:
++        if not isinstance(tool_call, dict):
++            normalized_calls.append(tool_call)
++            continue
++
++        tc = dict(tool_call)
++        function = tc.get("function")
++        if isinstance(function, dict):
++            fn = dict(function)
++            arguments, json_block = normalize_tool_arguments(fn.get("arguments"))
++            fn["arguments"] = arguments
++            if json_block is None:
++                fn.pop("_xtml_json_block", None)
++            else:
++                fn["_xtml_json_block"] = json_block
++            tc["function"] = fn
++        else:
++            arguments, json_block = normalize_tool_arguments(tc.get("arguments"))
++            tc["arguments"] = arguments
++            if json_block is None:
++                tc.pop("_xtml_json_block", None)
++            else:
++                tc["_xtml_json_block"] = json_block
++        normalized_calls.append(tc)
++
++    normalized["tool_calls"] = normalized_calls
++    return normalized
++
++
++def normalize_conversation(conversation: Any) -> Any:
++    if not isinstance(conversation, list):
++        return conversation
++
++    def normalize_messages(messages: list[Any]) -> list[Any]:
++        return [normalize_message(message) for message in messages]
++
++    if conversation and isinstance(conversation[0], list):
++        return [normalize_messages(messages) for messages in conversation]
++    return normalize_messages(conversation)
++
++
++def _tool_call_id_index(tool_calls: Any) -> dict:
++    """Map assistant ``tool_calls[].id`` to ``(1-based position, function name)``.
++
++    The position mirrors the chat template's enumeration over ``tool_calls``
++    (every entry advances the position, even an id-less one). Duplicate ids keep
++    their first occurrence.
++    """
++    index: dict = {}
++    if not isinstance(tool_calls, list):
++        return index
++    for position, tool_call in enumerate(tool_calls, start=1):
++        if not isinstance(tool_call, dict):
++            continue
++        call_id = tool_call.get("id")
++        if call_id is None:
++            continue
++        key = str(call_id)
++        if key in index:
++            continue
++        function = tool_call.get("function")
++        name = (
++            function.get("name")
++            if isinstance(function, dict)
++            else tool_call.get("name")
++        )
++        index[key] = (position, name)
++    return index
++
++
++def normalize_xtml_tool_result_messages(messages: list[Any]) -> list[Any]:
++    """Re-sort K3 XTML tool results into assistant ``tool_calls`` order.
++
++    Serving frameworks generally deliver tool results already in call order. A
++    direct Transformers caller, however, may pass OpenAI-style tool messages in any
++    order, so each run of consecutive tool messages is matched against the most
++    recent preceding assistant ``tool_calls`` by opaque ``tool_call_id`` ==
++    ``tool_calls[].id`` (K3 drops the ``func:index`` format requirement) and
++    sorted by the matched 1-based position. The matched call is authoritative,
++    so each matched message's ``tool`` is set to that call's function name --
++    this keeps an explicit (and possibly stale) ``tool``/``name`` from drifting
++    out of sync with the reordered position. ``index`` is still derived from the
++    rendered position by the chat template. A run that cannot be fully matched is
++    left untouched. Re-running is idempotent.
++
++    This function is side-effect free: matched tool messages are shallow-copied
++    before their ``tool``/``name`` is rewritten, and every other message is
++    appended to the output as-is. The input list and its message objects are
++    never mutated.
++    """
++    if not isinstance(messages, list):
++        return messages
++
++    output: list[Any] = []
++    current_index: dict = {}
++    i = 0
++    n = len(messages)
++
++    while i < n:
++        message = messages[i]
++
++        if isinstance(message, dict) and message.get("role") == "assistant":
++            tool_calls = message.get("tool_calls")
++            current_index = _tool_call_id_index(tool_calls) if tool_calls else {}
++            output.append(message)
++            i += 1
++            continue
++
++        if not isinstance(message, dict) or message.get("role") != "tool":
++            output.append(message)
++            i += 1
++            continue
++
++        run: list[tuple] = []  # (position, original_offset, message, name)
++        unresolved = False
++        offset = 0
++        while (
++            i < n
++            and isinstance(messages[i], dict)
++            and messages[i].get("role") == "tool"
++        ):
++            tool_message = messages[i]
++            call_id = tool_message.get("tool_call_id", tool_message.get("id"))
++            matched = current_index.get(str(call_id)) if call_id is not None else None
++            if matched is None:
++                unresolved = True
++                run.append((None, offset, tool_message, None))
++            else:
++                position, name = matched
++                run.append((position, offset, tool_message, name))
++            offset += 1
++            i += 1
++
++        if unresolved:
++            output.extend(item[2] for item in run)
++        else:
++            run.sort(key=lambda item: (item[0], item[1]))
++            for _, _, tool_message, name in run:
++                if name is None:
++                    output.append(tool_message)
++                    continue
++                # The id-matched call is authoritative: align tool (and any
++                # explicit name) so the rendered XTML tool attribute cannot
++                # disagree with the reordered position. Copy first so the
++                # caller's message object is never mutated.
++                resolved = dict(tool_message)
++                resolved["tool"] = name
++                if "name" in resolved:
++                    resolved["name"] = name
++                output.append(resolved)
++
++    return output
++
++
++def is_batched_conversation(conversation: Any) -> bool:
++    return (
++        isinstance(conversation, list)
++        and bool(conversation)
++        and isinstance(conversation[0], list)
++    )
++
++
++def _render_content_segments(
++    content: Any,
++    image_state: _ImagePromptState,
++) -> list[EncodeSegment]:
++    segments: list[EncodeSegment] = []
++    if isinstance(content, str):
++        _append_text(segments, content, image_state)
++    elif content is not None:
++        for part in content:
++            if part["type"] in ["image", "image_url"]:
++                segments.extend(_segment(image_state.next_prompt(), allow_special=True))
++            else:
++                _append_text(segments, part["text"], image_state)
++    return segments
++
++
++def _internal_system_message(message_type: str, body: str) -> list[EncodeSegment]:
++    segments: list[EncodeSegment] = []
++    segments.extend(_open_tag("message", [("role", "system"), ("type", message_type)]))
++    segments.extend(_text(body.strip()))
++    segments.extend(_close_tag("message"))
++    segments.extend(_end_of_msg())
++    return segments
++
++
++def _render_assistant_segments(
++    message: dict[str, Any],
++    image_state: _ImagePromptState,
++    thinking: bool = True,
++) -> list[EncodeSegment]:
++    segments: list[EncodeSegment] = []
++    # The <think> channel is structural: in thinking mode every assistant
++    # message carries the open/close tags even when there is no reasoning
++    # content to fill in. In non-thinking mode the channel is dropped
++    # entirely.
++    if thinking:
++        reasoning_content = message.get("reasoning_content") or message.get("reasoning")
++        segments.extend(_open_tag("think"))
++        if reasoning_content is not None and str(reasoning_content).strip():
++            _append_text(segments, reasoning_content, image_state)
++        segments.extend(_close_tag("think"))
++
++    segments.extend(_open_tag("response"))
++    segments.extend(_render_content_segments(message.get("content"), image_state))
++    segments.extend(_close_tag("response"))
++
++    tool_calls = message.get("tool_calls")
++    if tool_calls:
++        segments.extend(_open_tag("tools"))
++        for index, tool_call in enumerate(tool_calls, start=1):
++            fn = tool_call.get("function", tool_call)
++            segments.extend(_open_tag("call", [("tool", fn["name"]), ("index", index)]))
++            args = fn.get("arguments", {})
++            json_block = fn.get("_xtml_json_block")
++            if json_block is not None:
++                segments.extend(_open_tag("json", [("type", "object")]))
++                _append_text(segments, json_block, image_state)
++                segments.extend(_close_tag("json"))
++            elif _is_mapping(args):
++                for key, value in args.items():
++                    segments.extend(
++                        _open_tag(
++                            "argument",
++                            [("key", key), ("type", _xtml_type(value))],
++                        )
++                    )
++                    _append_text(segments, _xtml_value(value), image_state)
++                    segments.extend(_close_tag("argument"))
++            segments.extend(_close_tag("call"))
++        segments.extend(_close_tag("tools"))
++
++    return segments
++
++
++def _render_tool_declare(tools: Any, *, dynamic: bool = False) -> list[EncodeSegment]:
++    if dynamic:
++        body = (
++            "## New Tools Available\n"
++            "The system dynamically extends the toolset via lazy-loading.\n"
++            "You have access to all existing and extended tools.\n"
++            "Here are the specs for the extended tools.\n\n"
++            "```json\n"
++            f"{_json_compact(tools)}\n"
++            "```"
++        )
++    else:
++        body = (
++            "# Tools\n"
++            "Here are the available tools, described in JSONSchema.\n\n"
++            "```json\n"
++            f"{_json_compact(tools)}\n"
++            "```"
++        )
++    segments: list[EncodeSegment] = []
++    segments.extend(
++        _open_tag("message", [("role", "system"), ("type", "tool-declare")])
++    )
++    segments.extend(_text(body))
++    segments.extend(_close_tag("message"))
++    segments.extend(_end_of_msg())
++    return segments
++
++
++def build_chat_segments(
++    messages: list[Any],
++    tools: list[dict] | None = None,
++    *,
++    add_generation_prompt: bool = True,
++    thinking: bool = True,
++    image_prompts: list[str] | None = None,
++    **kwargs: Any,
++) -> list[EncodeSegment]:
++    # Re-sort tool results by tool_call_id at the lowest layer so every caller
++    # (processor or direct tokenizer) gets correctly ordered XTML. The helper is
++    # side-effect free, so the caller's message objects are left untouched.
++    messages = normalize_xtml_tool_result_messages(messages)
++    messages = normalize_conversation(messages)
++    tools = deep_sort_dict(tools)
++
++    kwargs = dict(kwargs)
++    response_format = kwargs.get("response_format")
++    if "response_schema" not in kwargs:
++        response_schema = extract_response_schema(response_format)
++        if response_schema is not None:
++            kwargs["response_schema"] = response_schema
++    if kwargs.get("response_schema") is not None:
++        kwargs["response_schema"] = deep_sort_dict(kwargs["response_schema"])
++
++    image_state = _ImagePromptState(image_prompts)
++    segments: list[EncodeSegment] = []
++
++    tool_calls = None
++    tool_index = 0
++
++    if tools:
++        segments.extend(_render_tool_declare(tools))
++
++    thinking_effort = kwargs.get("thinking_effort")
++    if thinking and thinking_effort is not None:
++        assert thinking_effort in _VALID_THINKING_EFFORTS, (
++            f"Unsupported thinking_effort={thinking_effort!r}; "
++            f"supported values are {sorted(_VALID_THINKING_EFFORTS)}."
++        )
++    if thinking and thinking_effort in _VALID_THINKING_EFFORTS:
++        segments.extend(
++            _internal_system_message(
++                "thinking-effort",
++                "`thinking_effort` guides on how much to think in your "
++                "thinking channel (not including the response channel), "
++                "supported values include `low`, `medium`, `high`, and `max`.\n"
++                f"Now the system is invoked with `thinking_effort={thinking_effort}`.",
++            )
++        )
++
++    for message_index, message in enumerate(messages):
++        if not isinstance(message, dict):
++            continue
++
++        role = message["role"]
++        if role == "user":
++            attrs = [("role", "user")]
++            if message.get("name"):
++                attrs.append(("name", message["name"]))
++            segments.extend(_open_tag("message", attrs))
++            segments.extend(
++                _render_content_segments(message.get("content"), image_state)
++            )
++            segments.extend(_close_tag("message"))
++            segments.extend(_end_of_msg())
++        elif role == "system" and message.get("tools"):
++            segments.extend(_render_tool_declare(message["tools"], dynamic=True))
++        elif role == "system":
++            attrs = [("role", "system")]
++            if message.get("name"):
++                attrs.append(("name", message["name"]))
++            segments.extend(_open_tag("message", attrs))
++            segments.extend(
++                _render_content_segments(message.get("content"), image_state)
++            )
++            segments.extend(_close_tag("message"))
++            segments.extend(_end_of_msg())
++        elif role == "tool":
++            tool_index += 1
++            tool_name = message.get("tool", message.get("name"))
++            if (
++                tool_name is None
++                and tool_calls is not None
++                and tool_index <= len(tool_calls)
++            ):
++                tc = tool_calls[tool_index - 1]
++                fn = tc.get("function", tc)
++                tool_name = fn["name"]
++            if tool_name is None:
++                raise ValueError(
++                    "Kimi K3 tool messages need a resolvable tool name: "
++                    "carry `tool`/`name`, or match a preceding assistant "
++                    "tool_call by order."
++                )
++            segments.extend(
++                _open_tag(
++                    "message",
++                    [("role", "tool"), ("tool", tool_name), ("index", tool_index)],
++                )
++            )
++            segments.extend(
++                _render_content_segments(message.get("content"), image_state)
++            )
++            segments.extend(_close_tag("message"))
++            segments.extend(_end_of_msg())
++        elif role == "assistant":
++            tool_calls = message.get("tool_calls")
++            tool_index = 0
++            attrs = [("role", "assistant")]
++            if message.get("name"):
++                attrs.append(("name", message["name"]))
++            segments.extend(_open_tag("message", attrs))
++            segments.extend(_render_assistant_segments(message, image_state, thinking))
++            segments.extend(_close_tag("message"))
++            segments.extend(_end_of_msg())
++
++    tool_choice = kwargs.get("tool_choice")
++    if tool_choice == "required":
++        segments.extend(
++            _internal_system_message(
++                "tool-choice",
++                "The system is invoked with `tool_choice=required`.\n"
++                "You MUST call tools in the next message.",
++            )
++        )
++    elif tool_choice == "none":
++        segments.extend(
++            _internal_system_message(
++                "tool-choice",
++                "The system is invoked with `tool_choice=none`.\n"
++                "You MUST NOT call any tools in the next message.",
++            )
++        )
++
++    rf = kwargs.get("response_format")
++    rf_type = _get_value(rf, "type", rf) if isinstance(rf, dict) else rf
++    if rf_type == "json_object":
++        segments.extend(
++            _internal_system_message(
++                "response-format",
++                "The system is invoked with `response_format=json_object`.\n"
++                "Your response must be raw JSON data without markdown code "
++                "blocks (```json) or any additional formatting.",
++            )
++        )
++    elif rf_type == "json_schema":
++        schema = _json_compact(kwargs.get("response_schema"))
++        segments.extend(
++            _internal_system_message(
++                "response-format",
++                "The system is invoked with `response_format=json_schema`.\n"
++                "Your response must be raw JSON data without markdown code "
++                "blocks (```json) or any additional formatting.\n"
++                "The JSON data must match the following schema:\n"
++                f"```json\n{schema}\n```",
++            )
++        )
++
++    if add_generation_prompt:
++        segments.extend(_open_tag("message", [("role", "assistant")]))
++        segments.extend(_open_tag("think" if thinking else "response"))
++
++    image_state.assert_consumed()
++    return segments
+diff --git a/vllm/tokenizers/kimi_k3_native.py b/vllm/tokenizers/kimi_k3_native.py
+new file mode 100644
+index 0000000..be6e6af
+--- /dev/null
++++ b/vllm/tokenizers/kimi_k3_native.py
+@@ -0,0 +1,441 @@
++# SPDX-License-Identifier: LicenseRef-Kimi-K3
++# Copyright (c) 2026 Moonshot AI
++"""Native Hugging Face tokenizer for Kimi K3.
++
++Ported from ``moonshotai/Kimi-K3`` at revision
++``9f62e4e9fffbd0a83ddd60e1c209d828994b3569`` so vLLM can load the
++checkpoint with ``trust_remote_code=False``. The implementation is unchanged
++apart from the in-tree import and the class name used for native registration.
++See ``vllm/third_party/kimi_k3/LICENSE``.
++"""
++
++import os
++from collections.abc import Iterator
++from logging import getLogger
++from pathlib import Path
++from shutil import copyfile
++from typing import cast
++
++import tiktoken
++from tiktoken.load import load_tiktoken_bpe
++from tokenizers import AddedToken
++from transformers.convert_slow_tokenizer import bytes_to_unicode
++from transformers.tokenization_utils import PreTrainedTokenizer
++
++from .kimi_k3_encoding import build_chat_segments, is_batched_conversation
++
++logger = getLogger(__name__)
++VOCAB_FILES_NAMES = {"vocab_file": "tiktoken.model"}
++
++
++class KimiK3Tokenizer(PreTrainedTokenizer):
++    """Tokenize and render Kimi K3 input with tiktoken.
++
++    Args:
++        vocab_file (`str`):
++            The path to the Tiktoken model file.
++        bos_token (`str` or `tokenizers.AddedToken`, *optional*):
++            The beginning-of-sequence token used during pretraining.
++        eos_token (`str` or `tokenizers.AddedToken`, *optional*):
++            The end of sequence token.
++        unk_token (`str` or `tokenizers.AddedToken`, *optional*):
++            The token used for vocabulary misses.
++        pad_token (`str` or `tokenizers.AddedToken`, *optional*):
++            The token used for padding sequences to equal lengths.
++        additional_special_tokens (list of `str`, *optional*):
++            Additional tokens to mark as special.
++    """
++
++    vocab_files_names = VOCAB_FILES_NAMES
++
++    model_input_names = ["input_ids", "attention_mask"]
++
++    special_tokens: dict[str, int]
++
++    num_reserved_special_tokens = 256
++
++    pat_str = "|".join(
++        [
++            r"""[\p{Han}]+""",
++            r"""[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?""",
++            r"""[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?""",
++            r"""\p{N}{1,3}""",
++            r""" ?[^\s\p{L}\p{N}]+[\r\n]*""",
++            r"""\s*[\r\n]+""",
++            r"""\s+(?!\S)""",
++            r"""\s+""",
++        ]
++    )
++
++    def __init__(
++        self,
++        vocab_file,
++        bos_token: str | AddedToken = "[BOS]",
++        eos_token: str | AddedToken = "[EOS]",
++        unk_token: str | AddedToken | None = None,
++        pad_token: str | AddedToken | None = None,
++        additional_special_tokens: list[str] = None,
++        added_tokens_decoder: dict | None = None,
++        **kwargs,
++    ):
++        assert os.path.isfile(vocab_file), vocab_file
++
++        if additional_special_tokens is None:
++            additional_special_tokens = [
++                "<|im_end|>",
++                "<|im_user|>",
++                "<|im_assistant|>",
++                "<|start_header_id|>",
++                "<|end_header_id|>",
++                "[EOT]",
++                "<|im_system|>",
++                "<|im_middle|>",
++            ]
++
++        if added_tokens_decoder:
++            special_tokens_mapping = {
++                i: added_tokens_decoder[i].content for i in added_tokens_decoder
++            }
++        else:
++            special_tokens_mapping = {}
++
++        self.vocab_file = vocab_file
++        mergeable_ranks = load_tiktoken_bpe(vocab_file)
++        num_base_tokens = len(mergeable_ranks)
++        self.special_tokens = {
++            special_tokens_mapping.get(i, f"<|reserved_token_{i}|>"): i
++            for i in range(
++                num_base_tokens, num_base_tokens + self.num_reserved_special_tokens
++            )
++        }
++
++        self.model = tiktoken.Encoding(
++            name=Path(vocab_file).name,
++            pat_str=self.pat_str,
++            mergeable_ranks=mergeable_ranks,
++            special_tokens=self.special_tokens,
++        )
++        logger.info("Reloaded tiktoken model from %s", vocab_file)
++
++        self.n_words: int = self.model.n_vocab
++        # BOS / EOS token IDs
++        self.bos_id: int = self.special_tokens[str(bos_token)]
++        self.eos_id: int = self.special_tokens[str(eos_token)]
++        logger.info(
++            "#words: %d - BOS ID: %d - EOS ID: %d",
++            self.n_words,
++            self.bos_id,
++            self.eos_id,
++        )
++
++        self.pad_id: int = self.special_tokens[str(pad_token)]
++        self.unk_id: int = self.special_tokens[str(unk_token)]
++
++        self.byte_encoder = bytes_to_unicode()
++        self.byte_decoder = {v: k for k, v in self.byte_encoder.items()}
++
++        self.decoder = {}
++        for i in range(self.n_words):
++            # Taken from https://gist.github.com/xenova/a452a6474428de0182b17605a98631ee
++            decoding = "".join(
++                [
++                    self.byte_encoder[ord(char)]
++                    for char in self.model.decode_single_token_bytes(i).decode(
++                        "latin-1"
++                    )
++                ]
++            )
++            self.decoder[i] = decoding
++
++        self.encoder = {}
++        for i in range(self.n_words):
++            if i in self.decoder:
++                self.encoder[self.decoder[i]] = i
++
++        super().__init__(
++            bos_token=bos_token,
++            eos_token=eos_token,
++            unk_token=unk_token,
++            pad_token=pad_token,
++            additional_special_tokens=additional_special_tokens,
++            added_tokens_decoder=added_tokens_decoder,
++            **kwargs,
++        )
++        self.all_special_ids_set = set(self.all_special_ids)
++
++    def _encode_text_piece(
++        self, text: str, allow_special_tokens: bool = True
++    ) -> list[int]:
++        # The tiktoken tokenizer can handle <=400k chars without
++        # pyo3_runtime.PanicException.
++        TIKTOKEN_MAX_ENCODE_CHARS = 400_000
++
++        # https://github.com/openai/tiktoken/issues/195
++        # Here we iterate over subsequences and split if we exceed the limit
++        # of max consecutive non-whitespace or whitespace characters.
++        MAX_NO_WHITESPACES_CHARS = 25_000
++
++        t: list[int] = []
++        for i in range(0, len(text), TIKTOKEN_MAX_ENCODE_CHARS):
++            for substr in self._split_whitespaces_or_nonwhitespaces(
++                text[i : i + TIKTOKEN_MAX_ENCODE_CHARS],
++                MAX_NO_WHITESPACES_CHARS,
++            ):
++                if allow_special_tokens:
++                    t.extend(
++                        # structural markers: encode <|...|> as their special token IDs
++                        self.model.encode(
++                            substr,
++                            allowed_special="all",
++                        )
++                    )
++                else:
++                    t.extend(
++                        # Encode user/tool markers as ordinary BPE tokens, never
++                        # as control tokens.
++                        self.model.encode(
++                            substr,
++                            disallowed_special=(),
++                        )
++                    )
++
++        return t
++
++    def encode(
++        self, text: str, allow_special_tokens: bool = True, **kwargs
++    ) -> list[int]:
++        """
++        Encodes a string into a list of token IDs.
++
++        Args:
++            text (str): The input string to be encoded.
++
++        Returns:
++            list[int]: A list of token IDs.
++        """
++        # Delegate uncommon options through the standard Transformers path.
++        # NOTE: our encode method is not compatible with the super().encode method,
++        #   e.g. split_special_tokens' default is True in our encode method.
++        if len(kwargs) > 0:
++            logger.warning("Calling super().encode with %s", kwargs)
++            return super().encode(text, **kwargs)
++
++        assert type(text) is str
++        return self._encode_text_piece(text, allow_special_tokens=allow_special_tokens)
++
++    def decode(self, token_ids: int | list[int], **kwargs) -> str:
++        """
++        Decodes a list of token IDs into a string.
++
++        Args:
++            token_ids (List[int]): The list of token IDs to be decoded.
++
++        Returns:
++            str: The decoded string.
++        """
++        # Delegate uncommon options through the standard Transformers path.
++        if len(kwargs) > 0:
++            return super().decode(token_ids, **kwargs)
++
++        if type(token_ids) is int:
++            token_ids = [token_ids]
++
++        return self.model.decode(cast(list[int], token_ids))
++
++    @staticmethod
++    def _split_whitespaces_or_nonwhitespaces(
++        s: str, max_consecutive_slice_len: int
++    ) -> Iterator[str]:
++        """
++        Split ``s`` into bounded whitespace or non-whitespace runs.
++        """
++        current_slice_len = 0
++        current_slice_is_space = s[0].isspace() if len(s) > 0 else False
++        slice_start = 0
++
++        for i in range(len(s)):
++            is_now_space = s[i].isspace()
++
++            if current_slice_is_space ^ is_now_space:
++                current_slice_len = 1
++                current_slice_is_space = is_now_space
++            else:
++                current_slice_len += 1
++                if current_slice_len > max_consecutive_slice_len:
++                    yield s[slice_start:i]
++                    slice_start = i
++                    current_slice_len = 1
++        yield s[slice_start:]
++
++    def _encode_chat_segments(self, segments) -> list[int]:
++        token_ids: list[int] = []
++        for segment in segments:
++            token_ids.extend(
++                self._encode_text_piece(
++                    segment.text,
++                    allow_special_tokens=segment.allow_special,
++                )
++            )
++        return token_ids
++
++    @staticmethod
++    def _truncate(
++        ids: list[int], truncation: bool = False, max_length: int | None = None
++    ) -> list[int]:
++        if truncation and max_length is not None:
++            return ids[:max_length]
++        return ids
++
++    def _format_chat_token_output(
++        self,
++        encoded_inputs: list[list[int]],
++        *,
++        is_batched: bool,
++        padding=False,
++        truncation: bool = False,
++        max_length: int | None = None,
++        return_tensors=None,
++        return_dict: bool = False,
++    ):
++        encoded_inputs = [
++            self._truncate(ids, truncation=truncation, max_length=max_length)
++            for ids in encoded_inputs
++        ]
++
++        needs_batch_encoding = (
++            is_batched or padding or return_tensors is not None or return_dict
++        )
++        if not needs_batch_encoding:
++            return encoded_inputs[0]
++
++        features = [
++            {"input_ids": ids, "attention_mask": [1] * len(ids)}
++            for ids in encoded_inputs
++        ]
++        batch = self.pad(
++            features,
++            padding=padding,
++            max_length=max_length if padding else None,
++            return_attention_mask=True,
++            return_tensors=return_tensors,
++        )
++
++        if return_dict:
++            return batch
++        if is_batched:
++            return batch["input_ids"]
++        return batch["input_ids"][0] if return_tensors is None else batch["input_ids"]
++
++    """ ----- Below are the abstract methods required by PreTrainedTokenizer ----- """
++
++    @property
++    def vocab_size(self) -> int:
++        return self.n_words
++
++    def get_vocab(self) -> dict[str, int]:
++        return self.encoder
++
++    def _tokenize(self, text: str, **kwargs) -> list[str]:
++        return [self.decoder[t] for t in self.encode(text)]
++
++    def _convert_token_to_id(self, token: str) -> int:
++        return self.encoder.get(token, self.unk_id)
++
++    def _convert_id_to_token(self, index: int) -> str:
++        return self.decoder.get(index)
++
++    @staticmethod
++    def clean_up_tokenization(out_string: str) -> str:
++        return out_string
++
++    def convert_tokens_to_string(self, tokens: list[str]) -> str:
++        text = "".join(tokens)
++        text = bytearray([self.byte_decoder[c] for c in text]).decode(
++            "utf-8", "replace"
++        )
++        return text
++
++    def save_vocabulary(
++        self, save_directory: str, filename_prefix: str | None = None
++    ) -> tuple[str]:
++        if not os.path.isdir(save_directory):
++            raise ValueError(
++                f"vocabulary path ({save_directory}) should be a directory"
++            )
++        out_vocab_file = os.path.join(
++            save_directory,
++            (filename_prefix + "-" if filename_prefix else "")
++            + VOCAB_FILES_NAMES["vocab_file"],
++        )
++
++        if os.path.abspath(self.vocab_file) != os.path.abspath(
++            out_vocab_file
++        ) and os.path.isfile(self.vocab_file):
++            copyfile(self.vocab_file, out_vocab_file)
++
++        return (out_vocab_file,)
++
++    def apply_chat_template(
++        self,
++        conversation,
++        tools: list[dict] | None = None,
++        tokenize: bool = False,
++        add_generation_prompt: bool = True,
++        thinking: bool = True,
++        padding=False,
++        truncation: bool = False,
++        max_length: int | None = None,
++        return_tensors=None,
++        return_dict: bool = False,
++        **kwargs,
++    ):
++        # Tokenizer-level rendering reorders tool result messages to match
++        # assistant tool_calls, normalizes per-call arguments and response
++        # schema, then encodes the resulting XTML structure segment-by-segment.
++        is_batched = is_batched_conversation(conversation)
++        conversations = conversation if is_batched else [conversation]
++        image_prompts = kwargs.pop("image_prompts", None)
++        if is_batched and image_prompts is not None:
++            raise ValueError("image_prompts is only supported for one chat.")
++
++        # by default set thinking effort to max
++        kwargs.setdefault("thinking_effort", "max")
++
++        segment_batches = [
++            build_chat_segments(
++                messages,
++                tools=tools,
++                add_generation_prompt=add_generation_prompt,
++                thinking=thinking,
++                image_prompts=image_prompts,
++                **kwargs,
++            )
++            for messages in conversations
++        ]
++
++        if not tokenize:
++            rendered = [
++                "".join(segment.text for segment in segments)
++                for segments in segment_batches
++            ]
++            return rendered if is_batched else rendered[0]
++
++        encoded_inputs = [
++            self._encode_chat_segments(segments) for segments in segment_batches
++        ]
++        return self._format_chat_token_output(
++            encoded_inputs,
++            is_batched=is_batched,
++            padding=padding,
++            truncation=truncation,
++            max_length=max_length,
++            return_tensors=return_tensors,
++            return_dict=return_dict,
++        )
++
++
++class TikTokenTokenizer(KimiK3Tokenizer):
++    """Checkpoint-compatible name for the native Kimi K3 tokenizer."""
++
++
++__all__ = ["KimiK3Tokenizer", "TikTokenTokenizer"]
+diff --git a/vllm/tokenizers/registry.py b/vllm/tokenizers/registry.py
+index 713c622..15fcf1b 100644
+--- a/vllm/tokenizers/registry.py
++++ b/vllm/tokenizers/registry.py
+@@ -39,6 +39,10 @@ _MODEL_TYPES_WITH_INCORRECT_TOKENIZER_CLASS: set[str] = {
+     "unlimited-ocr",
+ }
+
++# Model types whose Hub metadata only points at a remote tokenizer, while vLLM
++# ships a native equivalent that can be registered with HF AutoTokenizer.
++_MODEL_TYPES_WITH_NATIVE_HF_TOKENIZER: set[str] = {"kimi_k3"}
++
+ _VLLM_TOKENIZERS = {
+     # ``cohere`` mode uses the standard cached HF tokenizer; only the
+     # renderer (template stage) is replaced with a melody-based one.
+@@ -97,6 +101,28 @@ TokenizerRegistry = _TokenizerRegistry(
+ )
+
+
++def _register_native_hf_tokenizer(model_type: str | None) -> None:
++    """Register a vLLM-native tokenizer under its checkpoint class name."""
++    if model_type != "kimi_k3":
++        return
++
++    from transformers import AutoTokenizer
++
++    from vllm.tokenizers.kimi_k3_native import TikTokenTokenizer
++    from vllm.transformers_utils.configs.kimi_k3 import KimiK3Config
++
++    # Kimi K3 declares tokenizer_class="TikTokenTokenizer" as well as a remote
++    # auto_map. HF resolves named tokenizer classes by ``__name__`` before it
++    # considers the config mapping, so register the name-compatible native class.
++
++    with contextlib.suppress(ValueError):
++        AutoTokenizer.register(
++            KimiK3Config,
++            slow_tokenizer_class=TikTokenTokenizer,
++            exist_ok=True,
++        )
++
++
+ def resolve_tokenizer_args(
+     tokenizer_name: str | Path,
+     *args,
+@@ -235,6 +261,9 @@ def get_tokenizer(
+     # Some models have an incorrect tokenizer_class on the hub.
+     # For these model types, bypass AutoTokenizer and use TokenizersBackend directly.
+     model_type = getattr(config, "model_type", None) if config else None
++    if model_type in _MODEL_TYPES_WITH_NATIVE_HF_TOKENIZER:
++        _register_native_hf_tokenizer(model_type)
++
+     if model_type in _MODEL_TYPES_WITH_INCORRECT_TOKENIZER_CLASS:
+         from transformers.tokenization_utils_tokenizers import TokenizersBackend
+
+diff --git a/vllm/transformers_utils/processor.py b/vllm/transformers_utils/processor.py
+index aa33fae..075f3bc 100644
+--- a/vllm/transformers_utils/processor.py
++++ b/vllm/transformers_utils/processor.py
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
++import contextlib
+ import importlib
+ import inspect
+ from functools import lru_cache
+@@ -436,6 +437,46 @@ def cached_feature_extractor_from_config(
+     )
+
+
++def _maybe_register_native_image_processor(
++    processor_name: str,
++    revision: str | None,
++    trust_remote_code: bool,
++    kwargs: dict[str, Any],
++) -> None:
++    """Select a vLLM-native processor for remote-only Hub metadata."""
++    if trust_remote_code or kwargs.get("config") is not None:
++        return
++
++    from vllm.transformers_utils.config import get_config
++    from vllm.transformers_utils.configs.kimi_k3 import KimiK3Config
++    from vllm.transformers_utils.processors.kimi_k3_vision import (
++        KimiK3VisionProcessor,
++    )
++
++    config = None
++    with contextlib.suppress(ValueError, OSError):
++        config = get_config(
++            processor_name,
++            trust_remote_code=False,
++            revision=revision,
++            config_format="hf",
++        )
++
++    if type(config) is not KimiK3Config:
++        return
++
++    # K3's preprocessor_config.json has only a remote auto_map and no
++    # image_processor_type. Supplying the native config makes HF's local-code
++    # branch reachable; the registration then resolves the in-tree processor.
++    with contextlib.suppress(ValueError):
++        AutoImageProcessor.register(
++            KimiK3Config,
++            slow_image_processor_class=KimiK3VisionProcessor,
++            exist_ok=True,
++        )
++    kwargs["config"] = config
++
++
+ def get_image_processor(
+     processor_name: str,
+     *args: Any,
+@@ -447,6 +488,12 @@ def get_image_processor(
+     """Load an image processor for the given model name via HuggingFace."""
+     try:
+         processor_name = convert_model_repo_to_path(processor_name)
++        _maybe_register_native_image_processor(
++            processor_name,
++            revision,
++            trust_remote_code,
++            kwargs,
++        )
+         processor_cls = processor_cls_overrides or AutoImageProcessor
+         processor = processor_cls.from_pretrained(
+             processor_name,
+diff --git a/vllm/transformers_utils/processors/kimi_k3_media_utils.py b/vllm/transformers_utils/processors/kimi_k3_media_utils.py
+new file mode 100644
+index 0000000..16e041a
+--- /dev/null
++++ b/vllm/transformers_utils/processors/kimi_k3_media_utils.py
+@@ -0,0 +1,389 @@
++# SPDX-License-Identifier: LicenseRef-Kimi-K3
++# Copyright (c) 2026 Moonshot AI
++"""Media helpers for the native Kimi K3 image processor.
++
++Vendored from ``moonshotai/Kimi-K3`` at revision
++``9f62e4e9fffbd0a83ddd60e1c209d828994b3569`` without semantic changes.
++See ``vllm/third_party/kimi_k3/LICENSE``.
++"""
++
++import base64
++import functools
++import io
++import math
++from dataclasses import dataclass
++from typing import Literal, TypedDict
++
++import numpy as np
++from PIL import Image
++
++
++class ImageInput(TypedDict):
++    type: Literal["image"]
++    image: Image.Image
++
++
++MediaInput = ImageInput
++
++
++@dataclass
++class TransparentBgConfig:
++    """The config of the transparent background."""
++
++    pattern: Literal["white", "black", "gray", "chessboard"] = "black"
++    """The pattern of the transparent background."""
++
++    chessboard_square_size: int = 16
++    """The size of the squares in the chessboard background."""
++
++    chessboard_square_on_top_left: bool = True
++    """Whether to start the chessboard with a white square on the top left."""
++
++    chessboard_white_value: int = 255
++    """The value of the white pixels in the background."""
++
++    chessboard_gray_value: int = 200
++    """The value of the gray pixels in the background."""
++
++
++@functools.lru_cache(maxsize=256)
++def _create_chessboard_background(
++    height: int,
++    width: int,
++    square_size: int,
++    square_on_top_left: bool,
++    white_value: int,
++    gray_value: int,
++) -> np.ndarray:
++    """Create a chessboard background."""
++    bg = np.ones((height, width, 3), dtype=np.uint8) * white_value
++    for y in range(0, height, square_size):
++        for x in range(0, width, square_size):
++            if (y // square_size + x // square_size) % 2 == (
++                1 if square_on_top_left else 0
++            ):
++                bg[y : y + square_size, x : x + square_size] = gray_value
++    return bg
++
++
++def fill_transparent_bg_with(
++    image: Image.Image,
++    transparent_bg_config: TransparentBgConfig | None = None,
++) -> Image.Image:
++    """Composite a (possibly) transparent image onto a configured background.
++
++    When ``transparent_bg_config`` is ``None``, the image is simply converted
++    to RGB (preserving the historical behavior). Otherwise the alpha channel
++    is alpha-composited over a background generated according to the config.
++    """
++    if transparent_bg_config is None:
++        return image.convert("RGB")
++
++    if image.mode == "RGB":
++        return image
++
++    has_alpha = "A" in image.getbands() or "transparency" in image.info
++    if not has_alpha:
++        return image.convert("RGB")
++
++    img = np.array(image.convert("RGBA"))
++    height, width = img.shape[:2]
++    bg_pattern = transparent_bg_config.pattern
++    if bg_pattern == "white":
++        bg = np.full((height, width, 3), 255, dtype=np.uint8)
++    elif bg_pattern == "black":
++        bg = np.zeros((height, width, 3), dtype=np.uint8)
++    elif bg_pattern == "gray":
++        bg = np.full((height, width, 3), 128, dtype=np.uint8)
++    elif bg_pattern == "chessboard":
++        bg = _create_chessboard_background(
++            height,
++            width,
++            transparent_bg_config.chessboard_square_size,
++            transparent_bg_config.chessboard_square_on_top_left,
++            transparent_bg_config.chessboard_white_value,
++            transparent_bg_config.chessboard_gray_value,
++        )
++    else:
++        raise ValueError(f"Invalid background pattern: {bg_pattern}")
++
++    alpha = img[:, :, 3]
++    img_rgb = img[:, :, :3]
++    alpha_normalized = alpha.astype(np.float32) / 255.0
++    alpha_3d = np.stack([alpha_normalized] * 3, axis=2)
++    result = alpha_3d * img_rgb + (1 - alpha_3d) * bg
++    result = result.astype(np.uint8)
++    return Image.fromarray(result)
++
++
++def navit_resize_image(
++    width: int,
++    height: int,
++    patch_size: int,
++    merge_kernel_size: int,
++    in_patch_limit: int,
++    patch_limit_on_one_side: int,
++    fixed_output_tokens: int | None,
++):
++    # Apply the patch limits.
++    s1 = math.sqrt(
++        in_patch_limit
++        / (max(1.0, width // patch_size) * max(1.0, height // patch_size))
++    )
++    s2 = patch_limit_on_one_side * patch_size / width
++    s3 = patch_limit_on_one_side * patch_size / height
++    scale = min(1.0, s1, s2, s3)
++    new_w, new_h = max(1, int(width * scale)), max(1, int(height * scale))
++    new_w = min(new_w, patch_limit_on_one_side * patch_size)
++    new_h = min(new_h, patch_limit_on_one_side * patch_size)
++
++    # Pad height and width to the merged-patch alignment.
++    factor = merge_kernel_size * patch_size
++
++    pad_height = (factor - new_h % factor) % factor
++    pad_width = (factor - new_w % factor) % factor
++
++    if fixed_output_tokens is not None:
++        num_tokens = fixed_output_tokens
++    else:
++        # Calculate new dimensions after padding and patching
++        token_height = (new_h + pad_height) // factor
++        token_width = (new_w + pad_width) // factor
++
++        assert token_height * merge_kernel_size <= patch_limit_on_one_side, (
++            f"token_height {token_height} * merge_kernel_size "
++            f"{merge_kernel_size} > patch_limit_on_one_side "
++            f"{patch_limit_on_one_side}"
++        )
++        assert token_width * merge_kernel_size <= patch_limit_on_one_side, (
++            f"token_width {token_width} * merge_kernel_size "
++            f"{merge_kernel_size} > patch_limit_on_one_side "
++            f"{patch_limit_on_one_side}"
++        )
++
++        num_tokens = token_height * token_width
++    return {
++        "num_tokens": num_tokens,
++        "new_width": new_w,
++        "new_height": new_h,
++        "pad_width": pad_width,
++        "pad_height": pad_height,
++        "sampled_nframes": 1,
++    }
++
++
++def _to_pil(
++    data: str | bytes | Image.Image,
++    transparent_bg_config: TransparentBgConfig | None = None,
++    to_rgb: bool = True,
++) -> Image.Image:
++    """Load an image and (optionally) composite its transparent background.
++
++    Args:
++        data: A PIL Image, a base64 ``data:`` URL, a file path, or raw bytes.
++        transparent_bg_config: The config used to fill the transparent
++            background. ``None`` keeps the historical behavior of converting
++            to RGB without compositing.
++        to_rgb: If ``False`` the image is returned as-is (the
++            ``transparent_bg_config`` is ignored). The caller is then
++            expected to call :func:`fill_transparent_bg_with` later — e.g.
++            after a resize.
++    """
++    if isinstance(data, Image.Image):
++        image = data
++    elif isinstance(data, str):
++        if data.startswith("data:"):
++            raw_base64 = data.split(",")[1]
++            image = Image.open(io.BytesIO(base64.b64decode(raw_base64)))
++        else:
++            image = Image.open(data)
++    elif isinstance(data, bytes):
++        image = Image.open(io.BytesIO(data))
++    else:
++        raise ValueError(f"Unsupported data type: {type(data)}")
++
++    if not to_rgb:
++        return image
++
++    return fill_transparent_bg_with(image, transparent_bg_config)
++
++
++def ensure_media_type(
++    media: MediaInput,
++    transparent_bg_config: TransparentBgConfig | None = None,
++    transparent_bg_fill_stage: Literal[
++        "before_resize", "after_resize"
++    ] = "before_resize",
++) -> MediaInput:
++    if media["type"] == "image":
++        media["image"] = _to_pil(
++            media["image"],
++            transparent_bg_config=transparent_bg_config,
++            to_rgb=transparent_bg_fill_stage == "before_resize",
++        )
++        return media
++    else:
++        raise ValueError(f"Unsupported media type: {media['type']}")
++
++
++def image_to_np(
++    image: Image.Image,
++    resize_to: tuple[int, int] | None = None,
++    mode: str = "resize",
++    raise_error_for_ill_resize: bool = True,
++    transparent_bg_config: TransparentBgConfig | None = None,
++    transparent_bg_fill_stage: Literal[
++        "before_resize", "after_resize"
++    ] = "before_resize",
++) -> np.ndarray:
++    """Convert an image to a numpy array.
++
++    Args:
++        content: The image to convert.
++        resize_to: The size to resize the image to.
++        mode: The mode to resize the image to.
++        raise_error_for_ill_resize: Whether to raise an error for ill-sized resize.
++        transparent_bg_config: The config of the transparent background. Only
++            used when ``transparent_bg_fill_stage == "after_resize"`` (the
++            caller is responsible for filling before resize otherwise).
++        transparent_bg_fill_stage: When to composite the transparent
++            background — before or after the resize step.
++
++    Returns:
++        A numpy array.
++    """
++    assert isinstance(image, Image.Image), "image must be a PIL Image"
++    if resize_to is not None:
++        if mode == "resize":
++            image = image.resize(resize_to, resample=Image.Resampling.BICUBIC)
++            if transparent_bg_fill_stage == "after_resize":
++                image = fill_transparent_bg_with(image, transparent_bg_config)
++
++        elif mode == "rescale_and_pad_to_center":
++            scale = min(resize_to[0] / image.width, resize_to[1] / image.height, 1.0)
++            new_width = round(image.width * scale)
++            new_height = round(image.height * scale)
++            if new_width == 0 or new_height == 0:
++                if raise_error_for_ill_resize:
++                    raise ValueError(
++                        f"Invalid resize to: {resize_to}, from image size: {image.size}"
++                    )
++                else:
++                    return np.zeros((resize_to[1], resize_to[0], 3), dtype=np.uint8)
++
++            image = image.resize(
++                (new_width, new_height), resample=Image.Resampling.BICUBIC
++            )
++            if transparent_bg_fill_stage == "after_resize":
++                image = fill_transparent_bg_with(image, transparent_bg_config)
++            padding_left = (resize_to[0] - new_width) // 2
++            padding_right = resize_to[0] - new_width - padding_left
++            padding_top = (resize_to[1] - new_height) // 2
++            padding_bottom = resize_to[1] - new_height - padding_top
++            image = np.asarray(image)
++            image = np.pad(
++                image,
++                ((padding_top, padding_bottom), (padding_left, padding_right), (0, 0)),
++                mode="constant",
++                constant_values=0,
++            )
++            assert image.shape == (resize_to[1], resize_to[0], 3)
++
++        elif mode == "rescale_and_pad_to_rightbottom":
++            scale = min(resize_to[0] / image.width, resize_to[1] / image.height, 1.0)
++            new_width = round(image.width * scale)
++            new_height = round(image.height * scale)
++            if new_width == 0 or new_height == 0:
++                if raise_error_for_ill_resize:
++                    raise ValueError(
++                        f"Invalid resize to: {resize_to}, from image size: {image.size}"
++                    )
++                else:
++                    return np.zeros((resize_to[1], resize_to[0], 3), dtype=np.uint8)
++
++            image = image.resize(
++                (new_width, new_height), resample=Image.Resampling.BICUBIC
++            )
++            if transparent_bg_fill_stage == "after_resize":
++                image = fill_transparent_bg_with(image, transparent_bg_config)
++            padding_right = resize_to[0] - new_width
++            padding_bottom = resize_to[1] - new_height
++            image = np.asarray(image)
++            image = np.pad(
++                image,
++                ((0, padding_bottom), (0, padding_right), (0, 0)),
++                mode="constant",
++                constant_values=0,
++            )
++            assert image.shape == (resize_to[1], resize_to[0], 3)
++
++        else:
++            raise ValueError(f"Invalid mode: {mode}")
++
++    if isinstance(image, Image.Image):
++        return np.asarray(image)
++    else:
++        return image
++
++
++def navit_patchify(pixel_values: np.ndarray, patch_size: int) -> dict[str, np.ndarray]:
++    """Reshape the pixel values to a navit shape.
++
++    Args:
++        pixel_values: np.ndarray, shape (t, h, w, c)
++        patch_size: int
++
++    Returns:
++        dict[str, np.ndarray]
++        - patches: np.ndarray, one row per spatial patch
++        - grid_thw: np.ndarray, (t, h//patch_size, w//patch_size)
++    """
++    T, H, W, C = pixel_values.shape
++    assert C == 3, "pixel_values must have 3 channels"
++
++    patches = pixel_values.reshape(
++        T, H // patch_size, patch_size, W // patch_size, patch_size, C
++    )
++    # (T, H//patch_size, W//patch_size, C, patch_size, patch_size)
++    patches = patches.transpose(0, 1, 3, 5, 2, 4)
++    patches = patches.reshape(-1, C, patch_size, patch_size)
++    grid_thw = np.array([T, H // patch_size, W // patch_size])
++    return {"pixel_values": patches, "grid_thw": grid_thw}
++
++
++def normalize(
++    x: np.ndarray, mean, std_inv, pixels_dtype: np.dtype = np.float32
++) -> np.ndarray:
++    """Normalize the image.
++
++    Args:
++        x: The uint8 image to normalize, with shape ``(..., 3)``.
++        mean: The mean of the image.
++        std_inv: The inverse of the std of the image.
++        pixels_dtype: The dtype of the image.
++    Returns:
++        The normalized ``(..., 3)`` image using ``pixels_dtype``.
++    """
++    x = (x / 255.0).astype(pixels_dtype)
++    x -= mean
++    x *= std_inv
++    return x
++
++
++def _to_tensor(data, **kwargs):
++    import torch
++
++    if isinstance(data, np.ndarray):
++        return torch.from_numpy(data).to(**kwargs)
++    elif isinstance(data, torch.Tensor):
++        return data.to(**kwargs)
++    elif isinstance(data, list):
++        return [_to_tensor(item, **kwargs) for item in data]
++    elif isinstance(data, tuple):
++        return tuple(_to_tensor(item, **kwargs) for item in data)
++    elif isinstance(data, dict):
++        return {k: _to_tensor(v, **kwargs) for k, v in data.items()}
++    elif data is None:
++        return None
++    else:
++        raise ValueError(f"Unsupported data type: {type(data)}")
+diff --git a/vllm/transformers_utils/processors/kimi_k3_vision.py b/vllm/transformers_utils/processors/kimi_k3_vision.py
+new file mode 100644
+index 0000000..65483cd
+--- /dev/null
++++ b/vllm/transformers_utils/processors/kimi_k3_vision.py
+@@ -0,0 +1,210 @@
++# SPDX-License-Identifier: LicenseRef-Kimi-K3
++# Copyright (c) 2026 Moonshot AI
++"""Native image processor for Kimi K3.
++
++Ported from ``moonshotai/Kimi-K3`` at revision
++``9f62e4e9fffbd0a83ddd60e1c209d828994b3569`` so vLLM can load the
++checkpoint with ``trust_remote_code=False``. The only implementation change is
++the in-tree media-helper import. See ``vllm/third_party/kimi_k3/LICENSE``.
++"""
++
++import json
++from typing import Any
++
++import numpy as np
++import torch
++from PIL import Image
++from transformers.image_processing_utils import BaseImageProcessor, BatchFeature
++from transformers.utils import TensorType
++
++from .kimi_k3_media_utils import (
++    MediaInput,
++    TransparentBgConfig,
++    _to_tensor,
++    ensure_media_type,
++    image_to_np,
++    navit_patchify,
++    navit_resize_image,
++    normalize,
++)
++
++
++class KimiK3VisionProcessor(BaseImageProcessor):
++    model_type = "kimi_k3"
++
++    def __init__(
++        self,
++        media_proc_cfg: dict,
++        **kwargs,
++    ):
++        super().__init__(**kwargs)
++        self.media_proc_cfg = media_proc_cfg
++
++    @property
++    def _transparent_bg_config(self) -> TransparentBgConfig | None:
++        cfg = self.media_proc_cfg.get("transparent_bg_config")
++        if cfg is None:
++            return None
++        if isinstance(cfg, TransparentBgConfig):
++            return cfg
++        return TransparentBgConfig(**cfg)
++
++    @property
++    def _transparent_bg_fill_stage(self) -> str:
++        return self.media_proc_cfg.get("transparent_bg_fill_stage", "before_resize")
++
++    def media_tokens_calculator(self, media: MediaInput):
++        media = ensure_media_type(
++            media,
++            transparent_bg_config=self._transparent_bg_config,
++            transparent_bg_fill_stage=self._transparent_bg_fill_stage,
++        )
++        ret = self.get_resize_config(media)
++        return ret["num_tokens"]
++
++    @classmethod
++    def make_image_prompt(cls, width: int, height: int) -> str:
++        """Build the K3 image placeholder with resolution info."""
++        return (
++            f"<|media_begin|>image {width}x{height}"
++            f"<|media_content|><|media_pad|><|media_end|>"
++        )
++
++    def get_resize_config(self, media_input: MediaInput) -> dict:
++        if media_input["type"] == "image":
++            w, h = media_input["image"].size
++            ret = navit_resize_image(
++                w,
++                h,
++                self.media_proc_cfg["patch_size"],
++                self.media_proc_cfg["merge_kernel_size"],
++                self.media_proc_cfg["in_patch_limit"],
++                self.media_proc_cfg["patch_limit_on_one_side"],
++                self.media_proc_cfg["fixed_output_tokens"],
++            )
++            return ret
++        else:
++            raise ValueError("Unsupported type: {}".format(media_input["type"]))
++
++    def resize_image(
++        self,
++        image: Image.Image,
++        new_width: int,
++        new_height: int,
++        pad_width: int,
++        pad_height: int,
++    ) -> np.ndarray:
++        image_np = image_to_np(
++            image,
++            (new_width, new_height),
++            "resize",
++            transparent_bg_config=self._transparent_bg_config,
++            transparent_bg_fill_stage=self._transparent_bg_fill_stage,
++        )
++        image_np = np.pad(
++            image_np,
++            ((0, pad_height), (0, pad_width), (0, 0)),
++            mode="constant",
++            constant_values=0,
++        )
++        return image_np
++
++    def preprocess(
++        self,
++        medias: list[MediaInput],
++        return_tensors: str | TensorType | None = None,
++    ) -> BatchFeature:
++        """
++        Preprocess a atom vision input (images) into model-ready tensors.
++
++        Args:
++            medias: List of MediaInput.
++            return_tensors: Desired output format ('pt', 'np', 'tf', or None).
++
++        Returns:
++            BatchFeature containing 'pixel_values' and 'grid_thws' tensors.
++        """
++        if not isinstance(medias, list):
++            medias = [medias]
++        if medias:
++            pixel_values = []
++            for item in medias:
++                item = ensure_media_type(
++                    item,
++                    transparent_bg_config=self._transparent_bg_config,
++                    transparent_bg_fill_stage=self._transparent_bg_fill_stage,
++                )
++                resize_config = self.get_resize_config(item)
++                new_width, new_height, pad_width, pad_height = (
++                    resize_config["new_width"],
++                    resize_config["new_height"],
++                    resize_config["pad_width"],
++                    resize_config["pad_height"],
++                )
++                if item["type"] == "image":
++                    image = item["image"]
++                    image_np = self.resize_image(
++                        image, new_width, new_height, pad_width, pad_height
++                    )
++                    pixel_values.append(np.expand_dims(image_np, axis=0))
++                else:
++                    raise ValueError("Unsupported type: {}".format(item["type"]))
++            normalized_pixel_values = []
++            image_std_inv = 1.0 / np.array(self.media_proc_cfg["image_std"])
++            image_mean = np.array(self.media_proc_cfg["image_mean"])
++            for pixels in pixel_values:
++                pixels = normalize(pixels, image_mean, image_std_inv)
++                pixels_and_thw = navit_patchify(
++                    pixels,
++                    self.media_proc_cfg["patch_size"],
++                )
++                normalized_pixel_values.append(pixels_and_thw)
++
++            pixel_values = torch.cat(
++                [
++                    _to_tensor(pixel_value["pixel_values"])
++                    for pixel_value in normalized_pixel_values
++                ]
++            )
++            grid_thws = torch.cat(
++                [
++                    _to_tensor(pixel_value["grid_thw"], dtype=torch.int64).unsqueeze(0)
++                    for pixel_value in normalized_pixel_values
++                ]
++            )
++
++            data = {
++                "pixel_values": pixel_values,
++                "grid_thws": grid_thws,
++            }
++
++        else:
++            data = {}
++
++        return BatchFeature(data=data, tensor_type=return_tensors)
++
++    def __repr__(self):
++        return f"KimiK3VisionProcessor(media_proc_cfg={self.media_proc_cfg})"
++
++    def to_dict(self) -> dict[str, Any]:
++        output = super().to_dict()
++        output["media_proc_cfg"] = self.media_proc_cfg
++        if "media_processor" in output:
++            del output["media_processor"]
++        return output
++
++    @classmethod
++    def from_dict(cls, config_dict: dict[str, Any], **kwargs):
++        config = config_dict.copy()
++        media_proc_cfg = config.pop("media_proc_cfg", {})
++        return cls(media_proc_cfg=media_proc_cfg, **config, **kwargs)
++
++    def to_json_string(self):
++        dictionary = self.to_dict()
++        for key, value in dictionary.items():
++            if hasattr(value, "tolist"):
++                dictionary[key] = value.tolist()
++        return json.dumps(dictionary, indent=2, sort_keys=True) + "\n"
++
++
++__all__ = ["KimiK3VisionProcessor"]
