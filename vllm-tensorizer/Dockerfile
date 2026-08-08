@@ -87,12 +87,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
-# Local vLLM patch stack — backports that missed releases/v0.26.0.
-COPY vllm-patches/ /git/vllm-patches/
-RUN git -C vllm apply -v --stat --apply /git/vllm-patches/*.patch && \
-    rm -rf /git/vllm-patches
-
-
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
 ARG FLASHINFER_COMMIT
@@ -126,7 +120,7 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='a6b593d2826719dcf4892609af7b84ee23aaf32a'
+ARG DEEPGEMM_COMMIT='2fd67329ec2942f65ba35d561256ab6ed3b903cb'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
@@ -218,7 +212,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       "${CUTLASS_DSL_PACKAGE}" \
-      'apache-tvm-ffi==0.1.10' && \
+      'apache-tvm-ffi==0.1.11' && \
     export FLASHINFER_LOCAL_VERSION="$(echo "${CUDA_VERSION}" | sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
@@ -279,12 +273,19 @@ RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/work
     /opt/build.sh
 
 FROM builder-base AS deepep-builder
-ARG DEEPEP_COMMIT='73b6ea4'
+ARG DEEPEP_COMMIT='d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb'
 ARG NVSHMEM_VER='3.3.24'
+ENV EP_NCCL_ROOT_DIR=/opt/nccl-root
 # DeepEP requires SM 9.0+ (Hopper/Blackwell). Filter out pre-SM90 arches
 # so Blackwell (10.0) is also supported.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/tmp/ep_kernels \
     python3 -m pip install --no-cache-dir uv && \
+    mkdir -p "${EP_NCCL_ROOT_DIR}" && \
+    test -f /usr/include/nccl_device.h && \
+    test -e "/usr/lib/$(gcc -print-multiarch)/libnccl.so" && \
+    ln -s /usr/include "${EP_NCCL_ROOT_DIR}/include" && \
+    ln -s "/usr/lib/$(gcc -print-multiarch)" "${EP_NCCL_ROOT_DIR}/lib" && \
+    export LIBRARY_PATH="${EP_NCCL_ROOT_DIR}/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}" && \
     . /opt/arch_flags.sh && \
     export NVCC_WRAPPER_FILTER_CODES="sm_80;sm_89;compute_80;compute_89;${NVCC_WRAPPER_FILTER_CODES}" && \
     WORKSPACE=/tmp/deepep_build MODE=wheel \
@@ -334,7 +335,7 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.26 pins nvidia-cutlass-dsl==4.6.0 but only floors quack-kernels (>=0.4.0).
+# vLLM 0.27 pins nvidia-cutlass-dsl==4.6.0 but only floors quack-kernels (>=0.6.1).
 # Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
 # so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
@@ -363,8 +364,16 @@ RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=deepep-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
+ENV EP_NCCL_ROOT_DIR=/opt/nccl-root
+RUN mkdir -p "${EP_NCCL_ROOT_DIR}" && \
+    test -f /usr/include/nccl_device.h && \
+    test -e "/usr/lib/$(gcc -print-multiarch)/libnccl.so" && \
+    ln -s /usr/include "${EP_NCCL_ROOT_DIR}/include" && \
+    ln -s "/usr/lib/$(gcc -print-multiarch)" "${EP_NCCL_ROOT_DIR}/lib"
+
 COPY --link --from=deepep-builder /nvshmem_libs/ /usr/local/lib/
 RUN ldconfig
+RUN python3 -c "import deep_ep"
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
@@ -376,7 +385,7 @@ ARG TARGETPLATFORM
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
 # * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) - verified
 #   no crash on this image with vllm 0.22
-# * llguidance pin mirrors vLLM 0.26's own requirement (>=1.7.0,<1.8.0); kept explicit so
+# * llguidance pin mirrors vLLM 0.27's own requirement (>=1.7.0,<1.8.0); kept explicit so
 #   JSON Schema "format": "uri" support (llguidance v1.6.0+) can't regress on future bumps
 
 # ray[cgraph]>=2.48.0 will unconditionally install cupy-cuda12x. Uninstall it and install cupy-cuda13x if CUDA major version is 13.
