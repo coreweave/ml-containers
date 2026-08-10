@@ -16,10 +16,10 @@ Signed-off-by: Ace Eldeib <aeldeib@coreweave.com>
  1 file changed, 26 insertions(+), 2 deletions(-)
 
 diff --git a/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh b/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
-index 896ba04..684b8f0 100644
+index d5605586..4e0360fd 100644
 --- a/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
 +++ b/include/flashinfer/trtllm/fused_moe/RoutingCustomPolicy.cuh
-@@ -435,6 +435,24 @@ struct ScaledSumNormalizePostprocess {
+@@ -471,6 +471,24 @@ struct ScaledSumNormalizePostprocess {
      }
    }
  
@@ -44,7 +44,7 @@ index 896ba04..684b8f0 100644
    /// Block-per-token variant: read un-biased sigmoid directly from smemAux
    /// (written by SigmoidBiasPreprocess::applyToSmem) instead of reloading bias
    /// and subtracting.  Saves one global memory read + one FMA per top-K lane.
-@@ -566,8 +584,14 @@ struct TopKExpertSelect {
+@@ -613,8 +631,14 @@ struct TopKExpertSelect {
      topk::reduceTopK(warp, warpTopKScore, warpTopKExpertIdx, score, idx, minScore, topK);
  
      // Apply postprocess (e.g. renormalize, softmax over top-K, scaled renormalize, ...)
@@ -59,5 +59,5 @@ index 896ba04..684b8f0 100644
 +                                params.mExpertSelectParams.mPostprocessParams);
 +    }
    }
- };
  
+   /// Lane-owned TopK variant. It shares the generic preprocess and exact
