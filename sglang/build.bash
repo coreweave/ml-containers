@@ -40,7 +40,7 @@ curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup
   | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
 export PATH="/root/.cargo/bin:${PATH}"
 
-# sglang (includes sgl-kernel)
+# sglang (includes sglang-kernel)
 : "${SGLANG_COMMIT:?}"
 (
 echo 'Building sglang'
@@ -58,11 +58,16 @@ sed -Ei \
 
 # Surface the Rust toolchain file at the repo root so rustup's CWD-upward
 # walk finds it when setuptools-rust invokes cargo from python/.
-ln -sf rust/sglang-grpc/rust-toolchain.toml .
+# Since v0.5.16 the toolchain file lives at the cargo workspace root (rust/)
+# rather than inside rust/sglang-grpc/.
+ln -sf rust/rust-toolchain.toml .
 
-# Build sgl-kernel (scikit-build-core + CMake; deps via FetchContent).
+# Build the AOT kernel package `sglang-kernel`, which python/pyproject.toml pins
+# to an exact version (scikit-build-core + CMake; deps via FetchContent).
+# Since v0.5.16 its sources live at python/sglang/kernels/aot/ instead of the
+# top-level sgl-kernel/ directory.
 (
-cd sgl-kernel
+cd python/sglang/kernels/aot
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 silences the cmake 4.x breakage on any
 # FetchContent sub-project (e.g. dlpack inside mscclpp) that still declares
 # cmake_minimum_required(VERSION < 3.5).
@@ -74,7 +79,10 @@ CMAKE_BUILD_PARALLEL_LEVEL="${_CMAKE_PARALLEL}" \
   python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
 )
 
-# Build sglang python package (includes setuptools-rust extension sglang-grpc).
+# Build sglang python package. Since v0.5.16 setup.py auto-discovers every
+# crate in the rust/ cargo workspace declaring [package.metadata.sglang]
+# python-module, so this builds sglang-grpc, sglang-mm and sglang-server (the
+# CUDA pyproject.toml sets no [tool.sglang] rust-extensions allowlist).
 _BUILD python |& _LOG sglang.log
 )
 
