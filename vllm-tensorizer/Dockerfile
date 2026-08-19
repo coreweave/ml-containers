@@ -351,7 +351,7 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.27 pins nvidia-cutlass-dsl==4.6.0 but only floors quack-kernels (>=0.6.1).
+# vLLM 0.27 pins nvidia-cutlass-dsl==4.6.0 but only floors quack-kernels (>=0.6.4).
 # Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
 # so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
