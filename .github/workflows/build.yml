@@ -23,6 +23,10 @@ on:
         required: false
         description: "Optional scope for isolated cache writes with shared-cache fallback"
         type: string
+      cache-fallback-scope:
+        required: false
+        description: "Optional canonical scope to read before the legacy shared cache"
+        type: string
       platforms:
         required: false
         description: "Platforms for which to build (default: linux/amd64,linux/arm64)"
@@ -131,23 +135,29 @@ jobs:
         id: cache
         env:
           CACHE_SCOPE: ${{ inputs.cache-scope }}
+          CACHE_FALLBACK_SCOPE: ${{ inputs.cache-fallback-scope }}
         run: |
           KEY="${{ matrix.arch }}-${{ inputs.image-name }}"
           [ -z "${{ inputs.cache-key }}" ] || KEY="${KEY}-${{ inputs.cache-key }}"
-          SHARED_REF="${{ needs.prepare.outputs.registry }}/buildcache:${KEY}"
+          LEGACY_REF="${{ needs.prepare.outputs.registry }}/buildcache:${KEY}"
           if [ -n "$CACHE_SCOPE" ]; then
             SCOPE_HASH=$(printf '%s' "$CACHE_SCOPE" | sha256sum | cut -c1-12)
-            WRITE_REF="${SHARED_REF}-ref-${SCOPE_HASH}"
+            WRITE_REF="${LEGACY_REF}-ref-${SCOPE_HASH}"
             {
               echo 'sources<<EOF'
               echo "type=registry,ref=${WRITE_REF}"
-              echo "type=registry,ref=${SHARED_REF}"
+              if [ -n "$CACHE_FALLBACK_SCOPE" ]; then
+                FALLBACK_HASH=$(printf '%s' "$CACHE_FALLBACK_SCOPE" | sha256sum | cut -c1-12)
+                FALLBACK_REF="${LEGACY_REF}-ref-${FALLBACK_HASH}"
+                [ "$FALLBACK_REF" = "$WRITE_REF" ] || echo "type=registry,ref=${FALLBACK_REF}"
+              fi
+              echo "type=registry,ref=${LEGACY_REF}"
               echo 'EOF'
               echo "destination=type=registry,ref=${WRITE_REF},mode=max"
             } >> "$GITHUB_OUTPUT"
           else
-            echo "sources=type=registry,ref=${SHARED_REF}" >> "$GITHUB_OUTPUT"
-            echo "destination=type=registry,ref=${SHARED_REF},mode=max" >> "$GITHUB_OUTPUT"
+            echo "sources=type=registry,ref=${LEGACY_REF}" >> "$GITHUB_OUTPUT"
+            echo "destination=type=registry,ref=${LEGACY_REF},mode=max" >> "$GITHUB_OUTPUT"
           fi
       - name: Build and push by digest
         id: docker-build

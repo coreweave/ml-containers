@@ -38,7 +38,8 @@ jobs:
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.tag-suffix }}
       cache-key: ${{ matrix.cache-key }}
-      cache-scope: ${{ github.ref_name != 'main' && github.ref_name || '' }}
+      cache-scope: ${{ github.ref_name }}
+      cache-fallback-scope: main
       build-contexts: |
         common=common
       object-storage-secrets: true
