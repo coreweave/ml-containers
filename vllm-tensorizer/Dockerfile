@@ -86,6 +86,9 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout "${VLLM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
+COPY vllm-mnnvl-lamport-multimem-store.patch /git/patch
+RUN git -C vllm apply -v --stat --apply /git/patch && \
+    rm /git/patch
 
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git

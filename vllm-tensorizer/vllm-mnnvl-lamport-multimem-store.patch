@@ -1,0 +1,59 @@
+diff --git a/csrc/custom_all_gather_reduce_scatter.cuh b/csrc/custom_all_gather_reduce_scatter.cuh
+index ac990d8106..26d9864f45 100644
+--- a/csrc/custom_all_gather_reduce_scatter.cuh
++++ b/csrc/custom_all_gather_reduce_scatter.cuh
+@@ -59,7 +59,7 @@ DINLINE LamportPack<P> load_lamport_pack(const P* ptr) {
+   static_assert(sizeof(P) == 16);
+   LamportPack<P> value;
+ #if !defined(USE_ROCM)
+-  asm volatile("ld.volatile.global.v4.u32 {%0, %1, %2, %3}, [%4];"
++  asm volatile("ld.acquire.sys.global.v4.u32 {%0, %1, %2, %3}, [%4];"
+                : "=r"(value.words[0]), "=r"(value.words[1]),
+                  "=r"(value.words[2]), "=r"(value.words[3])
+                : "l"(ptr)
+@@ -104,6 +104,31 @@ DINLINE P sanitize_lamport_payload(P packed) {
+   return value.packed;
+ }
+ 
++template <typename P>
++DINLINE void store_multimem_lamport_payload(P* ptr, P packed) {
++  static_assert(sizeof(P) == 16);
++  // multimem was introduced in PTX 8.1 (CUDA 12.1) for SM90 and newer.
++#if !defined(USE_ROCM) && CUDA_VERSION >= 12010 && defined(__CUDA_ARCH__) && \
++    (__CUDA_ARCH__ >= 900)
++  LamportPack<P> value{.packed = packed};
++  asm volatile("multimem.st.release.sys.global.v4.f32 [%0], {%1,%2,%3,%4};"
++               :
++               : "l"(ptr), "r"(value.words[0]), "r"(value.words[1]),
++                 "r"(value.words[2]), "r"(value.words[3])
++               : "memory");
++  // The multicast and rank-local pointers are virtual aliases of the same
++  // allocations. Order the multicast publication before local-alias polling.
++  asm volatile("fence.proxy.alias;" : : : "memory");
++#elif defined(USE_ROCM)
++  __builtin_trap();
++#else
++  // Multicast mappings do not exist before SM90. Fail closed if this kernel is
++  // ever dispatched for an unsupported target instead of issuing an undefined
++  // ordinary store to a multicast address.
++  asm volatile("trap;");
++#endif
++}
++
+ template <typename P>
+ DINLINE P wait_lamport_payload(const P* ptr) {
+   auto value = load_lamport_pack(ptr);
+@@ -213,8 +229,11 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
+   P local_value;
+   if (tid < size_per_rank) {
+     local_value = packed_input[tid];
+-    current_multicast[rank * size_per_rank + tid] =
+-        sanitize_lamport_payload(local_value);
++    // A CUDA multicast mapping may only be accessed with multimem PTX;
++    // ordinary global loads and stores have undefined behavior.
++    store_multimem_lamport_payload(
++        current_multicast + rank * size_per_rank + tid,
++        sanitize_lamport_payload(local_value));
+   }
+ #if !defined(USE_ROCM) && CUDA_VERSION >= 12000 && defined(__CUDA_ARCH__) && \
+     (__CUDA_ARCH__ >= 900)
