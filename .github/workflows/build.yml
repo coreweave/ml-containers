@@ -19,6 +19,10 @@ on:
         required: false
         description: "Optional sub-key to append to the image name for build layer caching"
         type: string
+      cache-scope:
+        required: false
+        description: "Optional scope for isolated cache writes with shared-cache fallback"
+        type: string
       platforms:
         required: false
         description: "Platforms for which to build (default: linux/amd64,linux/arm64)"
@@ -125,10 +129,26 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Compute cache key
         id: cache
+        env:
+          CACHE_SCOPE: ${{ inputs.cache-scope }}
         run: |
           KEY="${{ matrix.arch }}-${{ inputs.image-name }}"
           [ -z "${{ inputs.cache-key }}" ] || KEY="${KEY}-${{ inputs.cache-key }}"
-          echo "ref=${{ needs.prepare.outputs.registry }}/buildcache:${KEY}" >> "$GITHUB_OUTPUT"
+          SHARED_REF="${{ needs.prepare.outputs.registry }}/buildcache:${KEY}"
+          if [ -n "$CACHE_SCOPE" ]; then
+            SCOPE_HASH=$(printf '%s' "$CACHE_SCOPE" | sha256sum | cut -c1-12)
+            WRITE_REF="${SHARED_REF}-ref-${SCOPE_HASH}"
+            {
+              echo 'sources<<EOF'
+              echo "type=registry,ref=${WRITE_REF}"
+              echo "type=registry,ref=${SHARED_REF}"
+              echo 'EOF'
+              echo "destination=type=registry,ref=${WRITE_REF},mode=max"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "sources=type=registry,ref=${SHARED_REF}" >> "$GITHUB_OUTPUT"
+            echo "destination=type=registry,ref=${SHARED_REF},mode=max" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and push by digest
         id: docker-build
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294  # v7.0.0
@@ -146,8 +166,8 @@ jobs:
           secrets: |
             ${{ inputs.object-storage-secrets && format('s3_access_key_id={0}', secrets.SCCACHE_S3_ACCESS_KEY_ID) || '' }}
             ${{ inputs.object-storage-secrets && format('s3_secret_access_key={0}', secrets.SCCACHE_S3_SECRET_ACCESS_KEY) || '' }}
-          cache-from: type=registry,ref=${{ steps.cache.outputs.ref }}
-          cache-to: type=registry,ref=${{ steps.cache.outputs.ref }},mode=max
+          cache-from: ${{ steps.cache.outputs.sources }}
+          cache-to: ${{ steps.cache.outputs.destination }}
       - name: Export digest
         id: export
         run: echo "digest-${{ matrix.arch }}=${{ steps.docker-build.outputs.digest }}" >> "$GITHUB_OUTPUT"

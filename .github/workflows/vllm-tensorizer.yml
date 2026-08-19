@@ -5,6 +5,9 @@ on:
       - ".github/configurations/vllm-tensorizer.yml"
       - ".github/workflows/vllm-tensorizer.yml"
 
+concurrency:
+  group: vllm-tensorizer-${{ github.ref }}
+  queue: max
 
 jobs:
   get-config:
@@ -35,6 +38,7 @@ jobs:
       folder: vllm-tensorizer
       tag-suffix: ${{ matrix.tag-suffix }}
       cache-key: ${{ matrix.cache-key }}
+      cache-scope: ${{ github.ref_name != 'main' && github.ref_name || '' }}
       build-contexts: |
         common=common
       object-storage-secrets: true
