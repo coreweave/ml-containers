@@ -1,20 +1,15 @@
 diff --git a/csrc/custom_all_gather_reduce_scatter.cuh b/csrc/custom_all_gather_reduce_scatter.cuh
-index ac990d810..a1eba2dda 100644
+index ac990d8106..205fda019f 100644
 --- a/csrc/custom_all_gather_reduce_scatter.cuh
 +++ b/csrc/custom_all_gather_reduce_scatter.cuh
-@@ -59,7 +59,7 @@ DINLINE LamportPack<P> load_lamport_pack(const P* ptr) {
-   static_assert(sizeof(P) == 16);
-   LamportPack<P> value;
- #if !defined(USE_ROCM)
--  asm volatile("ld.volatile.global.v4.u32 {%0, %1, %2, %3}, [%4];"
-+  asm volatile("ld.acquire.sys.global.v4.u32 {%0, %1, %2, %3}, [%4];"
-                : "=r"(value.words[0]), "=r"(value.words[1]),
-                  "=r"(value.words[2]), "=r"(value.words[3])
-                : "l"(ptr)
-@@ -104,6 +104,31 @@ DINLINE P sanitize_lamport_payload(P packed) {
+@@ -104,6 +104,34 @@ DINLINE P sanitize_lamport_payload(P packed) {
    return value.packed;
  }
  
++__host__ __device__ constexpr int mnnvl_lamport_dirty_stage(uint32_t epoch) {
++  return (epoch + 2) % 3;
++}
++
 +template <typename P>
 +DINLINE void store_multimem_lamport_payload(P* ptr, P packed) {
 +  static_assert(sizeof(P) == 16);
@@ -22,14 +17,13 @@ index ac990d810..a1eba2dda 100644
 +#if !defined(USE_ROCM) && CUDA_VERSION >= 12010 && defined(__CUDA_ARCH__) && \
 +    (__CUDA_ARCH__ >= 900)
 +  LamportPack<P> value{.packed = packed};
-+  asm volatile("multimem.st.release.sys.global.v4.f32 [%0], {%1,%2,%3,%4};"
++  // The local alias remains sentinel until this strong system-scope write
++  // becomes observable; readers reject prior or partial values and retry.
++  asm volatile("multimem.st.relaxed.sys.global.v4.f32 [%0], {%1,%2,%3,%4};"
 +               :
 +               : "l"(ptr), "r"(value.words[0]), "r"(value.words[1]),
 +                 "r"(value.words[2]), "r"(value.words[3])
 +               : "memory");
-+  // The multicast and rank-local pointers are virtual aliases of the same
-+  // allocations. Order the multicast publication before local-alias polling.
-+  asm volatile("fence.proxy.alias;" : : : "memory");
 +#elif defined(USE_ROCM)
 +  __builtin_trap();
 +#else
@@ -43,18 +37,18 @@ index ac990d810..a1eba2dda 100644
  template <typename P>
  DINLINE P wait_lamport_payload(const P* ptr) {
    auto value = load_lamport_pack(ptr);
-@@ -199,7 +224,9 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
+@@ -199,7 +227,9 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
    int stride = gridDim.x * blockDim.x;
    uint32_t epoch = epochs[0];
    int current_stage = epoch % 3;
 -  int dirty_stage = (epoch + 1) % 3;
 +  // A peer may start the next epoch after we publish but before we finish.
 +  // Clean the previous stage, which cannot be reused until two epochs later.
-+  int dirty_stage = (epoch + 2) % 3;
++  int dirty_stage = mnnvl_lamport_dirty_stage(epoch);
    int dirty_size = epochs[2 + dirty_stage];
    auto local_buffer = reinterpret_cast<P*>(const_cast<void*>(dp.ptrs[rank]));
    auto current_local = local_buffer + current_stage * stage_size;
-@@ -213,8 +240,11 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
+@@ -213,8 +243,11 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
    P local_value;
    if (tid < size_per_rank) {
      local_value = packed_input[tid];
@@ -68,14 +62,14 @@ index ac990d810..a1eba2dda 100644
    }
  #if !defined(USE_ROCM) && CUDA_VERSION >= 12000 && defined(__CUDA_ARCH__) && \
      (__CUDA_ARCH__ >= 900)
-@@ -267,7 +297,9 @@ __global__ void __launch_bounds__(kMnnvlLamportRsThreads, 1)
+@@ -267,7 +300,9 @@ __global__ void __launch_bounds__(kMnnvlLamportRsThreads, 1)
    int stride = gridDim.x * blockDim.x;
    uint32_t epoch = epochs[0];
    int current_stage = epoch % 3;
 -  int dirty_stage = (epoch + 1) % 3;
 +  // A peer may start the next epoch after we publish but before we finish.
 +  // Clean the previous stage, which cannot be reused until two epochs later.
-+  int dirty_stage = (epoch + 2) % 3;
++  int dirty_stage = mnnvl_lamport_dirty_stage(epoch);
    int dirty_size = epochs[2 + dirty_stage];
    auto local_buffer = reinterpret_cast<P*>(const_cast<void*>(dp.ptrs[rank]));
    auto current_local = local_buffer + current_stage * stage_size;
