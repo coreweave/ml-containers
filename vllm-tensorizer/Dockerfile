@@ -133,6 +133,10 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout "${DEEPGEMM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
+COPY deepgemm-mega-moe-combine-fence.patch /git/deepgemm-mega-moe-combine-fence.patch
+RUN git -C DeepGEMM apply -v --stat --apply \
+      /git/deepgemm-mega-moe-combine-fence.patch && \
+    rm /git/deepgemm-mega-moe-combine-fence.patch
 
 
 # vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the

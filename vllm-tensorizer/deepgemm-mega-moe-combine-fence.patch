@@ -1,0 +1,38 @@
+diff --git a/deep_gemm/include/deep_gemm/impls/sm100_bf16_mega_moe.cuh b/deep_gemm/include/deep_gemm/impls/sm100_bf16_mega_moe.cuh
+--- a/deep_gemm/include/deep_gemm/impls/sm100_bf16_mega_moe.cuh
++++ b/deep_gemm/include/deep_gemm/impls/sm100_bf16_mega_moe.cuh
+@@ -1238,6 +1238,8 @@ sm100_bf16_mega_moe_impl(void* y,
+                         for (uint32_t l = 0; l < kNumElemsPerUint4; ++ l)
+                             ptx::accumulate(reduced[j * kNumElemsPerUint4 + l], bf16_values[l]);
+                     }
++                    // Order generic shared-memory reads before the next TMA load reuses this stage.
++                    ptx::fence_proxy_async_shared_cta();
+                     combine_phase ^= load_stage_idx;
+                     load_stage_idx ^= 1;
+                 }
+diff --git a/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_mega_moe.cuh b/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_mega_moe.cuh
+--- a/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_mega_moe.cuh
++++ b/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_mega_moe.cuh
+@@ -1416,6 +1416,8 @@ sm100_fp8_fp4_mega_moe_impl(void* y,
+                         for (uint32_t l = 0; l < kNumElemsPerUint4; ++ l)
+                             ptx::accumulate(reduced[j * kNumElemsPerUint4 + l], bf16_values[l]);
+                     }
++                    // Order generic shared-memory reads before the next TMA load reuses this stage.
++                    ptx::fence_proxy_async_shared_cta();
+                     combine_phase ^= load_stage_idx;
+                     load_stage_idx ^= 1;
+                 }
+diff --git a/deep_gemm/include/deep_gemm/ptx/utils.cuh b/deep_gemm/include/deep_gemm/ptx/utils.cuh
+--- a/deep_gemm/include/deep_gemm/ptx/utils.cuh
++++ b/deep_gemm/include/deep_gemm/ptx/utils.cuh
+@@ -28,6 +28,10 @@ CUTLASS_DEVICE void sync_unaligned(const uint32_t& num_threads, const uint32_t&
+     asm volatile("barrier.sync %0, %1;" : : "r"(barrier_idx), "r"(num_threads));
+ }
+ 
++CUTLASS_DEVICE void fence_proxy_async_shared_cta() {
++    asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
++}
++
+ template <typename dtype_t>
+ CUTLASS_DEVICE dtype_t exchange(dtype_t ptr, const uint32_t& src_lane_idx) {
+     DG_STATIC_ASSERT(sizeof(dtype_t) % sizeof(uint32_t) == 0, "");
