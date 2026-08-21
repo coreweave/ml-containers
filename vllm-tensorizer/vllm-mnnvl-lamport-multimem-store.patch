@@ -1,5 +1,5 @@
 diff --git a/csrc/custom_all_gather_reduce_scatter.cuh b/csrc/custom_all_gather_reduce_scatter.cuh
-index ac990d8106..205fda019f 100644
+index ac990d810..d42fce25b 100644
 --- a/csrc/custom_all_gather_reduce_scatter.cuh
 +++ b/csrc/custom_all_gather_reduce_scatter.cuh
 @@ -104,6 +104,34 @@ DINLINE P sanitize_lamport_payload(P packed) {
@@ -48,7 +48,7 @@ index ac990d8106..205fda019f 100644
    int dirty_size = epochs[2 + dirty_stage];
    auto local_buffer = reinterpret_cast<P*>(const_cast<void*>(dp.ptrs[rank]));
    auto current_local = local_buffer + current_stage * stage_size;
-@@ -213,8 +243,11 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
+@@ -213,12 +243,10 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
    P local_value;
    if (tid < size_per_rank) {
      local_value = packed_input[tid];
@@ -60,9 +60,13 @@ index ac990d8106..205fda019f 100644
 +        current_multicast + rank * size_per_rank + tid,
 +        sanitize_lamport_payload(local_value));
    }
- #if !defined(USE_ROCM) && CUDA_VERSION >= 12000 && defined(__CUDA_ARCH__) && \
-     (__CUDA_ARCH__ >= 900)
-@@ -267,7 +300,9 @@ __global__ void __launch_bounds__(kMnnvlLamportRsThreads, 1)
+-#if !defined(USE_ROCM) && CUDA_VERSION >= 12000 && defined(__CUDA_ARCH__) && \
+-    (__CUDA_ARCH__ >= 900)
+-  cudaTriggerProgrammaticLaunchCompletion();
+-#endif
+-
+   lamport_cta_arrive(&epochs[1]);
+@@ -267,7 +295,9 @@ __global__ void __launch_bounds__(kMnnvlLamportRsThreads, 1)
    int stride = gridDim.x * blockDim.x;
    uint32_t epoch = epochs[0];
    int current_stage = epoch % 3;
@@ -73,3 +77,13 @@ index ac990d8106..205fda019f 100644
    int dirty_size = epochs[2 + dirty_stage];
    auto local_buffer = reinterpret_cast<P*>(const_cast<void*>(dp.ptrs[rank]));
    auto current_local = local_buffer + current_stage * stage_size;
+@@ -280,9 +310,4 @@ __global__ void __launch_bounds__(kMnnvlLamportRsThreads, 1)
+     auto src = packed_input + dst_rank * size_per_rank;
+     dst[idx] = sanitize_lamport_payload(src[idx]);
+   }
+-#if !defined(USE_ROCM) && CUDA_VERSION >= 12000 && defined(__CUDA_ARCH__) && \
+-    (__CUDA_ARCH__ >= 900)
+-  cudaTriggerProgrammaticLaunchCompletion();
+-#endif
+-
+   lamport_cta_arrive(&epochs[1]);
