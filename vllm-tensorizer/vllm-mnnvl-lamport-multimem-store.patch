@@ -2,7 +2,7 @@ diff --git a/csrc/custom_all_gather_reduce_scatter.cuh b/csrc/custom_all_gather_
 index ac990d8106..205fda019f 100644
 --- a/csrc/custom_all_gather_reduce_scatter.cuh
 +++ b/csrc/custom_all_gather_reduce_scatter.cuh
-@@ -104,6 +104,34 @@ DINLINE P sanitize_lamport_payload(P packed) {
+@@ -104,6 +104,37 @@ DINLINE P sanitize_lamport_payload(P packed) {
    return value.packed;
  }
  
@@ -17,13 +17,16 @@ index ac990d8106..205fda019f 100644
 +#if !defined(USE_ROCM) && CUDA_VERSION >= 12010 && defined(__CUDA_ARCH__) && \
 +    (__CUDA_ARCH__ >= 900)
 +  LamportPack<P> value{.packed = packed};
-+  // The local alias remains sentinel until this strong system-scope write
-+  // becomes observable; readers reject prior or partial values and retry.
++  // The local alias remains sentinel until the multicast payload becomes
++  // observable; readers reject prior or partial values and retry.
 +  asm volatile("multimem.st.relaxed.sys.global.v4.f32 [%0], {%1,%2,%3,%4};"
 +               :
 +               : "l"(ptr), "r"(value.words[0]), "r"(value.words[1]),
 +                 "r"(value.words[2]), "r"(value.words[3])
 +               : "memory");
++  // The multicast and rank-local pointers are virtual aliases of the same
++  // allocation. Make the multicast publication coherent through either VA.
++  asm volatile("fence.proxy.alias;" : : : "memory");
 +#elif defined(USE_ROCM)
 +  __builtin_trap();
 +#else
@@ -37,7 +40,7 @@ index ac990d8106..205fda019f 100644
  template <typename P>
  DINLINE P wait_lamport_payload(const P* ptr) {
    auto value = load_lamport_pack(ptr);
-@@ -199,7 +227,9 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
+@@ -199,7 +230,9 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
    int stride = gridDim.x * blockDim.x;
    uint32_t epoch = epochs[0];
    int current_stage = epoch % 3;
@@ -48,7 +51,7 @@ index ac990d8106..205fda019f 100644
    int dirty_size = epochs[2 + dirty_stage];
    auto local_buffer = reinterpret_cast<P*>(const_cast<void*>(dp.ptrs[rank]));
    auto current_local = local_buffer + current_stage * stage_size;
-@@ -213,8 +243,11 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
+@@ -213,8 +246,11 @@ __global__ void __launch_bounds__(kMnnvlLamportAgThreads, 1)
    P local_value;
    if (tid < size_per_rank) {
      local_value = packed_input[tid];
@@ -62,7 +65,7 @@ index ac990d8106..205fda019f 100644
    }
  #if !defined(USE_ROCM) && CUDA_VERSION >= 12000 && defined(__CUDA_ARCH__) && \
      (__CUDA_ARCH__ >= 900)
-@@ -267,7 +300,9 @@ __global__ void __launch_bounds__(kMnnvlLamportRsThreads, 1)
+@@ -267,7 +303,9 @@ __global__ void __launch_bounds__(kMnnvlLamportRsThreads, 1)
    int stride = gridDim.x * blockDim.x;
    uint32_t epoch = epochs[0];
    int current_stage = epoch % 3;
