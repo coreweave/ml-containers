@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ace Eldeib <aeldeib@coreweave.com>
+Date: Sun, 23 Aug 2026 09:00:00 -0400
+Subject: [PATCH] debug(decode): Use one split per sparse request
+
+Make sparse decode reduction order independent of neighboring requests by
+keeping each request within one scheduler split. Unused scheduler partitions
+are inert; dense decode retains the production load-balancing path.
+
+This is a correctness diagnostic, not a production scheduling policy.
+
+Signed-off-by: Ace Eldeib <aeldeib@coreweave.com>
+---
+ .../get_decoding_sched_meta.cu                | 30 +++++++++++++++++--
+ 1 file changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/csrc/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu b/csrc/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu
+index 083da60..1111111 100644
+--- a/csrc/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu
++++ b/csrc/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu
+@@ -61,8 +61,27 @@ get_mla_metadata_kernel(__grid_constant__ const GetDecodeSchedMetaParams params)
+     if (threadIdx.x == 0) {
+-        int payload = cutlass::ceil_div(total_num_blocks, num_sm_parts) + fixed_overhead_num_blocks;
+-
++        const bool force_sparse_one_split = params.topk != -1;
++        int payload;
++        if (force_sparse_one_split) {
++            int max_s_k = max(params.topk, 1);
++            if (params.extra_topk) {
++                max_s_k = ku::ceil(max_s_k, block_size_n);
++                max_s_k += params.extra_topk;
++            }
++            payload = cutlass::ceil_div(max_s_k, block_size_n)
++                + fixed_overhead_num_blocks;
++        } else {
++            payload = cutlass::ceil_div(total_num_blocks, num_sm_parts)
++                + fixed_overhead_num_blocks;
++        }
++        // Keep request boundaries stable in the sparse diagnostic.
+         int now_req_idx = 0, now_block = 0, now_n_split_idx = 0, cum_num_splits = 0;
+         num_splits_shared[0] = 0;
+         for (int i = 0; i < num_sm_parts; ++i) {
+-            DecodingSchedMeta cur_meta;
++            DecodingSchedMeta cur_meta{};
++            if (now_req_idx >= batch_size) {
++                cur_meta.begin_req_idx = batch_size;
++                cur_meta.end_req_idx = batch_size;
++                tile_scheduler_metadata_ptr[i] = cur_meta;
++                continue;
++            }
+             cur_meta.begin_req_idx = now_req_idx;
+@@ -83,8 +102,11 @@ get_mla_metadata_kernel(__grid_constant__ const GetDecodeSchedMetaParams params)
+                 } else {
+-                    if (remain_payload - fixed_overhead_num_blocks > 0) {
++                    if (
++                        !force_sparse_one_split
++                        && remain_payload - fixed_overhead_num_blocks > 0
++                    ) {
+                         now_block += remain_payload - fixed_overhead_num_blocks;
+                         ++now_n_split_idx;
+                         remain_payload = 0;
+                     }
+                     break;
+                 }
+--
+2.50.1 (Apple Git-155)
+
