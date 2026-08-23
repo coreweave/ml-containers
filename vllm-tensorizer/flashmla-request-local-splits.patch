@@ -1,0 +1,388 @@
+From 413c220265959bb104212e3111e387beda12deba Mon Sep 17 00:00:00 2001
+From: Ace Eldeib <aeldeib@coreweave.com>
+Date: Sun, 23 Aug 2026 10:14:43 -0400
+Subject: [PATCH] fix(decode): Make sparse split scheduling request-local
+
+Global payload balancing changes a request reduction tree when batch neighbors change, causing batch-dependent BF16 outputs.
+
+Use fixed per-request chunks and independent logical scheduler rows while retaining split-K parallelism and stable graph shapes.
+
+Signed-off-by: Ace Eldeib <aeldeib@coreweave.com>
+---
+ csrc/api/dense_decode.h                       |   2 +
+ csrc/api/sparse_decode.h                      |  53 +++++--
+ csrc/params.h                                 |  10 +-
+ .../fwd_for_small_topk/head128/phase1.cuh     |   2 +-
+ csrc/smxx/decode/combine/combine.cu           |   2 +-
+ .../get_decoding_sched_meta.cu                | 143 ++++++++++++++----
+ 6 files changed, 162 insertions(+), 50 deletions(-)
+
+diff --git a/csrc/api/dense_decode.h b/csrc/api/dense_decode.h
+index d52ea8c..1cdc129 100644
+--- a/csrc/api/dense_decode.h
++++ b/csrc/api/dense_decode.h
+@@ -119,6 +119,8 @@ dense_attn_decode_interface(
+             (DecodingSchedMeta*)tile_scheduler_metadata->data_ptr(),
+             num_splits->mutable_data_ptr<int>(),
+             num_sm_parts,
++            0,
++            0,
+             get_current_cuda_stream(q)
+         };
+         smxx::decode::run_get_decoding_sched_meta_kernel(get_sched_meta_params);
+diff --git a/csrc/api/sparse_decode.h b/csrc/api/sparse_decode.h
+index d6627cf..35c926c 100644
+--- a/csrc/api/sparse_decode.h
++++ b/csrc/api/sparse_decode.h
+@@ -31,6 +31,7 @@ struct DecodeImplMeta {
+     int num_sm_parts;
+     int fixed_overhead_num_blocks;
+     int block_size_topk;
++    int sparse_split_blocks;
+ };
+
+ class DecodeImplBase : public ImplBase<
+@@ -61,7 +62,8 @@ public:
+         return {
+             std::max(arch.num_sms / s_q / (h_q/64), 1),
+             5,
+-            64
++            64,
++            16
+         };
+     }
+
+@@ -94,7 +96,8 @@ public:
+         return {
+             std::max(arch.num_sms / s_q, 1),
+             5,
+-            64
++            64,
++            16
+         };
+     }
+
+@@ -128,7 +131,8 @@ public:
+         return {
+             std::max(arch.num_sms / s_q, 1),
+             5,
+-            64
++            64,
++            16
+         };
+     }
+
+@@ -170,7 +174,8 @@ public:
+         return {
+             std::max(arch.num_sms / s_q / 2, 1),
+             3,
+-            64
++            64,
++            16
+         };
+     }
+
+@@ -390,6 +395,27 @@ sparse_attn_decode_interface(
+     }
+
+     DecodeImplMeta impl_meta = impl->get_meta(h_q, s_q);
++    // Sparse reduction chunks must depend only on one request's work. Reserve
++    // a fixed per-request capacity so CUDA graph launch shapes remain stable.
++    const auto ceil_div_int = [](int value, int divisor) {
++        return (value + divisor - 1) / divisor;
++    };
++    int max_sparse_tokens = std::max(topk, 1);
++    if (extra_topk > 0) {
++        max_sparse_tokens =
++            ceil_div_int(max_sparse_tokens, impl_meta.block_size_topk)
++            * impl_meta.block_size_topk;
++        max_sparse_tokens += extra_topk;
++    }
++    const int max_blocks_per_request =
++        ceil_div_int(max_sparse_tokens, impl_meta.block_size_topk);
++    const int max_splits_per_request =
++        ceil_div_int(max_blocks_per_request, impl_meta.sparse_split_blocks);
++    STD_TORCH_CHECK(max_splits_per_request > 0 && max_splits_per_request <= 160);
++    STD_TORCH_CHECK(b <= 65535 / max_splits_per_request);
++    const int accum_capacity = b * max_splits_per_request;
++    const int num_sched_parts = accum_capacity;
++    STD_TORCH_CHECK(num_sched_parts > 0 && num_sched_parts <= 65535);
+
+     SparseAttnDecodeParams params = {
+         b, s_q, h_q, h_kv, d_qk, d_v,
+@@ -426,7 +452,7 @@ sparse_attn_decode_interface(
+     // Get MLA metadata if necessary
+     Tensor o_accum, lse_accum;
+     if (!tile_scheduler_metadata.has_value()) {
+-        tile_scheduler_metadata = torch::stable::new_empty(q, {impl_meta.num_sm_parts, sizeof(DecodingSchedMeta)/4}, ScalarType::Int);
++        tile_scheduler_metadata = torch::stable::new_empty(q, {num_sched_parts, sizeof(DecodingSchedMeta)/4}, ScalarType::Int);
+         num_splits = torch::stable::new_empty(q, {b+1}, ScalarType::Int);
+         KU_CHECK_CONTIGUOUS(tile_scheduler_metadata);
+         KU_CHECK_CONTIGUOUS(num_splits);
+@@ -442,7 +468,9 @@ sparse_attn_decode_interface(
+             nullptr,
+             (DecodingSchedMeta*)tile_scheduler_metadata->data_ptr(),
+             num_splits->mutable_data_ptr<int>(),
+-            impl_meta.num_sm_parts,
++            num_sched_parts,
++            impl_meta.sparse_split_blocks,
++            max_splits_per_request,
+             get_current_cuda_stream(q)
+         };
+         smxx::decode::run_get_decoding_sched_meta_kernel(get_sched_meta_params);
+@@ -454,16 +482,17 @@ sparse_attn_decode_interface(
+     KU_CHECK_DTYPE(num_splits, ScalarType::Int);
+     KU_CHECK_CONTIGUOUS(tile_scheduler_metadata);
+     KU_CHECK_CONTIGUOUS(num_splits);
+-    KU_CHECK_SHAPE(tile_scheduler_metadata, impl_meta.num_sm_parts, sizeof(DecodingSchedMeta)/sizeof(int));
++    KU_CHECK_SHAPE(tile_scheduler_metadata, num_sched_parts, sizeof(DecodingSchedMeta)/sizeof(int));
+     KU_CHECK_SHAPE(num_splits, b+1);
+     params.tile_scheduler_metadata_ptr = (DecodingSchedMeta*)tile_scheduler_metadata->data_ptr();
+     params.num_splits_ptr = num_splits->mutable_data_ptr<int>();
+-    params.num_sm_parts = impl_meta.num_sm_parts;
++    params.num_sm_parts = num_sched_parts;
++    params.max_splits_per_request = max_splits_per_request;
++    params.accum_capacity = accum_capacity;
+
+     // Allocate intermediate buffers for split-KV
+-    const int total_num_splits = b + impl_meta.num_sm_parts;
+-    lse_accum = torch::stable::new_empty(q, {total_num_splits, s_q, h_q}, ScalarType::Float);
+-    o_accum = torch::stable::new_empty(q, {total_num_splits, s_q, h_q, d_v}, ScalarType::Float);
++    lse_accum = torch::stable::new_empty(q, {accum_capacity, s_q, h_q}, ScalarType::Float);
++    o_accum = torch::stable::new_empty(q, {accum_capacity, s_q, h_q, d_v}, ScalarType::Float);
+     KU_CHECK_CONTIGUOUS(lse_accum);
+     KU_CHECK_CONTIGUOUS(o_accum);
+     params.lse_accum = lse_accum.mutable_data_ptr<float>();
+@@ -491,7 +520,7 @@ sparse_attn_decode_interface(
+
+         params.tile_scheduler_metadata_ptr,
+         params.num_splits_ptr,
+-        params.num_sm_parts,
++        params.max_splits_per_request,
+
+         ku::get_optional_tensor_ptr<float>(attn_sink),
+         get_current_cuda_stream(q)
+diff --git a/csrc/params.h b/csrc/params.h
+index 4433e8d..7a0e2f6 100644
+--- a/csrc/params.h
++++ b/csrc/params.h
+@@ -99,7 +99,9 @@ struct SparseAttnDecodeParams {
+     int stride_o_accum_split, stride_o_accum_s_q, stride_o_accum_h_q;
+     DecodingSchedMeta* __restrict__ tile_scheduler_metadata_ptr; // [num_sm_parts, ], contiguous
+     int* __restrict__ num_splits_ptr; // [batch_size+1, ], contiguous
+-    int num_sm_parts;
++    int num_sm_parts;  // Logical scheduler rows launched by the sparse kernel
++    int max_splits_per_request;
++    int accum_capacity;
+ };
+
+ struct CombineParams {
+@@ -115,9 +117,9 @@ struct CombineParams {
+     int stride_lse_accum_split, stride_lse_accum_s_q;
+     int stride_o_accum_split, stride_o_accum_s_q, stride_o_accum_h_q;
+
+-    DecodingSchedMeta* __restrict__ tile_scheduler_metadata_ptr; // [num_sm_parts, ], contiguous
++    DecodingSchedMeta* __restrict__ tile_scheduler_metadata_ptr;
+     int* __restrict__ num_splits_ptr; // [batch_size+1, ], contiguous
+-    int num_sm_parts;
++    int max_splits_per_request;
+
+     float* attn_sink;  // [h_q], may be nullptr
+
+@@ -138,6 +140,8 @@ struct GetDecodeSchedMetaParams {
+     DecodingSchedMeta *__restrict__ tile_scheduler_metadata_ptr;
+     int *__restrict__ num_splits_ptr;
+     int num_sm_parts;
++    int sparse_split_blocks;
++    int max_splits_per_request;
+
+     cudaStream_t stream;
+ };
+diff --git a/csrc/sm100/prefill/sparse/fwd_for_small_topk/head128/phase1.cuh b/csrc/sm100/prefill/sparse/fwd_for_small_topk/head128/phase1.cuh
+index 388abc8..b3d14d9 100644
+--- a/csrc/sm100/prefill/sparse/fwd_for_small_topk/head128/phase1.cuh
++++ b/csrc/sm100/prefill/sparse/fwd_for_small_topk/head128/phase1.cuh
+@@ -1046,7 +1046,7 @@ void KernelTemplate<FWD_MODE, D_QK>::run(const ArgT& params) {
+     CUtensorMap tensor_map_o_accum = {};
+     if constexpr (FWD_MODE == FwdMode::DecodeWithSplitKV) {
+         tensor_map_o_accum = ku::make_tensor_map(
+-            {32, H_Q, D_V/32, (unsigned long)params.s_q, (unsigned long)params.num_sm_parts + params.b},
++            {32, H_Q, D_V/32, (unsigned long)params.s_q, (unsigned long)params.accum_capacity},
+             ku::make_stride_helper<int>({params.stride_o_accum_h_q, 32, params.stride_o_accum_s_q, params.stride_o_accum_split}, sizeof(float)),
+             {32, H_Q/2, B_EPI_SPLITKV/32, 1, 1},
+             params.o_accum,
+diff --git a/csrc/smxx/decode/combine/combine.cu b/csrc/smxx/decode/combine/combine.cu
+index 7f23874..eada074 100644
+--- a/csrc/smxx/decode/combine/combine.cu
++++ b/csrc/smxx/decode/combine/combine.cu
+@@ -188,7 +188,7 @@ template<typename ElementT>
+ void run_flash_mla_combine_kernel(CombineParams &params) {
+     static constexpr int HEAD_DIM_V = 512;  // Since only this head dimension is supported by Flash MLA
+     FLASH_ASSERT(params.d_v == HEAD_DIM_V);
+-    MLA_NUM_SPLITS_SWITCH(params.num_sm_parts, NUM_SPLITS, [&] {
++    MLA_NUM_SPLITS_SWITCH(params.max_splits_per_request, NUM_SPLITS, [&] {
+         constexpr int BLOCK_SIZE_M = 8;
+         constexpr int NUM_THREADS = BLOCK_SIZE_M*32;
+         constexpr size_t smem_size = BLOCK_SIZE_M*(NUM_SPLITS+1)*sizeof(float);
+diff --git a/csrc/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu b/csrc/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu
+index 083da60..ad3decf 100644
+--- a/csrc/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu
++++ b/csrc/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu
+@@ -59,45 +59,122 @@ get_mla_metadata_kernel(__grid_constant__ const GetDecodeSchedMetaParams params)
+     __syncwarp();
+
+     if (threadIdx.x == 0) {
+-        int payload = cutlass::ceil_div(total_num_blocks, num_sm_parts) + fixed_overhead_num_blocks;
++        if (params.topk != -1) {
++            // Fixed request-local chunks keep each request's reduction tree
++            // unchanged when neighboring requests enter or leave the batch.
++            FLASH_DEVICE_ASSERT(params.sparse_split_blocks > 0);
++            FLASH_DEVICE_ASSERT(params.max_splits_per_request > 0);
++            FLASH_DEVICE_ASSERT(
++                num_sm_parts == batch_size * params.max_splits_per_request
++            );
+
+-        int now_req_idx = 0, now_block = 0, now_n_split_idx = 0, cum_num_splits = 0;
+-        num_splits_shared[0] = 0;
+-        for (int i = 0; i < num_sm_parts; ++i) {
+-            DecodingSchedMeta cur_meta;
+-            cur_meta.begin_req_idx = now_req_idx;
+-            cur_meta.begin_block_idx = now_block + first_block_idx_shared[now_req_idx];
+-            cur_meta.begin_split_idx = now_n_split_idx;
+-            cur_meta.is_first_req_splitted = (now_block != 0);
+-            int remain_payload = payload;
+-            while (now_req_idx < batch_size) {
+-                int num_blocks = num_blocks_shared[now_req_idx];
+-                int now_remain_blocks = num_blocks - now_block;
+-                if (remain_payload >= now_remain_blocks + fixed_overhead_num_blocks) {
+-                    cum_num_splits += now_n_split_idx + 1;
+-                    num_splits_shared[now_req_idx + 1] = cum_num_splits;
+-                    remain_payload -= now_remain_blocks + fixed_overhead_num_blocks;
+-                    ++now_req_idx;
+-                    now_block = 0;
+-                    now_n_split_idx = 0;
+-                } else {
+-                    if (remain_payload - fixed_overhead_num_blocks > 0) {
+-                        now_block += remain_payload - fixed_overhead_num_blocks;
+-                        ++now_n_split_idx;
+-                        remain_payload = 0;
++            int cum_num_splits = 0;
++            num_splits_shared[0] = 0;
++            for (int req_idx = 0; req_idx < batch_size; ++req_idx) {
++                const int num_blocks = num_blocks_shared[req_idx];
++                const int num_req_splits =
++                    cutlass::ceil_div(num_blocks, params.sparse_split_blocks);
++                FLASH_DEVICE_ASSERT(
++                    num_req_splits <= params.max_splits_per_request
++                );
++                num_splits_shared[req_idx + 1] =
++                    cum_num_splits + num_req_splits;
++
++                for (
++                    int split_idx = 0;
++                    split_idx < params.max_splits_per_request;
++                    ++split_idx
++                ) {
++                    DecodingSchedMeta cur_meta{};
++                    const int sched_idx =
++                        req_idx * params.max_splits_per_request + split_idx;
++                    if (split_idx < num_req_splits) {
++                        cur_meta.begin_req_idx = req_idx;
++                        cur_meta.end_req_idx = req_idx;
++                        cur_meta.begin_block_idx =
++                            first_block_idx_shared[req_idx]
++                            + split_idx * params.sparse_split_blocks;
++                        cur_meta.end_block_idx = min(
++                            cur_meta.begin_block_idx + params.sparse_split_blocks,
++                            last_block_idx_shared[req_idx] + 1
++                        );
++                        cur_meta.begin_split_idx = split_idx;
++                        cur_meta.is_first_req_splitted = num_req_splits > 1;
++                        cur_meta.is_last_req_splitted = num_req_splits > 1;
++                    } else {
++                        cur_meta.begin_req_idx = batch_size;
++                        cur_meta.end_req_idx = batch_size;
+                     }
+-                    break;
++                    tile_scheduler_metadata_ptr[sched_idx] = cur_meta;
+                 }
++                cum_num_splits += num_req_splits;
+             }
+-            cur_meta.end_req_idx = now_block > 0 ? now_req_idx : now_req_idx - 1;
+-            cur_meta.end_block_idx = now_block > 0 ? now_block + first_block_idx_shared[now_req_idx] : (seqlens_k_shared[now_req_idx-1] == 0 ? 0 : last_block_idx_shared[now_req_idx-1] + 1);
+-            cur_meta.is_last_req_splitted = cur_meta.end_block_idx != last_block_idx_shared[cur_meta.end_req_idx] + 1 && seqlens_k_shared[cur_meta.end_req_idx] != 0;
+-            if (cur_meta.begin_req_idx == cur_meta.end_req_idx) {
+-                cur_meta.is_first_req_splitted = cur_meta.is_last_req_splitted = cur_meta.is_first_req_splitted || cur_meta.is_last_req_splitted;
++        } else {
++            int payload = cutlass::ceil_div(total_num_blocks, num_sm_parts)
++                + fixed_overhead_num_blocks;
++
++            int now_req_idx = 0, now_block = 0, now_n_split_idx = 0;
++            int cum_num_splits = 0;
++            num_splits_shared[0] = 0;
++            for (int i = 0; i < num_sm_parts; ++i) {
++                DecodingSchedMeta cur_meta;
++                cur_meta.begin_req_idx = now_req_idx;
++                cur_meta.begin_block_idx =
++                    now_block + first_block_idx_shared[now_req_idx];
++                cur_meta.begin_split_idx = now_n_split_idx;
++                cur_meta.is_first_req_splitted = (now_block != 0);
++                int remain_payload = payload;
++                while (now_req_idx < batch_size) {
++                    int num_blocks = num_blocks_shared[now_req_idx];
++                    int now_remain_blocks = num_blocks - now_block;
++                    if (
++                        remain_payload
++                        >= now_remain_blocks + fixed_overhead_num_blocks
++                    ) {
++                        cum_num_splits += now_n_split_idx + 1;
++                        num_splits_shared[now_req_idx + 1] = cum_num_splits;
++                        remain_payload -=
++                            now_remain_blocks + fixed_overhead_num_blocks;
++                        ++now_req_idx;
++                        now_block = 0;
++                        now_n_split_idx = 0;
++                    } else {
++                        if (remain_payload - fixed_overhead_num_blocks > 0) {
++                            now_block +=
++                                remain_payload - fixed_overhead_num_blocks;
++                            ++now_n_split_idx;
++                            remain_payload = 0;
++                        }
++                        break;
++                    }
++                }
++                cur_meta.end_req_idx =
++                    now_block > 0 ? now_req_idx : now_req_idx - 1;
++                cur_meta.end_block_idx = now_block > 0
++                    ? now_block + first_block_idx_shared[now_req_idx]
++                    : (
++                        seqlens_k_shared[now_req_idx - 1] == 0
++                            ? 0
++                            : last_block_idx_shared[now_req_idx - 1] + 1
++                    );
++                cur_meta.is_last_req_splitted =
++                    cur_meta.end_block_idx
++                        != last_block_idx_shared[cur_meta.end_req_idx] + 1
++                    && seqlens_k_shared[cur_meta.end_req_idx] != 0;
++                if (cur_meta.begin_req_idx == cur_meta.end_req_idx) {
++                    cur_meta.is_first_req_splitted =
++                        cur_meta.is_last_req_splitted =
++                            cur_meta.is_first_req_splitted
++                            || cur_meta.is_last_req_splitted;
++                }
++                tile_scheduler_metadata_ptr[i] = cur_meta;
+             }
+-            tile_scheduler_metadata_ptr[i] = cur_meta;
++            FLASH_DEVICE_ASSERT(
++                now_req_idx == batch_size
++                && now_block == 0
++                && now_n_split_idx == 0
++            );
+         }
+-        FLASH_DEVICE_ASSERT(now_req_idx == batch_size && now_block == 0 && now_n_split_idx == 0);
+     }
+     __syncwarp();
+
+--
+2.50.1 (Apple Git-155)

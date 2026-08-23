@@ -90,6 +90,18 @@ COPY vllm-mnnvl-lamport-multimem-store.patch /git/patch
 RUN git -C vllm apply -v --stat --apply /git/patch && \
     rm /git/patch
 
+FROM alpine/git:2.36.3 AS flashmla-downloader
+WORKDIR /git
+ARG FLASHMLA_COMMIT='a8f794d1251cbfd88a5011445dd5582289c727e4'
+RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
+      https://github.com/vllm-project/FlashMLA && \
+    git -C FlashMLA checkout "${FLASHMLA_COMMIT}" && \
+    git -C FlashMLA submodule update --init --recursive --jobs 8 \
+      --depth 1 --filter=tree:0
+COPY flashmla-request-local-splits.patch /git/patch
+RUN git -C FlashMLA apply -v --stat --apply /git/patch && \
+    rm /git/patch
+
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
 ARG FLASHINFER_COMMIT
@@ -164,6 +176,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=bind,from=flashmla-downloader,source=/git/FlashMLA,target=/opt/flashmla \
     --mount=type=bind,from=vllm-rust-builder,source=/out,target=/opt/rust-artifacts \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
@@ -172,7 +185,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
     export NVCC_APPEND_FLAGS='-gencode=arch=compute_103a,code=sm_103a' && \
-    export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
+    export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' \
+      FLASH_MLA_SRC_DIR='/opt/flashmla' && \
     { \
       sed -i -E 's@(CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;)(11\.0;)@\110.3;\2@' CMakeLists.txt && \
       grep -qE 'CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;10\.3;11\.0;' CMakeLists.txt \
