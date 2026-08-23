@@ -1,0 +1,83 @@
+From 69d5ac01915426420458b2fbd089cb7a185c27f3 Mon Sep 17 00:00:00 2001
+From: Ace Eldeib <aeldeib@coreweave.com>
+Date: Sat, 22 Aug 2026 23:46:39 -0400
+Subject: [PATCH] fix(moe): Publish DSV4 routes before PDL completion
+
+Signed-off-by: Ace Eldeib <aeldeib@coreweave.com>
+---
+ csrc/libtorch_stable/moe/topk_softplus_sqrt_kernels.cu   | 8 +++++---
+ vllm/model_executor/layers/fused_moe/router/dsv4_topk.py | 7 ++++---
+ vllm/model_executor/layers/fused_moe/utils.py            | 4 +++-
+ 3 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/csrc/libtorch_stable/moe/topk_softplus_sqrt_kernels.cu b/csrc/libtorch_stable/moe/topk_softplus_sqrt_kernels.cu
+index 976eebac3..00bdc7349 100644
+--- a/csrc/libtorch_stable/moe/topk_softplus_sqrt_kernels.cu
++++ b/csrc/libtorch_stable/moe/topk_softplus_sqrt_kernels.cu
+@@ -109,9 +109,6 @@ __launch_bounds__(128) __global__
+     weight_sum += VLLM_SHFL_XOR_SYNC(weight_sum, mask);
+   }
+
+-  #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+-  cudaTriggerProgrammaticLaunchCompletion();
+-  #endif
+   if (lane < 6) {
+     const int offset = warp * 6 + lane;
+     output[offset] =
+@@ -119,6 +116,11 @@ __launch_bounds__(128) __global__
+     indices[offset] = !is_pad_row ? static_cast<OutIndType>(expert)
+                                   : static_cast<OutIndType>(-1);
+   }
++  #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
++  // The dependent MoE kernel consumes both outputs. Publish them before
++  // allowing that kernel to proceed past its PDL wait.
++  cudaTriggerProgrammaticLaunchCompletion();
++  #endif
+ }
+
+ template <typename OutIndType, typename HashIndType>
+diff --git a/vllm/model_executor/layers/fused_moe/router/dsv4_topk.py b/vllm/model_executor/layers/fused_moe/router/dsv4_topk.py
+index dd861d4eb..75fb06f05 100644
+--- a/vllm/model_executor/layers/fused_moe/router/dsv4_topk.py
++++ b/vllm/model_executor/layers/fused_moe/router/dsv4_topk.py
+@@ -89,12 +89,13 @@ if current_platform.is_cuda():
+         output_mask = topk_offsets < 6
+         output_offsets = row * 6 + topk_offsets
+
+-        if launch_pdl:
+-            tl.extra.cuda.gdc_launch_dependents()
+-
+         tl.store(topk_weights_ptr + output_offsets, selected_weights, mask=output_mask)
+         tl.store(topk_ids_ptr + output_offsets, selected_ids, mask=output_mask)
+
++        if launch_pdl:
++            # Downstream MoE kernels consume both outputs after their PDL wait.
++            tl.extra.cuda.gdc_launch_dependents()
++
+
+ def dsv4_topk(
+     gating_output: torch.Tensor,
+diff --git a/vllm/model_executor/layers/fused_moe/utils.py b/vllm/model_executor/layers/fused_moe/utils.py
+index cce8ccd07..f78eaf33a 100644
+--- a/vllm/model_executor/layers/fused_moe/utils.py
++++ b/vllm/model_executor/layers/fused_moe/utils.py
+@@ -402,7 +402,6 @@ def _pack_topk_ids_weights_kernel(
+     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+     mask = offsets < n_elements
+     if USE_GDC:
+-        tl.extra.cuda.gdc_launch_dependents()
+         tl.extra.cuda.gdc_wait()
+     expert_id = tl.load(topk_ids_ptr + offsets, mask=mask, other=0).to(tl.int32)
+     expert_id_shifted = expert_id << 16
+@@ -415,6 +414,9 @@ def _pack_topk_ids_weights_kernel(
+
+     packed = expert_id_shifted | weight_int32
+     tl.store(output_ptr + offsets, packed, mask=mask)
++    if USE_GDC:
++        # The routed MoE kernel consumes this packed output after its PDL wait.
++        tl.extra.cuda.gdc_launch_dependents()
+
+
+ def fi_moe_largest_bucket(moe_config: "FusedMoEConfig") -> int:
+--
+2.50.1 (Apple Git-155)

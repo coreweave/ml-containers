@@ -87,8 +87,10 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 COPY vllm-mnnvl-lamport-multimem-store.patch /git/patch
+COPY vllm-dsv4-route-pdl-publication.patch /git/route-pdl-patch
 RUN git -C vllm apply -v --stat --apply /git/patch && \
-    rm /git/patch
+    git -C vllm apply -v --stat --apply /git/route-pdl-patch && \
+    rm /git/patch /git/route-pdl-patch
 
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
