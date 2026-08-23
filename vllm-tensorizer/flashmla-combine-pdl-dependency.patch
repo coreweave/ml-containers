@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ace Eldeib <aeldeib@coreweave.com>
+Date: Sun, 23 Aug 2026 08:15:00 -0400
+Subject: [PATCH] fix(decode): Wait for PDL before no-split combine return
+
+The PDL-enabled combine kernel returned for direct rows before waiting for the
+primary FlashMLA grid. This let the combine grid complete while the primary
+could still be publishing its direct output to the next stream consumer.
+
+Signed-off-by: Ace Eldeib <aeldeib@coreweave.com>
+---
+ csrc/smxx/decode/combine/combine.cu | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/csrc/smxx/decode/combine/combine.cu b/csrc/smxx/decode/combine/combine.cu
+index 223f73e..6becd58 100644
+--- a/csrc/smxx/decode/combine/combine.cu
++++ b/csrc/smxx/decode/combine/combine.cu
+@@ -32,6 +32,10 @@ flash_fwd_mla_combine_kernel(__grid_constant__ const CombineParams params) {
+     const int start_split_idx = __ldg(params.num_splits_ptr + batch_idx);
+     const int end_split_idx = __ldg(params.num_splits_ptr + batch_idx + 1);
+     const int my_num_splits = end_split_idx - start_split_idx;
++
++    // Wait before the direct-row return so this PDL secondary cannot finish
++    // before the primary kernel has published its no-split output.
++    cudaGridDependencySynchronize();
+     if (my_num_splits <= 1) {
+         return;
+     }
+@@ -54,9 +58,6 @@ flash_fwd_mla_combine_kernel(__grid_constant__ const CombineParams params) {
+     
+     __shared__ float smem_buf[BLOCK_SIZE_M][MAX_SPLITS];
+ 
+-    // Wait for the previous kernel (the MLA kernel) to finish
+-    cudaGridDependencySynchronize();
+-
+     // Prefetch
+     static_assert(HEAD_DIM_V % (32*4) == 0);
+     constexpr int ELEMS_PER_THREAD = HEAD_DIM_V / (32*4);
+-- 
+2.50.1
