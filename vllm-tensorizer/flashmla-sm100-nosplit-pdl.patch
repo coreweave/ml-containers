@@ -1,0 +1,32 @@
+From 9b52378feafd5da925086a41c5f69d6480adfbaa Mon Sep 17 00:00:00 2001
+From: Ace Eldeib <aeldeib@coreweave.com>
+Date: Sun, 23 Aug 2026 07:01:14 -0400
+Subject: [PATCH] fix(sm100): Complete no-split output before PDL release
+
+The head64 no-split path triggered programmatic completion before its final TMA output store. Keep the early trigger for split/combine, whose consumer synchronizes, and let no-split release implicitly at grid exit.
+
+Signed-off-by: Ace Eldeib <aeldeib@coreweave.com>
+---
+ csrc/sm100/decode/head64/kernel.cuh | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/csrc/sm100/decode/head64/kernel.cuh b/csrc/sm100/decode/head64/kernel.cuh
+index 7c46921..ba5c9bb 100644
+--- a/csrc/sm100/decode/head64/kernel.cuh
++++ b/csrc/sm100/decode/head64/kernel.cuh
+@@ -328,7 +328,11 @@ KernelTemplate<MODEL_TYPE>
+             rs.update();
+             ku::tcgen05_after_thread_sync();
+
+-            if (args.is_last_batch) {
++            // The no-split path writes its final output below. Do not signal
++            // PDL completion until implicit grid completion has flushed it.
++            // Split mode writes an accumulator consumed by the combine kernel,
++            // which performs cudaGridDependencySynchronize before reading it.
++            if (args.is_last_batch && !args.is_no_split) {
+                 cudaTriggerProgrammaticLaunchCompletion();
+             }
+
+--
+2.50.1 (Apple Git-155)
+
