@@ -50,7 +50,7 @@ git checkout "${SGLANG_COMMIT}"
 
 # Relax exact torch-family version pins to be compatible with the base image
 sed -Ei \
-  -e 's@"torch==[0-9]+\.[0-9]+\.[0-9]+"@"torch>=2.11.0"@' \
+  -e 's@"torch==[0-9]+\.[0-9]+\.[0-9]+"@"torch>=2.13.0"@' \
   -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.11.0"@' \
   -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
   -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
