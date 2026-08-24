@@ -46,6 +46,13 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
 COPY install.bash /wheels/
 
 FROM ${BASE_IMAGE}
+# The CUDA 13 sgl-deep-ep wheel links against NVSHMEM but does not bundle it.
+RUN apt-get -qq update && \
+    apt-get -q install --no-install-recommends -y libnvshmem3-cuda-13 && \
+    NVSHMEM_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/nvshmem/13" && \
+    echo "${NVSHMEM_LIB_DIR}" > /etc/ld.so.conf.d/nvshmem.conf && \
+    ldconfig && \
+    rm -rf /var/lib/apt/lists/*
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     cd /wheels && \
     bash install.bash
