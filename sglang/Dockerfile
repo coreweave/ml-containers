@@ -47,8 +47,12 @@ COPY install.bash /wheels/
 
 FROM ${BASE_IMAGE}
 # The CUDA 13 sgl-deep-ep wheel links against NVSHMEM but does not bundle it.
+# SGLang JIT-compiles its HiCache native hash extension on first use, which
+# requires the OpenSSL headers in addition to the runtime library.
 RUN apt-get -qq update && \
-    apt-get -q install --no-install-recommends -y libnvshmem3-cuda-13 && \
+    apt-get -q install --no-install-recommends -y \
+      libnvshmem3-cuda-13 \
+      libssl-dev && \
     NVSHMEM_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/nvshmem/13" && \
     echo "${NVSHMEM_LIB_DIR}" > /etc/ld.so.conf.d/nvshmem.conf && \
     ldconfig && \
