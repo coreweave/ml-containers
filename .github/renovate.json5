@@ -18,7 +18,7 @@
       ],
       matchStrings: [
         "# renovate-release: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) currentValue=(?<currentValue>\\S+) versioning=(?<versioning>\\S+)\\n[ \\t]*- (?:[a-z-]+: )?'?(?<currentDigest>[0-9a-f]{40})'?",
-        "# renovate-release-tag: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) versioning=(?<versioning>\\S+)\\n[ \\t]*- '(?<currentValue>v?[0-9][^'-]*)(?:-[^']*)?'",
+        "# renovate-release-tag: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) versioning=(?<versioning>\\S+)\\n[ \\t]*(?:- )?(?:[a-z-]+: )?'(?<currentValue>v?[0-9][^'-]*)(?:-[^']*)?'",
       ],
     },
   ],
