@@ -21,7 +21,12 @@ ldconfig
 
 # Compile and exercise the lazy HiCache hash extension during the image build.
 # This catches missing C++ headers or libcrypto linkage before request traffic
-# reaches the Mamba radix-cache event path.
+# reaches the Mamba radix-cache event path. Keep the build-host-specific module
+# out of the final image so runtime compilation targets the serving host CPU.
+TORCH_EXTENSIONS_DIR="$(mktemp -d)"
+export TORCH_EXTENSIONS_DIR
+trap 'rm -rf "${TORCH_EXTENSIONS_DIR}"' EXIT
+
 python3 - <<'PY'
 from sglang.srt.mem_cache.cpp_utils.native_hash import get_native_hash
 
