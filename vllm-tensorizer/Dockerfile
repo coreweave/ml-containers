@@ -86,9 +86,14 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout "${VLLM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
-COPY vllm-mnnvl-lamport-multimem-store.patch /git/patch
-RUN git -C vllm apply -v --stat --apply /git/patch && \
-    rm /git/patch
+
+# Apply only source changes that affect compiled artifacts before building the
+# vLLM wheel. The GLM-5.3 Python/runtime delta is intentionally applied later
+# in a downstream runtime layer so it can iterate without rebuilding native
+# code.
+COPY vllm-patches/ /git/vllm-patches/
+RUN git -C vllm apply -v --stat --apply /git/vllm-patches/*.patch && \
+    rm -rf /git/vllm-patches
 
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
@@ -99,12 +104,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout "${FLASHINFER_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
-
-# Apply the v0.6.15.post1 FlashInfer patch stack in numbered order.
-COPY flashinfer-patches/ /git/flashinfer-patches/
-RUN git -C flashinfer apply -v --stat --apply /git/flashinfer-patches/*.patch && \
-    rm -rf /git/flashinfer-patches
-
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
@@ -208,9 +207,10 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     [ -n "${CUDA_VERSION}" ] && \
-    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.6.0' && \
+    python3 -m pip uninstall -y flash-attn-4 && \
+    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.6.2' && \
     if [ "${CUDA_VERSION%%.*}" = "13" ]; then \
-      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.6.0'; \
+      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.6.2'; \
     fi && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
@@ -218,6 +218,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       "${CUTLASS_DSL_PACKAGE}" \
+      'quack-kernels==0.6.4' \
       'apache-tvm-ffi==0.1.11' && \
     export FLASHINFER_LOCAL_VERSION="$(echo "${CUDA_VERSION}" | sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
@@ -347,6 +348,14 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
 
 FROM ${FINAL_BASE_IMAGE} AS base
 
+ARG VLLM_COMMIT
+ARG FLASHINFER_COMMIT
+ARG VLLM_GLM53_COMPILED_REF=e34f7f71edc7aa46e906326688d1c4f3a6fce8a1
+LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
+      com.coreweave.vllm.flashinfer-ref="${FLASHINFER_COMMIT}" \
+      com.coreweave.vllm.glm53-upstream-pr="53906" \
+      com.coreweave.vllm.glm53-compiled-ref="${VLLM_GLM53_COMPILED_REF}"
+
 WORKDIR /workspace
 
 RUN apt-get -qq update && \
@@ -354,7 +363,12 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.27 pins nvidia-cutlass-dsl==4.6.2 but only floors quack-kernels (>=0.6.4).
+# vLLM 0.28 ships its own namespaced FA4 implementation. Remove the inherited
+# global FA4 package because its metadata hard-pins CUTLASS DSL 4.6.0.dev0 and
+# apache-tvm-ffi >=0.1.12, which conflict with vLLM's 4.6.2/0.1.11 contract.
+RUN python3 -m pip uninstall -y flash-attn-4
+
+# vLLM 0.28 pins nvidia-cutlass-dsl==4.6.2 but only floors quack-kernels (>=0.6.4).
 # Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
 # so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
@@ -362,13 +376,15 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
     echo 'quack-kernels==0.6.4' >> /tmp/constraints.txt
 
-RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
-
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
+
+# Install the locally built FlashInfer wheels first so the vLLM resolver checks
+# the pinned rc contract without fetching or downgrading FlashInfer.
+RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
@@ -470,5 +486,47 @@ ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
 
 # Re-prepend on login shells too (HPC-X's profile.d regenerates LD_LIBRARY_PATH; zz- sorts last).
 RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx-mt.sh
+
+# Keep the vLLM wheel metadata, installed FlashInfer wheels, and the GLM NoPE
+# feature API in one compatibility contract. The local CUDA suffix is valid for
+# an exact public-version pin (for example, 0.6.18rc10+cu132 satisfies
+# ==0.6.18rc10).
+RUN python3 - <<'PY'
+from importlib import metadata
+from inspect import Parameter, signature
+
+from packaging.requirements import Requirement
+from packaging.version import Version
+
+from flashinfer.mla import BatchMLAPagedAttentionWrapper
+
+requirements = [Requirement(value) for value in metadata.requires("vllm") or ()]
+flashinfer_requirement = next(
+    requirement
+    for requirement in requirements
+    if requirement.name.lower() == "flashinfer-python"
+)
+installed_python = metadata.version("flashinfer-python")
+assert flashinfer_requirement.specifier.contains(installed_python, prereleases=True), (
+    f"vLLM requires {flashinfer_requirement}, but flashinfer-python {installed_python} "
+    "is installed"
+)
+expected_flashinfer = Version("0.6.18rc10")
+for distribution in ("flashinfer-python", "flashinfer-cubin"):
+    installed = metadata.version(distribution)
+    assert Version(installed).public == expected_flashinfer.public, (
+        f"expected {distribution} {expected_flashinfer}, found {installed}"
+    )
+parameters = signature(BatchMLAPagedAttentionWrapper.run).parameters
+assert (
+    "ckv_scale_arr" in parameters
+    and parameters["ckv_scale_arr"].kind is Parameter.KEYWORD_ONLY
+), "FlashInfer is missing the GLM NoPE MLA ckv_scale_arr API"
+print(
+    f"vLLM metadata {flashinfer_requirement}; installed FlashInfer "
+    f"{installed_python}; GLM NoPE MLA API present"
+)
+PY
+RUN python3 -m pip check
 
 EXPOSE 8080
