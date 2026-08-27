@@ -198,6 +198,22 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 WORKDIR /wheels
 
 
+FROM builder-base AS vllm-cute47-wheel
+RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/input \
+    mkdir -p /workspace/unpacked /wheels && \
+    wheel unpack /input/vllm-*.whl -d /workspace/unpacked && \
+    WHEEL_DIR="$(find /workspace/unpacked -mindepth 1 -maxdepth 1 -type d -print -quit)" && \
+    METADATA="$(find "$WHEEL_DIR" -mindepth 2 -maxdepth 2 -path '*.dist-info/METADATA' -print -quit)" && \
+    [ -n "$WHEEL_DIR" ] && [ -n "$METADATA" ] && \
+    [ "$(grep -c 'nvidia-cutlass-dsl\[cu13\]==4.6.2' "$METADATA")" -eq 1 ] && \
+    sed -i 's/nvidia-cutlass-dsl\[cu13\]==4\.6\.2/nvidia-cutlass-dsl[cu13]==4.7.0/' "$METADATA" && \
+    ! grep -q 'nvidia-cutlass-dsl\[cu13\]==4.6.2' "$METADATA" && \
+    grep -q 'nvidia-cutlass-dsl\[cu13\]==4.7.0' "$METADATA" && \
+    wheel pack "$WHEEL_DIR" -d /wheels
+
+WORKDIR /wheels
+
+
 FROM builder-base AS flashinfer-builder
 RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -227,6 +243,25 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       /opt/build.sh; \
     ); done && \
     ( cd flashinfer-jit-cache && CXX_WRAPPED=g++-12 CC_WRAPPED=gcc-12 /opt/build.sh )
+
+WORKDIR /wheels
+
+
+FROM builder-base AS quack-builder
+COPY quack-public-0.6.4-to-cute-4.7.patch /tmp/quack.patch
+RUN python3 -m pip download --no-cache-dir --no-deps --no-binary=:all: \
+      quack-kernels==0.6.4 -d /tmp && \
+    mkdir -p /workspace/quack && \
+    tar -xf /tmp/quack_kernels-0.6.4.tar.gz \
+      -C /workspace/quack --strip-components=1 && \
+    git -C /workspace/quack apply --check /tmp/quack.patch && \
+    git -C /workspace/quack apply --whitespace=nowarn /tmp/quack.patch && \
+    sed -i 's/4\.6\.2/4.7.0/g' \
+      /workspace/quack/pyproject.toml && \
+    [ "$(grep -c 'nvidia-cutlass-dsl.*4.7.0' /workspace/quack/pyproject.toml)" -eq 2 ] && \
+    ! grep -q '4\.6\.2' /workspace/quack/pyproject.toml && \
+    cd /workspace/quack && \
+    /opt/build.sh
 
 WORKDIR /wheels
 
@@ -354,21 +389,29 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.27 pins nvidia-cutlass-dsl==4.6.2 but only floors quack-kernels (>=0.6.4).
-# Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
-# so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
+# The Standard Kernels experiment upgrades vLLM, FlashInfer, and QuACK together
+# to CUTLASS DSL 4.7. QuACK keeps its public 0.6.4 package version but is rebuilt
+# from the recovered 4.7-compatible source patch above.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
     echo 'quack-kernels==0.6.4' >> /tmp/constraints.txt
 
-RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
+RUN --mount=type=bind,from=quack-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir /tmp/wheels/quack_kernels-0.6.4-*.whl \
+      -c /tmp/constraints.txt
+
+RUN --mount=type=bind,from=vllm-cute47-wheel,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
+
+COPY verify-quack-cute47.py /tmp/verify-quack-cute47.py
+RUN python3 /tmp/verify-quack-cute47.py && \
+    rm /tmp/verify-quack-cute47.py
 
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
