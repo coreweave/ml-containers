@@ -1,0 +1,370 @@
+From 9a107e6275cda08dd5a860a4cf2740f8170452a1 Mon Sep 17 00:00:00 2001
+From: Aleksandr Malyshev <amalyshev@coreweave.com>
+Date: Thu, 27 Aug 2026 11:33:09 -0700
+Subject: [PATCH] feat: add SiTU (Kimi K3) activation to CuTe-DSL MoE GEMM1
+
+Add direct ActivationType.Situ support to the gather grouped GEMM
+activation-fusion epilogue. The direct API uses swiglu_alpha and
+swiglu_beta as the gate and linear tanh scales, matching vLLM's
+gemm1_alpha/gemm1_beta contract.
+
+Keep the pinned release's existing parameterized SiTU API
+(ActivationType.Swiglu with situ_beta/situ_linear_beta) unchanged.
+
+AI-assisted.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+
+diff --git a/flashinfer/fused_moe/cute_dsl/blackwell/blockscaled_contiguous_gather_grouped_gemm_act_fusion.py b/flashinfer/fused_moe/cute_dsl/blackwell/blockscaled_contiguous_gather_grouped_gemm_act_fusion.py
+index 1614e5f166d05b34bfcebc9db1912a3b084aebbd..2d917b0e1e98618f478ac23b45e436985737aab5 100644
+--- a/flashinfer/fused_moe/cute_dsl/blackwell/blockscaled_contiguous_gather_grouped_gemm_act_fusion.py
++++ b/flashinfer/fused_moe/cute_dsl/blackwell/blockscaled_contiguous_gather_grouped_gemm_act_fusion.py
+@@ -469,9 +469,11 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
+         :param enable_pdl: Enable Programmatic Dependent Launch.
+         :type enable_pdl: bool
+         :param activation_type: FC1 activation type. Use ActivationType.Swiglu
+-            for gated SwiGLU/OAI/SiTU, ActivationType.GegluTanh for
+-            tanh-approximate GeGLU, and ActivationType.Relu2 for non-gated
+-            ReLU^2. Setting situ_beta selects SiTU.
++            for gated SwiGLU/OAI or parameterized SiTU, ActivationType.Situ for
++            direct SiTU with swiglu_alpha/beta as its tanh scales,
++            ActivationType.GegluTanh for tanh-approximate GeGLU, and
++            ActivationType.Relu2 for non-gated ReLU^2. Setting situ_beta
++            selects SiTU.
+         :type activation_type: int
+         :param swiglu_alpha: Sigmoid multiplier for parameterized SwiGLU.
+         :type swiglu_alpha: float
+@@ -581,6 +583,15 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
+                 f"gated={gated} is inconsistent with activation_type {activation_type!r}"
+             )
+         validate_cute_dsl_moe_situ_config(activation_type, situ_beta, situ_linear_beta)
++        if activation_type == ActivationType.Situ and (
++            swiglu_alpha == 0.0 or swiglu_beta == 0.0
++        ):
++            raise ValueError(
++                "Situ requires non-zero swiglu_alpha (gate tanh scale) and "
++                "swiglu_beta (linear tanh scale); pass swiglu_beta=1.0 for the "
++                "standard SiTU formulation (the SwiGLU default beta=0.0 is "
++                "invalid for Situ)."
++            )
+         self.vectorized_f32 = vectorized_f32
+         self.activation_type = int(activation_type)
+         self.swiglu_alpha = swiglu_alpha
+@@ -2802,7 +2813,138 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
+                         swiglu_beta = cutlass.Float32(self.swiglu_beta)
+                         swiglu_limit = cutlass.Float32(self.swiglu_limit)
+                         LOG2_E = cutlass.Float32(1.4426950408889634)
+-                        if cutlass.const_expr(self.situ_beta is not None):
++                        if cutlass.const_expr(
++                            self.activation_type == ActivationType.Situ.value
++                        ):
++                            inv_alpha = cutlass.Float32(
++                                f32_reciprocal(self.swiglu_alpha)
++                            )
++                            inv_beta = cutlass.Float32(
++                                f32_reciprocal(self.swiglu_beta)
++                            )
++                            if cutlass.const_expr(self.vectorized_f32):
++                                for i in cutlass.range_constexpr(
++                                    0, cute.size(tTR_rAcc_up), 2
++                                ):
++                                    up_dequant = cute.arch.mul_packed_f32x2(
++                                        (acc_vec_up[i], acc_vec_up[i + 1]),
++                                        (
++                                            cutlass.Float32(alpha_val),
++                                            cutlass.Float32(alpha_val),
++                                        ),
++                                    )
++                                    gate_dequant = cute.arch.mul_packed_f32x2(
++                                        (acc_vec_gate[i], acc_vec_gate[i + 1]),
++                                        (
++                                            cutlass.Float32(alpha_val),
++                                            cutlass.Float32(alpha_val),
++                                        ),
++                                    )
++                                    gate_clamped = (
++                                        fmin(gate_dequant[0], swiglu_limit, nan=True),
++                                        fmin(gate_dequant[1], swiglu_limit, nan=True),
++                                    )
++                                    up_clamped = (
++                                        -fmin(
++                                            -fmin(
++                                                up_dequant[0], swiglu_limit, nan=True
++                                            ),
++                                            swiglu_limit,
++                                            nan=True,
++                                        ),
++                                        -fmin(
++                                            -fmin(
++                                                up_dequant[1], swiglu_limit, nan=True
++                                            ),
++                                            swiglu_limit,
++                                            nan=True,
++                                        ),
++                                    )
++                                    left = cute.arch.mul_packed_f32x2(
++                                        (
++                                            cute.math.tanh(
++                                                up_clamped[0] * inv_beta,
++                                                fastmath=True,
++                                            ),
++                                            cute.math.tanh(
++                                                up_clamped[1] * inv_beta,
++                                                fastmath=True,
++                                            ),
++                                        ),
++                                        (swiglu_beta, swiglu_beta),
++                                    )
++                                    gate_scaled = cute.arch.mul_packed_f32x2(
++                                        gate_clamped, (inv_alpha, inv_alpha)
++                                    )
++                                    right = cute.arch.mul_packed_f32x2(
++                                        cute.arch.mul_packed_f32x2(
++                                            (
++                                                cute.math.tanh(
++                                                    gate_scaled[0], fastmath=True
++                                                ),
++                                                cute.math.tanh(
++                                                    gate_scaled[1], fastmath=True
++                                                ),
++                                            ),
++                                            (swiglu_alpha, swiglu_alpha),
++                                        ),
++                                        (
++                                            cute.arch.rcp_approx(
++                                                1.0
++                                                + cute.math.exp2(
++                                                    -(LOG2_E * gate_clamped[0]),
++                                                    fastmath=True,
++                                                )
++                                            ),
++                                            cute.arch.rcp_approx(
++                                                1.0
++                                                + cute.math.exp2(
++                                                    -(LOG2_E * gate_clamped[1]),
++                                                    fastmath=True,
++                                                )
++                                            ),
++                                        ),
++                                    )
++                                    (
++                                        tCompute[i],
++                                        tCompute[i + 1],
++                                    ) = cute.arch.mul_packed_f32x2(left, right)
++                            else:
++                                for i in cutlass.range_constexpr(
++                                    cute.size(tTR_rAcc_up)
++                                ):
++                                    up_dequant = acc_vec_up[i] * cutlass.Float32(
++                                        alpha_val
++                                    )
++                                    gate_dequant = acc_vec_gate[i] * cutlass.Float32(
++                                        alpha_val
++                                    )
++                                    gate_clamped = fmin(
++                                        gate_dequant, swiglu_limit, nan=True
++                                    )
++                                    up_clamped = -fmin(
++                                        -fmin(up_dequant, swiglu_limit, nan=True),
++                                        swiglu_limit,
++                                        nan=True,
++                                    )
++                                    left = swiglu_beta * cute.math.tanh(
++                                        up_clamped * inv_beta, fastmath=True
++                                    )
++                                    sigmoid_gate = cute.arch.rcp_approx(
++                                        1.0
++                                        + cute.math.exp2(
++                                            -(LOG2_E * gate_clamped), fastmath=True
++                                        )
++                                    )
++                                    right = (
++                                        swiglu_alpha
++                                        * cute.math.tanh(
++                                            gate_clamped * inv_alpha, fastmath=True
++                                        )
++                                        * sigmoid_gate
++                                    )
++                                    tCompute[i] = left * right
++                        elif cutlass.const_expr(self.situ_beta is not None):
+                             # Keep the Python float so situ_f32 can fold 1/beta.
+                             situ_beta = self.situ_beta
+                             if cutlass.const_expr(self.situ_linear_beta is not None):
+diff --git a/flashinfer/fused_moe/cute_dsl/fused_moe.py b/flashinfer/fused_moe/cute_dsl/fused_moe.py
+index d2220dd5e6819696c84a6f37f45b8985102524fc..14b1ead796e9f1b84984e82171a80ec91dca2854 100644
+--- a/flashinfer/fused_moe/cute_dsl/fused_moe.py
++++ b/flashinfer/fused_moe/cute_dsl/fused_moe.py
+@@ -228,7 +228,8 @@ def _moe_core_impl(
+         use_fused_finalize: Use atomic fused finalize; otherwise use the
+             deterministic two-stage finalize.
+         activation_type: Activation type to apply after GEMM1. Use
+-            ActivationType.Swiglu for gated SwiGLU/OAI/SiTU,
++            ActivationType.Swiglu for gated SwiGLU/OAI or parameterized SiTU,
++            ActivationType.Situ for direct SiTU using swiglu_alpha/beta,
+             ActivationType.GegluTanh for tanh-approximate GeGLU, and
+             ActivationType.Relu2 for non-gated mode. Setting situ_beta selects
+             SiTU; swiglu_oai is represented as Swiglu with non-default
+@@ -544,9 +545,10 @@ class CuteDslMoEWrapper:
+             Enable Programmatic Dependent Launch.  Defaults to ``True``.
+         activation_type : int
+             FC1 activation type. Use ``ActivationType.Swiglu`` for gated
+-            SwiGLU/SiTU, ``ActivationType.GegluTanh`` for tanh-approximate
+-            GeGLU, and ``ActivationType.Relu2`` for non-gated ReLU^2. Setting
+-            ``situ_beta`` selects SiTU.
++            SwiGLU or parameterized SiTU, ``ActivationType.Situ`` for direct
++            SiTU using swiglu_alpha/beta, ``ActivationType.GegluTanh`` for
++            tanh-approximate GeGLU, and ``ActivationType.Relu2`` for non-gated
++            ReLU^2. Setting ``situ_beta`` selects SiTU.
+         swiglu_alpha, swiglu_beta, swiglu_limit : float
+             SwiGLU parameters. ``swiglu_oai`` is represented as
+             ``ActivationType.Swiglu`` with non-default values.
+@@ -1094,9 +1096,10 @@ def cute_dsl_fused_moe_nvfp4(
+         Enable Programmatic Dependent Launch.  Defaults to ``True``.
+     activation_type : int
+         FC1 activation type. Use ``ActivationType.Swiglu`` for gated
+-        SwiGLU/SiTU, ``ActivationType.GegluTanh`` for tanh-approximate GeGLU,
+-        and ``ActivationType.Relu2`` for non-gated ReLU^2. Setting
+-        ``situ_beta`` selects SiTU; ``swiglu_oai`` is represented as
++        SwiGLU or parameterized SiTU, ``ActivationType.Situ`` for direct SiTU
++        using swiglu_alpha/beta, ``ActivationType.GegluTanh`` for
++        tanh-approximate GeGLU, and ``ActivationType.Relu2`` for non-gated
++        ReLU^2. Setting ``situ_beta`` selects SiTU; ``swiglu_oai`` is represented as
+         ``ActivationType.Swiglu`` with non-default ``swiglu_alpha/beta/limit``.
+     swiglu_alpha, swiglu_beta, swiglu_limit : float
+         SwiGLU parameters.
+diff --git a/flashinfer/fused_moe/cute_dsl/moe_utils.py b/flashinfer/fused_moe/cute_dsl/moe_utils.py
+index 47d75f2934ed4aab06b7779910d6ef152a860934..0b630b0c6e9a99eaa380381e5a5b0cd3cdb0429b 100644
+--- a/flashinfer/fused_moe/cute_dsl/moe_utils.py
++++ b/flashinfer/fused_moe/cute_dsl/moe_utils.py
+@@ -41,6 +41,7 @@ SUPPORTED_CUTE_DSL_MOE_ACTIVATION_TYPES = (
+     ActivationType.Swiglu,
+     ActivationType.GegluTanh,
+     ActivationType.Relu2,
++    ActivationType.Situ,
+ )
+ 
+ 
+diff --git a/tests/moe/test_cute_dsl_fused_moe.py b/tests/moe/test_cute_dsl_fused_moe.py
+index 04b1a73091d8f52ad3c24b4813257eed81b4ee6c..5c4b16645132bf39832d9a54e527a36533f4e2ac 100644
+--- a/tests/moe/test_cute_dsl_fused_moe.py
++++ b/tests/moe/test_cute_dsl_fused_moe.py
+@@ -221,6 +221,14 @@ def test_geglu_tanh_activation_is_supported():
+     assert gated
+ 
+ 
++def test_situ_activation_is_supported():
++    activation_type, gated = normalize_cute_dsl_moe_activation_type(
++        ActivationType.Situ
++    )
++    assert activation_type == ActivationType.Situ
++    assert gated
++
++
+ @pytest.mark.parametrize(
+     "activation_type,situ_beta,situ_linear_beta,error",
+     [
+@@ -1773,12 +1781,14 @@ class TestCuteDslFusedMoeFunctional:
+         [(1.75, None), (0.8, 1.5)],
+         ids=["gate-clamp", "gate-and-up-clamp"],
+     )
++    @pytest.mark.parametrize("situ_api", ["parameterized", "direct-enum"])
+     def test_situ_accuracy(
+         self,
+         quant_mode: str,
+         use_per_token_activation: bool,
+         situ_beta: float,
+         situ_linear_beta: float | None,
++        situ_api: str,
+     ):
+         """Accuracy test for SiTU with optional smooth up-branch clamping."""
+         if is_sm107():
+@@ -1806,6 +1816,19 @@ class TestCuteDslFusedMoeFunctional:
+             tensors, quant_mode
+         )
+ 
++        if situ_api == "direct-enum":
++            activation_type = ActivationType.Situ
++            activation_kwargs = {
++                "swiglu_alpha": situ_beta,
++                "swiglu_beta": situ_linear_beta or 1.0,
++            }
++        else:
++            activation_type = ActivationType.Swiglu
++            activation_kwargs = {
++                "situ_beta": situ_beta,
++                "situ_linear_beta": situ_linear_beta,
++            }
++
+         result = cute_dsl_fused_moe_nvfp4(
+             token_selected_experts=tensors["token_selected_experts"],
+             token_final_scales=tensors["token_final_scales"],
+@@ -1817,10 +1840,9 @@ class TestCuteDslFusedMoeFunctional:
+             w2_alpha=tensors["w2_alpha"],
+             num_experts=num_experts,
+             top_k=top_k,
+-            activation_type=ActivationType.Swiglu,
+-            situ_beta=situ_beta,
+-            situ_linear_beta=situ_linear_beta,
++            activation_type=activation_type,
+             quant_mode=quant_mode,
++            **activation_kwargs,
+             **api_inputs,
+         )
+ 
+@@ -1832,9 +1854,8 @@ class TestCuteDslFusedMoeFunctional:
+             top_k=top_k,
+             hidden_size=hidden_size,
+             intermediate_size=intermediate_size,
+-            activation_type=ActivationType.Swiglu,
+-            situ_beta=situ_beta,
+-            situ_linear_beta=situ_linear_beta,
++            activation_type=activation_type,
++            **activation_kwargs,
+             **reference_inputs,
+         )
+ 
+diff --git a/tests/moe/utils.py b/tests/moe/utils.py
+index 7fa7fef40684b4fd13b35eabe85d5fda24a66eec..912df132c18b422416d6685099759daa711a1023 100644
+--- a/tests/moe/utils.py
++++ b/tests/moe/utils.py
+@@ -385,13 +385,17 @@ def compute_reference_moe_fp4(
+         validate_cute_dsl_moe_situ_config(
+             normalized_activation_type, situ_beta, situ_linear_beta
+         )
+-        if situ_beta is not None:
+-            activation = "situ"
+-        elif normalized_activation_type == ActivationType.GegluTanh:
+-            activation = "gelu_tanh"
+         swiglu_alpha = DEFAULT_SWIGLU_ALPHA if swiglu_alpha is None else swiglu_alpha
+         swiglu_beta = DEFAULT_SWIGLU_BETA if swiglu_beta is None else swiglu_beta
+         swiglu_limit = DEFAULT_SWIGLU_LIMIT if swiglu_limit is None else swiglu_limit
++        if normalized_activation_type == ActivationType.Situ:
++            if swiglu_alpha == 0.0 or swiglu_beta == 0.0:
++                raise ValueError("Situ requires non-zero swiglu_alpha and swiglu_beta")
++            activation = "situ_direct"
++        elif situ_beta is not None:
++            activation = "situ"
++        elif normalized_activation_type == ActivationType.GegluTanh:
++            activation = "gelu_tanh"
+     else:
+         supported_activations = {
+             "silu",
+@@ -458,7 +462,16 @@ def compute_reference_moe_fp4(
+             if gated:
+                 linear = gemm1_out[:, :intermediate_size]
+                 gate = gemm1_out[:, intermediate_size:]
+-                if activation == "situ":
++                if activation == "situ_direct":
++                    if swiglu_limit is not None:
++                        gate = gate.clamp(max=swiglu_limit)
++                        linear = linear.clamp(min=-swiglu_limit, max=swiglu_limit)
++                    act_out = (swiglu_beta * torch.tanh(linear / swiglu_beta)) * (
++                        swiglu_alpha
++                        * torch.tanh(gate / swiglu_alpha)
++                        * torch.sigmoid(gate)
++                    )
++                elif activation == "situ":
+                     situ_gate = (
+                         situ_beta * torch.tanh(gate / situ_beta) * torch.sigmoid(gate)
+                     )

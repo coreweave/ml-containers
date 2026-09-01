@@ -105,6 +105,10 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+COPY flashinfer-patches/ /git/flashinfer-patches/
+RUN git -C flashinfer apply -v --stat --apply /git/flashinfer-patches/*.patch && \
+    rm -rf /git/flashinfer-patches
+
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
 ARG LMCACHE_COMMIT
