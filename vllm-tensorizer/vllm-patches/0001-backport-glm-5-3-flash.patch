@@ -1,8 +1,8 @@
 diff --git a/csrc/libtorch_stable/cache_kernels.cu b/csrc/libtorch_stable/cache_kernels.cu
-index 2dbd498fb3..3813aab9d5 100644
+index 6b8908d2cd..bc8d1be2fa 100644
 --- a/csrc/libtorch_stable/cache_kernels.cu
 +++ b/csrc/libtorch_stable/cache_kernels.cu
-@@ -1173,6 +1173,9 @@ __global__ void gather_and_maybe_dequant_cache_page(
+@@ -1230,6 +1230,9 @@ __global__ void gather_and_maybe_dequant_cache_page(
  #define CALL_GATHER_CACHE_576(SCALAR_T, CACHE_T, KV_DTYPE) \
    CALL_GATHER_CACHE(SCALAR_T, CACHE_T, KV_DTYPE, 576)
 
@@ -12,7 +12,7 @@ index 2dbd498fb3..3813aab9d5 100644
  #define CALL_GATHER_CACHE_320(SCALAR_T, CACHE_T, KV_DTYPE) \
    CALL_GATHER_CACHE(SCALAR_T, CACHE_T, KV_DTYPE, 320)
 
-@@ -1210,10 +1213,9 @@ void gather_and_maybe_dequant_cache(
+@@ -1267,10 +1270,9 @@ void gather_and_maybe_dequant_cache(
          seq_starts.value().scalar_type() == torch::headeronly::ScalarType::Int,
          "seq_starts must be int32");
    }
@@ -26,7 +26,7 @@ index 2dbd498fb3..3813aab9d5 100644
 
    STD_TORCH_CHECK(src_cache.device() == dst.device(),
                    "src_cache and dst must be on the same device");
-@@ -1249,6 +1251,9 @@ void gather_and_maybe_dequant_cache(
+@@ -1306,6 +1308,9 @@ void gather_and_maybe_dequant_cache(
    if (head_dim == 576) {
      DISPATCH_BY_KV_CACHE_DTYPE(dst.scalar_type(), kv_cache_dtype,
                                 CALL_GATHER_CACHE_576);
