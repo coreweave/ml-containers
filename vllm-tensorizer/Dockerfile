@@ -135,8 +135,8 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 
 # vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
-# rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95)
-# plus protoc. v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
+# rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95).
+# v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
 # via setuptools-rust. Build both in a dedicated stage and copy the artifacts
 # into the wheel build below so the heavy wheel stage doesn't need cargo.
 FROM builder-base AS vllm-rust-builder
@@ -145,7 +145,7 @@ ENV CARGO_BUILD_JOBS=4 \
     PATH="/root/.cargo/bin:${PATH}"
 RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends --no-upgrade -y \
-      curl ca-certificates unzip build-essential pkg-config perl && \
+      curl ca-certificates build-essential pkg-config perl && \
     apt-get clean && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain none && \
@@ -155,7 +155,6 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
-    bash tools/install_protoc.sh && \
     bash build_rust.sh && \
     install -D -m755 vllm/vllm-rs /out/vllm-rs && \
     cp vllm/_rust_*.so /out/
@@ -214,7 +213,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     fi && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
-      'nvidia-cudnn-frontend>=1.19.1' \
+      'nvidia-cudnn-frontend>=1.25.0' \
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       "${CUTLASS_DSL_PACKAGE}" \
@@ -363,14 +362,14 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.28 ships its own namespaced FA4 implementation. Remove the inherited
+# vLLM 0.29 ships its own namespaced FA4 implementation. Remove the inherited
 # global FA4 package because its metadata hard-pins CUTLASS DSL 4.6.0.dev0 and
 # apache-tvm-ffi >=0.1.12, which conflict with vLLM's 4.6.2/0.1.11 contract.
 RUN python3 -m pip uninstall -y flash-attn-4
 
-# vLLM 0.28 pins nvidia-cutlass-dsl==4.6.2 but only floors quack-kernels (>=0.6.4).
-# Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
-# so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
+# vLLM 0.29 pins nvidia-cutlass-dsl==4.6.2 and quack-kernels==0.6.4.
+# Keep the constraint explicit so the FlashInfer and vLLM installs use the same
+# CUTLASS DSL contract.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
@@ -382,7 +381,7 @@ RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels 
     python3 -m pip install --no-cache-dir nvidia-ml-py
 
 # Install the locally built FlashInfer wheels first so the vLLM resolver checks
-# the pinned rc contract without fetching or downgrading FlashInfer.
+# the pinned release contract without fetching or downgrading FlashInfer.
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
@@ -489,8 +488,7 @@ RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /e
 
 # Keep the vLLM wheel metadata, installed FlashInfer wheels, and the GLM NoPE
 # feature API in one compatibility contract. The local CUDA suffix is valid for
-# an exact public-version pin (for example, 0.6.18rc10+cu132 satisfies
-# ==0.6.18rc10).
+# an exact public-version pin (for example, 0.6.18+cu132 satisfies ==0.6.18).
 RUN python3 - <<'PY'
 from importlib import metadata
 from inspect import Parameter, signature
@@ -511,7 +509,7 @@ assert flashinfer_requirement.specifier.contains(installed_python, prereleases=T
     f"vLLM requires {flashinfer_requirement}, but flashinfer-python {installed_python} "
     "is installed"
 )
-expected_flashinfer = Version("0.6.18rc10")
+expected_flashinfer = Version("0.6.18")
 for distribution in ("flashinfer-python", "flashinfer-cubin"):
     installed = metadata.version(distribution)
     assert Version(installed).public == expected_flashinfer.public, (
