@@ -1,0 +1,42 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["github>coreweave/renovate-config"],
+
+  // Limit this rollout to the expensive inference runtime builds. Other
+  // dependencies can be enabled deliberately once this flow proves useful.
+  includePaths: [
+    ".github/configurations/sglang.yml",
+    ".github/configurations/vllm-tensorizer.yml",
+  ],
+  enabledManagers: ["custom.regex"],
+  customManagers: [
+    {
+      customType: "regex",
+      description: "Track released inference runtimes while retaining immutable commit pins",
+      managerFilePatterns: [
+        "/^\\.github/configurations/(?:sglang|vllm-tensorizer)\\.yml$/",
+      ],
+      matchStrings: [
+        "# renovate-release: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) currentValue=(?<currentValue>\\S+) versioning=(?<versioning>\\S+)\\n[ \\t]*- (?:[a-z-]+: )?'?(?<currentDigest>[0-9a-f]{40})'?",
+        "# renovate-release-tag: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) versioning=(?<versioning>\\S+)\\n[ \\t]*(?:- )?(?:[a-z-]+: )?'(?<currentValue>v?[0-9][^'-]*)(?:-[^']*)?'",
+      ],
+    },
+  ],
+
+  packageRules: [
+    {
+      description: "Build stable inference updates after a six-hour release-age buffer",
+      matchDatasources: ["github-releases"],
+      matchPackageNames: ["sgl-project/sglang", "vllm-project/vllm"],
+      ignoreUnstable: true,
+      minimumReleaseAge: "6 hours",
+      automerge: false,
+      prCreation: "not-pending",
+      labels: ["dependencies", "inference"],
+    },
+  ],
+
+  // Limit total candidate build concurrency across both runtimes.
+  branchConcurrentLimit: 2,
+  prConcurrentLimit: 2,
+}

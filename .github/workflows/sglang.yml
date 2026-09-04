@@ -25,7 +25,7 @@ jobs:
       object-storage-secrets: true
       build-contexts: common=common
       tag-suffix: ${{ matrix.tag }}
+      cache-key: ${{ matrix.tag }}
       build-args: |
         BASE_IMAGE=${{ matrix.base-image }}
         SGLANG_COMMIT=${{ matrix.sglang-commit }}
-        DECORD_COMMIT=${{ matrix.decord-commit }}

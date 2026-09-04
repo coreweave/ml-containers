@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:es-sm-10x-4a80ea7-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:es-sm-10x-4a80ea7-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:8c5de3e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:8c5de3e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
 ARG SCCACHE_VERSION="0.14.0"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -87,6 +87,13 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
+# Apply only source changes that affect compiled artifacts before building the
+# vLLM wheel. The GLM-5.3 Python/runtime delta is intentionally applied later
+# in a downstream runtime layer so it can iterate without rebuilding native
+# code.
+COPY vllm-patches/ /git/vllm-patches/
+RUN git -C vllm apply -v --stat --apply /git/vllm-patches/*.patch && \
+    rm -rf /git/vllm-patches
 
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
@@ -97,7 +104,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout "${FLASHINFER_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
-
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
@@ -116,17 +122,48 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 FROM alpine/git:2.36.3 AS deepgemm-downloader
 WORKDIR /git
-ARG DEEPGEMM_COMMIT='891d57b4db1071624b5c8fa0d1e51cb317fa709f'
+# Match _DEEPGEMM_UPSTREAM_TAG in vLLM's cmake/external_projects/deepgemm.cmake
+# at VLLM_COMMIT (vllm-project/DeepGEMM); a stale wheel drifts from the JIT
+# interface vLLM was built against and breaks FP8 MoE GEMMs at serve time.
+ARG DEEPGEMM_COMMIT='8b1392b978f5a03c828dd1711090d7fb50958b8a'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
-      https://github.com/deepseek-ai/DeepGEMM && \
+      https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
     git checkout "${DEEPGEMM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
 
+# vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
+# rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95)
+# plus protoc. v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
+# via setuptools-rust. Build both in a dedicated stage and copy the artifacts
+# into the wheel build below so the heavy wheel stage doesn't need cargo.
+FROM builder-base AS vllm-rust-builder
+ENV CARGO_BUILD_JOBS=4 \
+    CC=gcc CXX=g++ \
+    PATH="/root/.cargo/bin:${PATH}"
+RUN apt-get -qq update && \
+    apt-get -q install --no-install-recommends --no-upgrade -y \
+      curl ca-certificates unzip build-essential pkg-config perl && \
+    apt-get clean && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain none && \
+    python3 -m pip install --no-cache-dir \
+      'setuptools>=77.0.3,<81.0.0' 'setuptools-rust>=1.9.0' wheel
+RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/workspace/rust/target \
+    bash tools/install_protoc.sh && \
+    bash build_rust.sh && \
+    install -D -m755 vllm/vllm-rs /out/vllm-rs && \
+    cp vllm/_rust_*.so /out/
+
+
 FROM builder-base AS vllm-builder
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
+    --mount=type=bind,from=vllm-rust-builder,source=/out,target=/opt/rust-artifacts \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
@@ -141,7 +178,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
       || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
     } && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
-    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' grpcio-tools && \
+    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' \
+      grpcio-tools 'setuptools-rust>=1.9.0' && \
     if [ -f 'use_existing_torch.py' ]; then \
       python3 use_existing_torch.py; \
     else \
@@ -149,6 +187,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
         e489ad7a210f4234db696d1f2749d5f3662fa65b:use_existing_torch.py \
         | python3 -; \
     fi && \
+    install -D -m755 /opt/rust-artifacts/vllm-rs vllm/vllm-rs && \
+    cp /opt/rust-artifacts/_rust_*.so vllm/ && \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
@@ -167,13 +207,20 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     . /opt/arch_flags.sh && \
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     [ -n "${CUDA_VERSION}" ] && \
+    python3 -m pip uninstall -y flash-attn-4 && \
+    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.6.2' && \
+    if [ "${CUDA_VERSION%%.*}" = "13" ]; then \
+      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.6.2'; \
+    fi && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
-      'nvidia-cudnn-frontend>=1.13.0,<1.19.0' \
+      'nvidia-cudnn-frontend>=1.19.1' \
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
-      'apache-tvm-ffi==0.1.9' && \
-    export FLASHINFER_LOCAL_VERSION="$(sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
+      "${CUTLASS_DSL_PACKAGE}" \
+      'quack-kernels==0.6.4' \
+      'apache-tvm-ffi==0.1.11' && \
+    export FLASHINFER_LOCAL_VERSION="$(echo "${CUDA_VERSION}" | sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
       FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
     for DIR in . flashinfer-cubin; do ( \
@@ -233,12 +280,30 @@ RUN --mount=type=bind,from=deepgemm-downloader,source=/git/DeepGEMM,target=/work
     /opt/build.sh
 
 FROM builder-base AS deepep-builder
-ARG DEEPEP_COMMIT='73b6ea4'
+# Keep in lockstep with the DEEPEP_COMMIT_HASH default in vLLM's
+# tools/ep_kernels/install_python_libraries.sh at VLLM_COMMIT: that script
+# source-patches DeepEP (e.g. csrc/kernels/backend/symmetric.hpp), so an older
+# pin whose tree lacks those files fails the build. vLLM main expects this ref.
+ARG DEEPEP_COMMIT='d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb'
 ARG NVSHMEM_VER='3.3.24'
+ENV EP_NCCL_ROOT_DIR=/opt/nccl-root
 # DeepEP requires SM 9.0+ (Hopper/Blackwell). Filter out pre-SM90 arches
 # so Blackwell (10.0) is also supported.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,target=/tmp/ep_kernels \
     python3 -m pip install --no-cache-dir uv && \
+    # DeepEP's setup.py locates NCCL via deep_ep/utils/find_pkgs.py, which honors
+    # EP_NCCL_ROOT_DIR / NCCL_DIR before falling back to a nvidia-nccl-cuNN pip wheel.
+    # This base builds torch+NCCL from source (system lib, no wheel), so build DeepEP
+    # against that SAME system NCCL via a symlink root. (We used to `pip install
+    # nvidia-nccl-cu${major}` here purely to unblock the build — a hack: it's a
+    # byte-different PyPI build of the same 2.30.4, and on cuda13 the cuNN suffix is a
+    # footgun. Building against the system NCCL makes build-NCCL == runtime-NCCL; the
+    # final stage points EP_NCCL_ROOT_DIR at the identical system NCCL there.)
+    NCCL_LIBDIR="/usr/lib/$(uname -m)-linux-gnu" && \
+    mkdir -p /opt/nccl-root/lib /opt/nccl-root/include && \
+    ln -sf /usr/include/nccl.h /opt/nccl-root/include/nccl.h && \
+    for f in "${NCCL_LIBDIR}"/libnccl.so*; do ln -sf "$f" /opt/nccl-root/lib/"$(basename "$f")"; done && \
+    export EP_NCCL_ROOT_DIR=/opt/nccl-root && \
     . /opt/arch_flags.sh && \
     export NVCC_WRAPPER_FILTER_CODES="sm_80;sm_89;compute_80;compute_89;${NVCC_WRAPPER_FILTER_CODES}" && \
     WORKSPACE=/tmp/deepep_build MODE=wheel \
@@ -246,44 +311,50 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,tar
     NVSHMEM_VER="${NVSHMEM_VER}" \
     bash /tmp/ep_kernels/install_python_libraries.sh && \
     cp /tmp/deepep_build/dist/*.whl /wheels/ && \
-    mkdir -p /nvshmem_libs && \
-    cp /tmp/deepep_build/nvshmem/lib/libnvshmem*.so* /nvshmem_libs/
+    # Preserve the FULL nvshmem tree (lib + include), not just the host .so, so the
+    # final stage can expose it as EP_NVSHMEM_ROOT_DIR for internode DeepEP.
+    mkdir -p /nvshmem_root && \
+    cp -a /tmp/deepep_build/nvshmem/. /nvshmem_root/
 
+# Build a NIXL wheel linked against HPC-X's multi-threaded UCX (/opt/hpcx/ucx/mt). The PyPI
+# nixl-cuNN wheels bundle their own UCX, which clashes with this image's HPC-X UCX and can't
+# register GPU memory. UCX+POSIX are the only plugins needed; CUDA arch stays at NIXL's default
+# (sm_80+) to keep the wheel multi-arch.
 FROM builder-base AS nixl-builder
 RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends --no-upgrade -y \
-      build-essential pkg-config && \
+      build-essential pkg-config git && \
     apt-get clean && \
-    python3 -m pip install --no-cache-dir meson ninja pybind11 cmake
+    python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
-ARG NIXL_TAG='0.2.0'
-ARG NIXL_UCX_HOME='/opt/hpcx/ucx'
+ARG NIXL_TAG='v1.3.1'
+ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
-    mkdir /tmp/nixl && \
-    cd /tmp/nixl && \
-    wget "https://github.com/ai-dynamo/nixl/archive/refs/tags/${NIXL_TAG}.tar.gz" -qO- \
-    | tar --strip-components=1 -xzf - && \
     [ -d "${NIXL_UCX_HOME}" ] && \
-    CUDA_TARGET="$(find /usr/local/cuda/targets -mindepth 1 -maxdepth 1 -type d | head -1)" && \
-    meson setup build --prefix=/opt/nixl \
-      -Ducx_path="${NIXL_UCX_HOME}" \
-      -Dgds_path="${CUDA_TARGET}" \
-      -Dcudapath_inc="${CUDA_TARGET}/include" \
-      -Dcudapath_lib="${CUDA_TARGET}/lib" \
-      -Dcudapath_stub="${CUDA_TARGET}/lib/stubs" && \
-    cd build && \
-    ninja && \
-    ninja install && \
-    cd ../.. && \
-    rm -r /tmp/nixl && \
-    echo '/opt/nixl/lib/python3/dist-packages' > /usr/lib/python3/dist-packages/nixl.pth
+    git clone --depth 1 --branch "${NIXL_TAG}" https://github.com/ai-dynamo/nixl /tmp/nixl && \
+    # Rename the dist to nixl-cu<major> matching this image's CUDA (NIXL hardcodes nixl-cu12), so the
+    # `nixl` meta's nixl-cu<major> pin is met by our build and no prebuilt (bundled-UCX) wheel is pulled.
+    CUDA_MAJOR="$(nvcc --version | sed -n 's/.*release \([0-9]\{1,\}\).*/\1/p' | head -1)" && \
+    sed -i -E "s/^name = \"nixl-cu[0-9]+\"/name = \"nixl-cu${CUDA_MAJOR}\"/" /tmp/nixl/pyproject.toml && \
+    python3 -m pip wheel --no-cache-dir --no-build-isolation --no-deps /tmp/nixl -w /wheels \
+      -C setup-args="-Ducx_path=${NIXL_UCX_HOME}" \
+      -C setup-args="-Denable_plugins=UCX,POSIX" && \
+    rm -rf /tmp/nixl
 
 FROM ${FINAL_BASE_IMAGE} AS base
+
+ARG VLLM_COMMIT
+ARG FLASHINFER_COMMIT
+ARG VLLM_GLM53_COMPILED_REF=e34f7f71edc7aa46e906326688d1c4f3a6fce8a1
+LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
+      com.coreweave.vllm.flashinfer-ref="${FLASHINFER_COMMIT}" \
+      com.coreweave.vllm.glm53-upstream-pr="53906" \
+      com.coreweave.vllm.glm53-compiled-ref="${VLLM_GLM53_COMPILED_REF}"
 
 WORKDIR /workspace
 
@@ -292,17 +363,28 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
+# vLLM 0.28 ships its own namespaced FA4 implementation. Remove the inherited
+# global FA4 package because its metadata hard-pins CUTLASS DSL 4.6.0.dev0 and
+# apache-tvm-ffi >=0.1.12, which conflict with vLLM's 4.6.2/0.1.11 contract.
+RUN python3 -m pip uninstall -y flash-attn-4
+
+# vLLM 0.28 pins nvidia-cutlass-dsl==4.6.2 but only floors quack-kernels (>=0.6.4).
+# Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
+# so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
-    echo 'click != 8.3.0' >> /tmp/constraints.txt
-
-RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
+    echo 'click != 8.3.0' >> /tmp/constraints.txt && \
+    echo 'quack-kernels==0.6.4' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
     python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
+
+# Install the locally built FlashInfer wheels first so the vLLM resolver checks
+# the pinned rc contract without fetching or downgrading FlashInfer.
+RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
 # InfiniStore must be installed before LMCache as LMCache depends on InfiniStore
 RUN --mount=type=bind,from=infinistore-builder,source=/wheels,target=/tmp/wheels \
@@ -317,11 +399,34 @@ RUN --mount=type=bind,from=deepgemm-builder,source=/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,from=deepep-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt
 
-COPY --link --from=deepep-builder /nvshmem_libs/ /usr/local/lib/
-RUN ldconfig
+# --- DeepEP runtime NCCL discovery (this is what enables has_deep_ep()) --------
+# DeepEP resolves NCCL via deep_ep/utils/find_pkgs.py (EP_NCCL_ROOT_DIR / NCCL_DIR,
+# else a nvidia-nccl-cuNN wheel). This base builds NCCL from source (system lib, no
+# wheel), so without this DeepEP's import fails ("Cannot find package: nccl"),
+# has_deep_ep() is False, and DeepEP's MoE all2all is silently disabled. Point it at
+# the SYSTEM NCCL that torch actually loads via symlinks — NOT a PyPI wheel: a
+# from-source vs PyPI build of 2.30.4 differs byte-for-byte and fails
+# check_nccl_so()'s loaded-vs-linked filecmp. Symlinking the real lib makes that
+# compare file-vs-itself (validated in-image: has_deep_ep() -> True).
+RUN NCCL_LIBDIR="/usr/lib/$(uname -m)-linux-gnu" && \
+    mkdir -p /opt/nccl-root/lib /opt/nccl-root/include && \
+    ln -sf /usr/include/nccl.h /opt/nccl-root/include/nccl.h && \
+    for f in "${NCCL_LIBDIR}"/libnccl.so*; do ln -sf "$f" /opt/nccl-root/lib/"$(basename "$f")"; done
+ENV EP_NCCL_ROOT_DIR=/opt/nccl-root
 
-COPY --link --from=nixl-builder /opt/nixl /opt/nixl
-COPY --link --from=nixl-builder /usr/lib/python3/dist-packages/nixl.pth /usr/lib/python3/dist-packages/nixl.pth
+# NVSHMEM root for INTERNODE DeepEP (multi-node EP). Builder preserves the full tree;
+# expose it on the linker path and point find_nvshmem_root at it (honors
+# EP_NVSHMEM_ROOT_DIR / NVSHMEM_DIR). NOTE: the guard below only validates the NCCL
+# path / has_deep_ep(); internode DeepEP (an nvshmem Buffer) still needs a runtime
+# multi-node smoke-test before relying on it.
+COPY --link --from=deepep-builder /nvshmem_root/ /opt/nvshmem/
+RUN echo /opt/nvshmem/lib > /etc/ld.so.conf.d/nvshmem.conf && ldconfig
+ENV EP_NVSHMEM_ROOT_DIR=/opt/nvshmem
+
+# Build-time guard: fail loudly if DeepEP can't import (e.g. a base NCCL path/layout
+# drift silently reverting has_deep_ep() to False). Importing deep_ep runs its
+# check_nccl_so()+init_jit and needs no GPU (validated on a CPU-only pod).
+RUN python3 -c "import deep_ep; print('DeepEP imports cleanly; has_deep_ep() will be True')"
 
 # Copied from vLLM's Dockerfile
 ARG TARGETPLATFORM
@@ -329,11 +434,14 @@ ARG TARGETPLATFORM
 # Ray was removed as a default dependancy by vllm in v18, but it is still required
 # for the multi-node setup.
 
-# * Gemma 4 needs transformers > 5.5.0
+# * Gemma 4 MTP needs transformers 5.9.0
 # * Kimi K2.5 tool-call scramble fixed in transformers 5.5.4 (huggingface/transformers#45359)
-# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) — pin both to 1.0.0
-# * llguidance bumped to 1.7 — vLLM's pin (<1.4) lacks JSON Schema "format": "uri" support
-#   (added in llguidance v1.6.0; mirrors upstream vllm-project/vllm#42150)
+# * Kimi K2.5 registry-subprocess SIGSEGV on GB200 with nixl-cu12 1.0.1 (vllm-project/vllm#40642) - verified
+#   no crash on this image with vllm 0.22
+# * llguidance pin mirrors vLLM 0.27's own requirement (>=1.7.0,<1.8.0); kept explicit so
+#   JSON Schema "format": "uri" support (llguidance v1.6.0+) can't regress on future bumps
+
+# ray[cgraph]>=2.48.0 will unconditionally install cupy-cuda12x. Uninstall it and install cupy-cuda13x if CUDA major version is 13.
 
 RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       BITSANDBYTES_VER='0.42.0'; \
@@ -343,9 +451,82 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
-      'transformers==5.5.4' 'nixl==1.0.0' 'nixl-cu12==1.0.0' \
+      'transformers==5.14.1' \
       'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
-    rm /tmp/constraints.txt
+    rm /tmp/constraints.txt && \
+    if [ "$(echo $CUDA_VERSION | cut -d. -f1)" -eq "13" ]; then \
+      python3 -m pip uninstall -y cupy-cuda12x && \
+      python3 -m pip install --no-cache-dir --force-reinstall --no-deps cupy-cuda13x; \
+    fi
+
+# Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
+# `nixl>=1.1.0`) pull the bundled-UCX wheel; purge those, install our wheel + the `nixl` meta
+# (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back. NIXL 1.3's
+# meta also ships a `nixl_ep` dispatcher, but our UCX/POSIX-only build intentionally omits its
+# optional EP kernels. Remove that unusable dispatcher so vLLM does not discover and import it.
+RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
+    python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
+    rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
+    python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
+    python3 -m pip install --no-cache-dir --no-deps nixl==1.3.1 && \
+    # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
+    # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
+    sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
+    rm -rf /usr/local/lib/python3.12/dist-packages/nixl_ep && \
+    # Assert the UCX plugin links HPC-X's MT UCX (LD_LIBRARY_PATH below selects it at runtime).
+    P="$(find /usr/local/lib/python3.12/dist-packages -name 'libplugin_UCX.so' | head -1)" && \
+    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P" | grep -q "/opt/hpcx/ucx/mt/lib/libucp.so.0" || \
+      { echo "NIXL UCX plugin not linked to HPC-X MT UCX:"; LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P"; exit 1; } && \
+    LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c \
+      "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is None; assert util.find_spec('nixl_ep_cu${CUDA_VERSION%%.*}') is None; print('matching NIXL dispatcher/backend import OK; optional NIXL EP dispatcher/backend absent')"
+
+# Prepend MT UCX so its libucp wins over the base image's non-MT /opt/hpcx/ucx/lib.
+ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
+
+# Re-prepend on login shells too (HPC-X's profile.d regenerates LD_LIBRARY_PATH; zz- sorts last).
+RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /etc/profile.d/zz-nixl-ucx-mt.sh
+
+# Keep the vLLM wheel metadata, installed FlashInfer wheels, and the GLM NoPE
+# feature API in one compatibility contract. The local CUDA suffix is valid for
+# an exact public-version pin (for example, 0.6.18rc10+cu132 satisfies
+# ==0.6.18rc10).
+RUN python3 - <<'PY'
+from importlib import metadata
+from inspect import Parameter, signature
+
+from packaging.requirements import Requirement
+from packaging.version import Version
+
+from flashinfer.mla import BatchMLAPagedAttentionWrapper
+
+requirements = [Requirement(value) for value in metadata.requires("vllm") or ()]
+flashinfer_requirement = next(
+    requirement
+    for requirement in requirements
+    if requirement.name.lower() == "flashinfer-python"
+)
+installed_python = metadata.version("flashinfer-python")
+assert flashinfer_requirement.specifier.contains(installed_python, prereleases=True), (
+    f"vLLM requires {flashinfer_requirement}, but flashinfer-python {installed_python} "
+    "is installed"
+)
+expected_flashinfer = Version("0.6.18rc10")
+for distribution in ("flashinfer-python", "flashinfer-cubin"):
+    installed = metadata.version(distribution)
+    assert Version(installed).public == expected_flashinfer.public, (
+        f"expected {distribution} {expected_flashinfer}, found {installed}"
+    )
+parameters = signature(BatchMLAPagedAttentionWrapper.run).parameters
+assert (
+    "ckv_scale_arr" in parameters
+    and parameters["ckv_scale_arr"].kind is Parameter.KEYWORD_ONLY
+), "FlashInfer is missing the GLM NoPE MLA ckv_scale_arr API"
+print(
+    f"vLLM metadata {flashinfer_requirement}; installed FlashInfer "
+    f"{installed_python}; GLM NoPE MLA API present"
+)
+PY
+RUN python3 -m pip check
 
 EXPOSE 8080

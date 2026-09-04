@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:7d4f07a-nccl-cuda12.9.1-ubuntu22.04-nccl2.29.7-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:8c5de3e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
 ARG BUILDER_IMAGE="${BASE_IMAGE}"
 ARG SCCACHE_VERSION="0.14.0"
 
@@ -16,7 +16,6 @@ ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 ARG TARGETPLATFORM
 
 ARG SGLANG_COMMIT
-ARG DECORD_COMMIT
 
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
@@ -47,6 +46,17 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
 COPY install.bash /wheels/
 
 FROM ${BASE_IMAGE}
+# The CUDA 13 sgl-deep-ep wheel links against NVSHMEM but does not bundle it.
+# SGLang JIT-compiles its HiCache native hash extension on first use, which
+# requires the OpenSSL headers in addition to the runtime library.
+RUN apt-get -qq update && \
+    apt-get -q install --no-install-recommends -y \
+      libnvshmem3-cuda-13 \
+      libssl-dev && \
+    NVSHMEM_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/nvshmem/13" && \
+    echo "${NVSHMEM_LIB_DIR}" > /etc/ld.so.conf.d/nvshmem.conf && \
+    ldconfig && \
+    rm -rf /var/lib/apt/lists/*
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     cd /wheels && \
     bash install.bash
