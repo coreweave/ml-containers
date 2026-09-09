@@ -50,7 +50,7 @@ ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 ARG TARGETPLATFORM
 # Switch 9.x, 10.x, and 12.x to -a variants; inject 10.3a if absent.
-# Flashinfer v0.28.0 in particular can only build for 12.0a but not 12.0
+# FlashInfer 0.6.18 in particular can only build for 12.0a but not 12.0
 # vLLM Marlin MoE requires 8.0+PTX for non-FP8 WNA16 kernels. Keep the arm64
 # filter strict about unsupported sm80 SASS, but preserve compute80 PTX so
 # newer architectures can forward-JIT the generated sm80 kernels.
@@ -127,7 +127,7 @@ WORKDIR /git
 # interface vLLM was built against and breaks FP8 MoE GEMMs at serve time.
 ARG DEEPGEMM_COMMIT='8b1392b978f5a03c828dd1711090d7fb50958b8a'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
-      https://github.com/vllm-project/DeepGEMM && \
+      https://github.com/deepseek-ai/DeepGEMM && \
     cd DeepGEMM && \
     git checkout "${DEEPGEMM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
@@ -135,8 +135,8 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
 
 
 # vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
-# rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95)
-# plus protoc. v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
+# rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95).
+# v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
 # via setuptools-rust. Build both in a dedicated stage and copy the artifacts
 # into the wheel build below so the heavy wheel stage doesn't need cargo.
 FROM builder-base AS vllm-rust-builder
@@ -145,7 +145,7 @@ ENV CARGO_BUILD_JOBS=4 \
     PATH="/root/.cargo/bin:${PATH}"
 RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends --no-upgrade -y \
-      curl ca-certificates unzip build-essential pkg-config perl && \
+      curl ca-certificates build-essential pkg-config perl && \
     apt-get clean && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain none && \
@@ -155,7 +155,6 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
-    bash tools/install_protoc.sh && \
     bash build_rust.sh && \
     install -D -m755 vllm/vllm-rs /out/vllm-rs && \
     cp vllm/_rust_*.so /out/
@@ -327,7 +326,7 @@ RUN apt-get -qq update && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
-ARG NIXL_TAG='v1.3.1'
+ARG NIXL_TAG='v1.3.2'
 ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -350,7 +349,7 @@ FROM ${FINAL_BASE_IMAGE} AS base
 
 ARG VLLM_COMMIT
 ARG FLASHINFER_COMMIT
-ARG VLLM_GLM53_COMPILED_REF=e34f7f71edc7aa46e906326688d1c4f3a6fce8a1
+ARG VLLM_GLM53_COMPILED_REF=4500c80c080328dfe62435d083f4063e00d987df
 LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
       com.coreweave.vllm.flashinfer-ref="${FLASHINFER_COMMIT}" \
       com.coreweave.vllm.glm53-upstream-pr="53906" \
@@ -363,12 +362,12 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.28 ships its own namespaced FA4 implementation. Remove the inherited
+# vLLM 0.29 ships its own namespaced FA4 implementation. Remove the inherited
 # global FA4 package because its metadata hard-pins CUTLASS DSL 4.6.0.dev0 and
 # apache-tvm-ffi >=0.1.12, which conflict with vLLM's 4.6.2/0.1.11 contract.
 RUN python3 -m pip uninstall -y flash-attn-4
 
-# vLLM 0.28 pins nvidia-cutlass-dsl==4.6.2 but only floors quack-kernels (>=0.6.4).
+# vLLM 0.29 pins nvidia-cutlass-dsl==4.6.2 and quack-kernels==0.6.4.
 # Keep Quack pinned to the release that declares the same exact CUTLASS DSL version
 # so the DeepSeek-V4 cute-DSL indexer cannot drift to an incompatible API.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
@@ -450,14 +449,14 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
+      'runai-model-streamer[s3,gcs]>=0.15.7' 'ray[cgraph]>=2.56.0,<2.57' \
       'transformers==5.14.1' \
       'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt && \
     if [ "$(echo $CUDA_VERSION | cut -d. -f1)" -eq "13" ]; then \
       python3 -m pip uninstall -y cupy-cuda12x && \
-      python3 -m pip install --no-cache-dir --force-reinstall --no-deps cupy-cuda13x; \
+      python3 -m pip install --no-cache-dir --force-reinstall --no-deps 'cupy-cuda13x!=14.1.0'; \
     fi
 
 # Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
@@ -469,7 +468,7 @@ RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
     python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
-    python3 -m pip install --no-cache-dir --no-deps nixl==1.3.1 && \
+    python3 -m pip install --no-cache-dir --no-deps nixl==1.3.2 && \
     # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
     # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
     sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
@@ -489,8 +488,7 @@ RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /e
 
 # Keep the vLLM wheel metadata, installed FlashInfer wheels, and the GLM NoPE
 # feature API in one compatibility contract. The local CUDA suffix is valid for
-# an exact public-version pin (for example, 0.6.18rc10+cu132 satisfies
-# ==0.6.18rc10).
+# an exact public-version pin (for example, 0.6.18+cu132 satisfies ==0.6.18).
 RUN python3 - <<'PY'
 from importlib import metadata
 from inspect import Parameter, signature
@@ -511,7 +509,7 @@ assert flashinfer_requirement.specifier.contains(installed_python, prereleases=T
     f"vLLM requires {flashinfer_requirement}, but flashinfer-python {installed_python} "
     "is installed"
 )
-expected_flashinfer = Version("0.6.18rc10")
+expected_flashinfer = Version("0.6.18")
 for distribution in ("flashinfer-python", "flashinfer-cubin"):
     installed = metadata.version(distribution)
     assert Version(installed).public == expected_flashinfer.public, (
