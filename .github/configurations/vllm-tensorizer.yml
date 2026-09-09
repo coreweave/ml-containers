@@ -1,5 +1,5 @@
 include:
-  # renovate-release: datasource=github-releases depName=vllm-project/vllm currentValue=v0.29.0rc2 versioning=pep440
+  # renovate-release: datasource=github-releases depName=vllm-project/vllm currentValue=v0.29.0 versioning=pep440
   - vllm-commit: '98dff2a81d747d1dba01a47f939f48c3526d4206'
     flashinfer-commit: '69ff11fc4954396d98326656dc85debd2223f637'
     lmcache-commit: 'v0.4.7'
