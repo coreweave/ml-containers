@@ -1,0 +1,20 @@
+## Conversation
+The user requested a separate draft stack for SM120 compatibility review, preserving the existing artifact privacy and reviewer requirements.
+
+## Actions
+Rebased the indexer allocation and backend block-size changes onto the parent V4.1 source plus the cache-geometry layer. Added a portable GPU probe that constructs the actual DeepseekV4IndexerCache spec, selects the backend block size, and then exercises packed storage and paged scoring. Documented earlier numerical evidence and the limits of the expanded probe. Patch application and Python syntax checks passed.
+
+## Errors & Mistakes
+The original numerical probe constructed a compatible cache spec directly, which did not verify that the production model selected that geometry. The adapted probe now uses the model's cache-spec constructor and allocator selector. No new GPU execution has been performed.
+
+## Dead Ends
+Splitting a packed 128-entry page into two 64-entry pages would misplace the FP8 scale footer. Changing only the DeepGEMM planner does not fix allocation.
+
+## Hints for Future Agents
+Compression ratios 1 and 2 require logical blocks 64 and 128 but both must allocate 64 physical entries. Check select_common_block_size together with the actual model spec. The patch is gated to CUDA capability family 120.
+
+## Codebase Discoveries
+The initial V4.1 integration modifies other indexer cache handling but leaves this SM120 page selection absent. The model cache class can be constructed without model weights under set_current_vllm_config, making the allocation boundary part of the GPU probe.
+
+## Open Questions
+The new image build and expanded GPU probe remain pending. The text-only metadata fix is the next draft layer.
