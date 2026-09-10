@@ -1,0 +1,20 @@
+## Conversation
+The user requested the three SM120 compatibility fixes as a separate draft stack for review. Existing requirements preserve artifact privacy, record reproducible image/configuration/hardware facts, and request alexeldeib.
+
+## Actions
+Rebased the shared text-only metadata and V4.1 warmup changes after the cache and indexer layers. Added the portable metadata-to-attention GPU probe, explicit SM120 hardware check, earlier failure/passing summaries, and complete historical native engine arguments. Documented that the instance SKU was not recorded rather than inferring it. Patch application and Python syntax checks passed.
+
+## Errors & Mistakes
+None.
+
+## Dead Ends
+Do not gate the text-only flag correction to SM120: honoring language_model_only is a shared metadata contract. Do not describe the vision-enabled configuration check as proof of multimodal inference.
+
+## Hints for Future Agents
+Both warmup and shared metadata must agree on the prefill index width. Text-only requires 128 indices; vision-enabled retains 1152. The included GPU checks use actual metadata and the public attention entrypoint but do not replace full-model acceptance. Keep the stack draft until the rebuilt image is validated.
+
+## Codebase Discoveries
+The parent's V4.1 source still sizes these buffers from checkpoint vision declarations without considering language_model_only. The change has broader hardware scope than the two earlier SM120-gated geometry fixes and is isolated in this layer for review.
+
+## Open Questions
+Rebuilt-image, numerical, and full-model SM120 validation remain pending. DSpark, concurrency, multimodal inference, and broader model quality remain unvalidated. Record the actual instance SKU in the next GPU run.
