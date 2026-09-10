@@ -86,3 +86,69 @@ Earlier kernel checks on the documented baseline passed with maximum absolute
 error `7.62939453125e-06` and relative RMSE below `7.3e-08`. The revised probe
 also verifies that the model and allocator actually choose the tested geometry;
 that revision has not yet run on a GPU.
+
+## Text-only attention metadata
+
+The third layer honors `language_model_only` in both the shared sliding-window
+metadata builder and the V4.1 warmup declaration. Text-only prefill needs 128
+indices, not 1152 indices that include unused image slots. This correction is
+not hardware-gated: it honors the same text-only contract on other devices.
+Vision-enabled configuration retains its 1152-index capacity. The vision check
+below tests configuration preservation, not multimodal inference.
+
+```bash
+python3 vllm-tensorizer/tests/sm120/check_sm120_text_only_swa.py --num-tokens 16
+python3 vllm-tensorizer/tests/sm120/check_sm120_text_only_swa.py --num-tokens 65
+python3 vllm-tensorizer/tests/sm120/check_sm120_text_only_swa.py --vision-enabled
+```
+
+The probe exercises the actual metadata builder and public FlashInfer attention
+entrypoint. On the earlier baseline, the unpatched 16-token case failed with
+`ValueError: SM120 sparse-MLA has no decode kernel for this shape` and an index
+width of 1152. With the patch, 16- and 65-token cases used 128 indices and
+passed finite-output and numerical checks. Maximum absolute output error was
+at most `0.0054931640625`, with relative RMSE below `0.025`.
+
+## Earlier full-model configuration
+
+After all three fixes, an earlier native vLLM run passed streaming text,
+separate reasoning, two automatic tool calls, structured JSON, near-limit
+retrieval, and a healthy followup. It used eight RTX PRO 6000 Blackwell Server
+Edition GPUs. The instance SKU was not recorded; the GPU model and topology
+are the available hardware evidence.
+
+The checkpoint was `deepseek-ai/DeepSeek-V4.1-Flash` at
+`fb2764a5cf321eaa5070ca8f9e892818f477c16d`. The earlier command used:
+
+```text
+--language-model-only
+--tokenizer-mode deepseek_v41
+--reasoning-parser deepseek_v41
+--tool-call-parser deepseek_v41
+--enable-auto-tool-choice
+--tensor-parallel-size 8
+--moe-backend marlin
+--max-model-len 262144
+--max-num-seqs 1
+--max-num-batched-tokens 8192
+--gpu-memory-utilization 0.9
+--attention-backend FLASHINFER_MLA_SPARSE_DSV41
+--kv-cache-dtype fp8
+--block-size 128
+--engram-config '{"cpu_offload":true}'
+--prefix-cache-retention-interval 1024
+--generation-config vllm
+--override-generation-config '{"temperature":1.0,"top_p":0.95}'
+--enforce-eager
+```
+
+Native dense layers retained CUTLASS MXFP8; only MoE used Marlin. No dense-GEMM
+fallback or DeepGEMM kernel patch was required. DSpark was disabled.
+
+The long request had 261984 prompt tokens and 27 completion tokens. It returned
+all three records near the start, middle, and end through 26 content chunks,
+then emitted `stop` and `[DONE]`. These synthetic single-sequence results do not
+establish concurrency, broader model quality, multimodal inference, or DSpark
+support. Recheck the CLI and repeat these acceptance checks on the rebuilt
+image; this document records the earlier configuration rather than claiming
+that the new build has passed it.

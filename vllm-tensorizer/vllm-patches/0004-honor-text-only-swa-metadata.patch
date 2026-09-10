@@ -1,0 +1,28 @@
+diff --git a/vllm/models/deepseek_v4_1/attention.py b/vllm/models/deepseek_v4_1/attention.py
+index b3281e3..b56a3da 100644
+--- a/vllm/models/deepseek_v4_1/attention.py
++++ b/vllm/models/deepseek_v4_1/attention.py
+@@ -242,6 +242,9 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
+             if getattr(config, "vision_n_layers", 0) > 0
+             else 0
+         )
++        multimodal_config = vllm_config.model_config.multimodal_config
++        if multimodal_config is not None and multimodal_config.language_model_only:
++            self.max_image_tokens = 0
+         # ---- v4.1 sparse-attention topology ----
+         # compress_ratios has one entry per layer (MTP layers included):
+         # 0 = pure sliding window, 1 = full-length compressed cache,
+diff --git a/vllm/v1/attention/backends/mla/sparse_swa.py b/vllm/v1/attention/backends/mla/sparse_swa.py
+index 02e6336..a9c924d 100644
+--- a/vllm/v1/attention/backends/mla/sparse_swa.py
++++ b/vllm/v1/attention/backends/mla/sparse_swa.py
+@@ -452,6 +452,9 @@ class DeepseekSparseSWAMetadataBuilder(AttentionMetadataBuilder):
+             if getattr(hf_config, "vision_n_layers", 0) > 0
+             else 0
+         )
++        multimodal_config = self.vllm_config.model_config.multimodal_config
++        if multimodal_config is not None and multimodal_config.language_model_only:
++            self.max_image_tokens = 0
+         self.prefill_index_width = self.window_size + self.max_image_tokens
+ 
+         # Detect which DeepseekV4 layer types this model uses so we only build a
