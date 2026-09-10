@@ -60,3 +60,7 @@ RUN apt-get -qq update && \
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     cd /wheels && \
     bash install.bash
+
+ARG SGLANG_COMMIT
+LABEL com.coreweave.sglang.source-revision="${SGLANG_COMMIT}"
+ENV SGLANG_BUILD_COMMIT="${SGLANG_COMMIT}"
