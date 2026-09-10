@@ -64,3 +64,25 @@ A new image build and SM120 GPU run are pending. Record the final image digest,
 instance type, GPU count, package versions, commands, and results before
 marking this stack ready. Kernel checks alone do not prove full-model serving,
 DSpark, concurrency, or multimodal support.
+
+## Indexer allocation
+
+The second layer selects logical indexer blocks of `64 * compress_ratio` on
+SM120. The indexer backend accepts logical block sizes 64 and 128 there, so
+both compression ratios retain 64 physical entries per packed page. Other
+capability families retain their existing block-size selection. A packed
+128-entry page cannot be split into two 64-entry pages because its FP8 scale
+footer belongs to the whole page.
+
+```bash
+python3 vllm-tensorizer/tests/sm120/check_sm120_indexer.py
+```
+
+The probe uses the real model cache-spec constructor and backend block-size
+selection, then runs RMSNorm, RoPE, FP8 storage, DeepGEMM scheduling, and paged
+scoring for compression ratios 1 and 2. It checks shuffled physical pages,
+unequal context lengths, an empty request, and five deterministic repetitions.
+Earlier kernel checks on the documented baseline passed with maximum absolute
+error `7.62939453125e-06` and relative RMSE below `7.3e-08`. The revised probe
+also verifies that the model and allocator actually choose the tested geometry;
+that revision has not yet run on a GPU.
