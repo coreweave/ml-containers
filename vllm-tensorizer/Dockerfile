@@ -87,10 +87,9 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
-# Apply only source changes that affect compiled artifacts before building the
-# vLLM wheel. The GLM-5.3 Python/runtime delta is intentionally applied later
-# in a downstream runtime layer so it can iterate without rebuilding native
-# code.
+# Build the native/Rust DeepSeek V4.1 support from the pinned upstream main,
+# together with the remaining runtime integration from upstream PR #56214.
+# Keep the reconciled source in one wheel for this initial development image.
 COPY vllm-patches/ /git/vllm-patches/
 RUN git -C vllm apply -v --stat --apply /git/vllm-patches/*.patch && \
     rm -rf /git/vllm-patches
@@ -349,11 +348,11 @@ FROM ${FINAL_BASE_IMAGE} AS base
 
 ARG VLLM_COMMIT
 ARG FLASHINFER_COMMIT
-ARG VLLM_GLM53_COMPILED_REF=e34f7f71edc7aa46e906326688d1c4f3a6fce8a1
+ARG VLLM_DSV41_INTEGRATION_REF=e47aa780bccf59f59dfa2cbb18e17a10b4fe69ba
 LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
       com.coreweave.vllm.flashinfer-ref="${FLASHINFER_COMMIT}" \
-      com.coreweave.vllm.glm53-upstream-pr="53906" \
-      com.coreweave.vllm.glm53-compiled-ref="${VLLM_GLM53_COMPILED_REF}"
+      com.coreweave.vllm.dsv41-upstream-pr="56214" \
+      com.coreweave.vllm.dsv41-integration-ref="${VLLM_DSV41_INTEGRATION_REF}"
 
 WORKDIR /workspace
 
@@ -509,7 +508,7 @@ assert flashinfer_requirement.specifier.contains(installed_python, prereleases=T
     f"vLLM requires {flashinfer_requirement}, but flashinfer-python {installed_python} "
     "is installed"
 )
-expected_flashinfer = Version("0.6.18")
+expected_flashinfer = Version("0.6.18.post1")
 for distribution in ("flashinfer-python", "flashinfer-cubin"):
     installed = metadata.version(distribution)
     assert Version(installed).public == expected_flashinfer.public, (
