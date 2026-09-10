@@ -1,0 +1,44 @@
+diff --git a/csrc/sparse_mla_sm120_prefill.cu b/csrc/sparse_mla_sm120_prefill.cu
+index 0c988ca..bc16d35 100644
+--- a/csrc/sparse_mla_sm120_prefill.cu
++++ b/csrc/sparse_mla_sm120_prefill.cu
+@@ -322,7 +322,7 @@ inline bool dispatch_dsv4_dual(int num_heads, int topk, int topk_extra, int extr
+                                const int* topk_length_ptr, const int* topk_length_extra_ptr,
+                                cudaStream_t stream) {
+   if (topk == 128 && topk_length_ptr == nullptr && topk_length_extra_ptr == nullptr &&
+-      topk_extra % BI == 0 && (extra_page_block_size == 64 || extra_page_block_size == 2)) {
++      topk_extra % BI == 0 && (extra_page_block_size == 64 || extra_page_block_size == 128 || extra_page_block_size == 2)) {
+ #define DISPATCH_DUAL_MG_FULLTILE(NH, TK, PBSX, NHG)                                         \
+   launch_prefill_mg_dual_fulltile<ModelType::DSV4, NH, TK, 64, PBSX, NHG>(                   \
+       Q, KV, indices, KV_extra, idx_extra, attn_sink, output, out_lse, sm_scale, num_tokens, \
+@@ -353,6 +353,8 @@ inline bool dispatch_dsv4_dual(int num_heads, int topk, int topk_extra, int extr
+ 
+     if (extra_page_block_size == 64) {
+       DISPATCH_FULLTILE_BY_NH_PBSX(64);
++    } else if (extra_page_block_size == 128) {
++      DISPATCH_FULLTILE_BY_NH_PBSX(128);
+     } else {
+       DISPATCH_FULLTILE_BY_NH_PBSX(2);
+     }
+@@ -394,6 +396,8 @@ inline bool dispatch_dsv4_dual(int num_heads, int topk, int topk_extra, int extr
+   if (topk != 128) return false;
+   if (extra_page_block_size == 64) {
+     DISPATCH_BY_NH_PBSX(64);
++  } else if (extra_page_block_size == 128) {
++    DISPATCH_BY_NH_PBSX(128);
+   } else if (extra_page_block_size == 2) {
+     DISPATCH_BY_NH_PBSX(2);
+   }
+diff --git a/flashinfer/jit/mla.py b/flashinfer/jit/mla.py
+index 6c11d54..06eda19 100644
+--- a/flashinfer/jit/mla.py
++++ b/flashinfer/jit/mla.py
+@@ -43,7 +43,7 @@ def gen_sparse_mla_sm120_module() -> JitSpec:
+         supported_major_versions=[12]
+     )
+     return gen_jit_spec(
+-        "sparse_mla_sm120",
++        "sparse_mla_sm120_dsv41",
+         [
+             jit_env.FLASHINFER_CSRC_DIR / "sparse_mla_sm120.cu",
+             jit_env.FLASHINFER_CSRC_DIR / "sparse_mla_sm120_decode_dsv3_2.cu",

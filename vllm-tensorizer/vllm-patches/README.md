@@ -28,3 +28,10 @@ V4.1 requires a rebuilt runtime because the prior released base lacks its
 native kernels and Rust frontend. Once this image exists, its remaining
 Python integration can be iterated in the downstream infr patch layer.
 This branch is a development integration, not evidence of production rollout.
+
+## SM120 development stack
+
+The numbered SM120 patches extend the initial V4.1 development integration.
+Keep their cache geometry aligned with `../flashinfer-patches`.
+See [the SM120 validation guide](../tests/sm120/README.md) for source pins,
+reproduction commands, earlier test evidence, and remaining validation.
