@@ -1,0 +1,20 @@
+## Conversation
+The user requested the SM120 compatibility patches as a separate draft stack for review. Their existing requirements prohibit environment-specific identifiers in commits, notes, and PRs and require reproducible image, configuration, and hardware facts. Reviewer alexeldeib remains requested.
+
+## Actions
+Refreshed the internal repositories and inspected Alex's ace/dsv41-flash branch and PR 227. Read the parent commit and current source/build conventions. Fetched exact vLLM and FlashInfer source, applied the parent's relevant V4.1 integration hunks, and rebased the paired cache-page and prefill-template changes. Restored FlashInfer source-patch application before its wheels are built. Added the licensed GPU reference probe and a portable validation guide. Patch checks and Python syntax checks passed.
+
+## Errors & Mistakes
+Full upstream source checkouts were slow, so focused immutable source-file reads were used to make progress. No GPU test of the rebased image has run.
+
+## Dead Ends
+Do not add these patches to the independent Grace Blackwell frontend stack. Do not apply a patch for installed flashinfer/data/csrc paths to the upstream repository; its source lives under csrc.
+
+## Hints for Future Agents
+The vLLM cache-page change and FlashInfer page128 template dispatch are one compatibility boundary and must ship together. The custom JIT module name avoids silently loading an unpatched AOT module. Preserve the GPU reference probe's BSD license. Keep draft status until the new image is tested on SM120.
+
+## Codebase Discoveries
+PR 227 intentionally packages the initial V4.1 runtime integration in the compiled wheel. This development stack follows that existing path; it does not add Python runtime backports to the released image queue. FlashInfer 0.6.18.post1 still lacks the required page128 dispatch.
+
+## Open Questions
+The new image digest, compiled-kernel build result, and SM120 GPU results remain pending. Indexer page size and text-only metadata form the next two draft layers.
