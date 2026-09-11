@@ -53,10 +53,20 @@ RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends -y \
       libnvshmem3-cuda-13 \
       libssl-dev && \
+    NCCL_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" && \
     NVSHMEM_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/nvshmem/13" && \
+    mkdir -p /opt/nccl && \
+    ln -s "${NCCL_LIB_DIR}" /opt/nccl/lib && \
+    ln -s /usr/include /opt/nccl/include && \
     echo "${NVSHMEM_LIB_DIR}" > /etc/ld.so.conf.d/nvshmem.conf && \
     ldconfig && \
     rm -rf /var/lib/apt/lists/*
+
+# sgl-deep-ep discovers NCCL from Python package metadata or this explicit
+# prefix. The base installs NCCL from apt, so expose its multiarch layout under
+# the conventional prefix DeepEP expects without installing a second NCCL copy.
+ENV EP_NCCL_ROOT_DIR=/opt/nccl
+
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     cd /wheels && \
     bash install.bash

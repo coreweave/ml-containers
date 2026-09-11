@@ -19,6 +19,29 @@ python3 -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__)
   > /etc/ld.so.conf.d/torch.conf
 ldconfig
 
+# Exercise sgl-deep-ep's actual NCCL discovery logic without importing the
+# package, whose top-level GPU prerequisite check cannot run during image build.
+python3 - <<'PY'
+import glob
+import os
+import runpy
+from importlib.metadata import PackageNotFoundError, distribution
+
+try:
+    deep_ep = distribution("sgl-deep-ep")
+except PackageNotFoundError:
+    print("sgl-deep-ep is not installed; skipping its NCCL discovery check")
+else:
+    finder = deep_ep.locate_file("deep_ep/utils/find_pkgs.py")
+    find_nccl_root = runpy.run_path(str(finder))["find_nccl_root"]
+    root = find_nccl_root()
+
+    assert os.path.realpath(root) == os.path.realpath(os.environ["EP_NCCL_ROOT_DIR"]), root
+    assert glob.glob(os.path.join(root, "lib", "libnccl.so*")), root
+    assert os.path.isfile(os.path.join(root, "include", "nccl.h")), root
+    print("DeepEP NCCL root:", root)
+PY
+
 # Compile and exercise the lazy HiCache hash extension during the image build.
 # This catches missing C++ headers or libcrypto linkage before request traffic
 # reaches the Mamba radix-cache event path.
