@@ -286,7 +286,7 @@ ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-poi
 RUN LLVM_VERSION='22' && \
     CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-    apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
+    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
     SETUP_TOOLCHAIN() { \
         if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
           apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
