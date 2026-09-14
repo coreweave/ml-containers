@@ -22,6 +22,8 @@ ARG SCCACHE_VERSION="0.15.0"
 
 ARG UV_VERSION="0.11.16"
 
+ARG CMAKE_VERSION="3.31.12"
+
 # region Downloads
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -37,6 +39,21 @@ RUN ARCH=$(uname -m) && \
     curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz" \
     | tar xz --strip-components=1 -C /opt/ \
       "uv-${ARCH}-unknown-linux-gnu/uv" "uv-${ARCH}-unknown-linux-gnu/uvx"
+
+FROM alpine/curl:8.17.0 AS cmake-downloader
+ARG CMAKE_VERSION
+RUN ARCH="$(uname -m)" && \
+    case "$ARCH" in \
+      x86_64) SHA256='0dc2e9a6860f06bf10bd8fadc03e35d9eeb4df46e33763a7e480e987758f385c' ;; \
+      aarch64) SHA256='83f8fd91d2038a56556e1400390fcfe42f79602940c494f6c6f1cdae7f9e7f40' ;; \
+    esac && \
+    DIST="cmake-${CMAKE_VERSION}-linux-${ARCH}" && \
+    curl -fsSL -o /tmp/cmake.tar.gz \
+      "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${DIST}.tar.gz" && \
+    echo "${SHA256}  /tmp/cmake.tar.gz" | sha256sum -c - && \
+    mkdir /opt/cmake && \
+    tar -C /opt/cmake --strip-components=1 -xzf /tmp/cmake.tar.gz "${DIST}/bin" "${DIST}/share" && \
+    rm /tmp/cmake.tar.gz
 
 
 # Config files for uv and pip
@@ -237,14 +254,10 @@ RUN CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     rm /tmp/install_cudnn.sh && \
     apt-get clean
 
-# Add Kitware's apt repository to get a newer version of CMake
+COPY --link --from=cmake-downloader /opt/cmake /usr/local
+
 RUN apt-get -qq update && apt-get -qq install -y \
       software-properties-common lsb-release && \
-    { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
-    | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
-    apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
-    apt-get -qq update && \
-    apt-get -qq install -y 'cmake=3.31.12-*' 'cmake-data=3.31.12-*' && \
     apt-get clean && \
     python3 -m pip install 'cmake==3.31.10'
 
