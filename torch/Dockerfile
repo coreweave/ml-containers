@@ -18,7 +18,8 @@ ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
 
-ARG SCCACHE_VERSION="0.18.0"
+ARG SCCACHE_VERSION="0.16.0"
+ARG SCCACHE_BUILD="00f795b"
 
 ARG UV_VERSION="0.11.16"
 
@@ -28,9 +29,16 @@ ARG CMAKE_VERSION="3.31.12"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
 ARG SCCACHE_VERSION
+ARG SCCACHE_BUILD
 RUN ARCH=$(uname -m) && \
-    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
-    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
+    DIST="sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl" && \
+    { \
+      curl -fsSL "https://ml-dev.cwobject.com/ci/common/sccache/${SCCACHE_BUILD}/${DIST}.tar.gz" || \
+        { \
+          echo 'warning: falling back to official sccache release' >&2 && \
+          curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${DIST}.tar.gz"; \
+        }; \
+    } | tar xz --strip-components=1 -C /opt/ "${DIST}/sccache" && \
     chmod 755 /opt/sccache
 
 FROM alpine/curl:8.17.0 AS uv-downloader
