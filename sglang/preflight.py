@@ -44,12 +44,16 @@ def canonical_name(name):
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def sha256(path):
+def sha256_stream(stream):
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
     return digest.hexdigest()
+
+
+def sha256(path):
+    with path.open("rb") as stream:
+        return sha256_stream(stream)
 
 
 def validate_commit(commit):
@@ -130,9 +134,39 @@ def validate_dependencies(wheels, versions):
             raise ValueError(f"Installed {name} differs from the built wheel version")
 
 
+def installed_files():
+    packages = {name: metadata.distribution(name) for name in ("sglang", "sglang-kernel")}
+    paths = {relative.removeprefix("python/"): "sglang" for relative, classes in SOURCE_FEATURES.items() if classes}
+    paths["sgl_kernel/sm100/common_ops.abi3.so"] = "sglang-kernel"
+    return {relative: (name, Path(packages[name].locate_file(relative))) for relative, name in paths.items()}
+
+
+def installed_features(evidence, wheel_dir):
+    hashes = {}
+    for relative, (name, path) in installed_files().items():
+        observed = sha256(path)
+        with zipfile.ZipFile(wheel_dir / evidence["wheels"][name]["filename"]) as wheel:
+            with wheel.open(relative) as content:
+                expected = sha256_stream(content)
+        if observed != expected:
+            raise ValueError(f"Installed file differs from its built wheel: {relative}")
+        if name == "sglang" and observed != evidence["source_files_sha256"]["python/" + relative]:
+            raise ValueError(f"Installed file differs from the reviewed source: {relative}")
+        hashes[relative] = observed
+    return {
+        "installed_files_sha256": hashes,
+        "gpu_runtime_check": "required",
+        "runtime_command": ["python3", "/opt/sglang-preflight.py", "runtime", "--commit", CANDIDATE_COMMIT],
+        "checkpoint_loading": "not-tested",
+        "gpu_kernels_and_tp2_mtp": "not-tested",
+    }
+
+
 def runtime_features():
+    torch = importlib.import_module("torch")
+    if not torch.cuda.is_available():
+        raise ValueError("GPU runtime preflight requires an accessible CUDA device and NVIDIA driver")
     module_names = (
-        "torch",
         "flashinfer",
         "sgl_kernel",
         "sglang.srt.configs.glm5_next",
@@ -140,7 +174,7 @@ def runtime_features():
         "sglang.srt.models.glm5_next_nextn",
         "sglang.srt.layers.quantization.modelopt_quant",
     )
-    modules = {name: importlib.import_module(name) for name in module_names}
+    modules = {"torch": torch, **{name: importlib.import_module(name) for name in module_names}}
     config_type = modules["sglang.srt.configs.glm5_next"].Glm5NextConfig
     target = modules["sglang.srt.models.glm5_next"].Glm5NextForConditionalGeneration
     draft = modules["sglang.srt.models.glm5_next_nextn"].Glm5NextForConditionalGenerationNextN
@@ -188,10 +222,11 @@ def runtime_features():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=("source", "wheels", "installed"))
+    parser.add_argument("phase", choices=("source", "wheels", "installed", "runtime"))
     parser.add_argument("--commit", required=True)
     parser.add_argument("--source-dir", type=Path, default=Path("."))
     parser.add_argument("--wheel-dir", type=Path, default=Path("/wheels"))
+    parser.add_argument("--evidence", type=Path, default=Path("/opt/sglang-build-evidence.json"))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     validate_commit(args.commit)
@@ -204,16 +239,28 @@ def main():
         else:
             evidence["wheels"] = wheel_evidence(args.wheel_dir)
     else:
-        evidence = json.loads((args.wheel_dir / "sglang-build-evidence.json").read_text())
+        evidence_path = args.evidence if args.phase == "runtime" else args.wheel_dir / "sglang-build-evidence.json"
+        evidence = json.loads(evidence_path.read_text())
         if evidence["source_commit"] != args.commit:
             raise ValueError("Builder evidence has a different SGLang source commit")
-        if evidence["wheels"] != wheel_evidence(args.wheel_dir):
-            raise ValueError("Wheel contents changed since builder evidence was captured")
+        if args.phase == "installed":
+            if evidence["wheels"] != wheel_evidence(args.wheel_dir):
+                raise ValueError("Wheel contents changed since builder evidence was captured")
+        else:
+            if evidence["phase"] != "installed":
+                raise ValueError("GPU runtime preflight requires installed-image evidence")
+            observed = {relative: sha256(path) for relative, (_, path) in installed_files().items()}
+            if observed != evidence["preflight"]["installed_files_sha256"]:
+                raise ValueError("Installed files changed since image validation")
         subprocess.run([sys.executable, "-m", "pip", "check"], check=True)
         versions = {canonical_name(dist.metadata["Name"]): dist.version for dist in metadata.distributions()}
         validate_dependencies(evidence["wheels"], versions)
         evidence["installed_distributions"] = dict(sorted(versions.items()))
-        evidence["preflight"] = runtime_features()
+        if args.phase == "installed":
+            evidence["preflight"] = installed_features(evidence, args.wheel_dir)
+        else:
+            evidence["runtime_preflight"] = runtime_features()
+            evidence["preflight"]["gpu_runtime_check"] = "passed"
         evidence["pip_check"] = "passed"
     evidence.update(phase=args.phase, python=sys.version, architecture=platform.machine())
     rendered = json.dumps(evidence, indent=2, sort_keys=True) + "\n"

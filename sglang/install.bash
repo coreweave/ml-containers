@@ -60,4 +60,5 @@ PY
 if [ "${SGLANG_GLM53_PREFLIGHT:-0}" = 1 ]; then
   python3 /wheels/preflight.py installed --commit "${SGLANG_COMMIT:?}" \
     --output /opt/sglang-build-evidence.json
+  install -m 0644 /wheels/preflight.py /opt/sglang-preflight.py
 fi
