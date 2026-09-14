@@ -95,9 +95,9 @@ RUN apt-get -qq update && apt-get -qq install -y \
     | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
     apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
     apt-get -qq update && \
-    apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
+    apt-get -qq install -y 'cmake=3.31.12-*' 'cmake-data=3.31.12-*' && \
     apt-get clean && \
-    python3 -m pip install --no-cache-dir 'cmake==3.31.6'
+    python3 -m pip install --no-cache-dir 'cmake==3.31.10'
 
 # Update compiler (GCC) and linker (LLD) versions
 # gfortran-13 is just for compiler_wrapper.f95

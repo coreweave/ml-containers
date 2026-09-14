@@ -244,9 +244,9 @@ RUN apt-get -qq update && apt-get -qq install -y \
     | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
     apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
     apt-get -qq update && \
-    apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
+    apt-get -qq install -y 'cmake=3.31.12-*' 'cmake-data=3.31.12-*' && \
     apt-get clean && \
-    python3 -m pip install 'cmake==3.31.6'
+    python3 -m pip install 'cmake==3.31.10'
 
 # Setup for sccache and its wrappers.
 # Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
@@ -270,7 +270,7 @@ ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-poi
     CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
 
 # Update compiler (GCC) and linker (LLD) versions
-RUN LLVM_VERSION='18' && \
+RUN LLVM_VERSION='22' && \
     CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
@@ -556,7 +556,11 @@ RUN rm ./dist/*
 ## Build torchvision
 ARG BUILD_TORCH_VISION_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
-RUN python3 -m pip install --upgrade \
+COPY --chmod=755 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
+RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
+      /opt/coreweave/bin/distro-pkg-divert python3-typing-extensions; \
+    fi && \
+    python3 -m pip install --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
@@ -581,7 +585,11 @@ RUN rm ./dist/*
 ## Build torchaudio
 ARG BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
-RUN python3 -m pip install --upgrade \
+COPY --chmod=755 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
+RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
+      /opt/coreweave/bin/distro-pkg-divert python3-typing-extensions; \
+    fi && \
+    python3 -m pip install --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
@@ -758,11 +766,11 @@ RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
       apt-get clean; \
     fi
 
-RUN LLVM_VERSION='18' && \
+RUN LLVM_VERSION='22' && \
     CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
-    apt-get -qq install -y --no-install-recommends "libomp5-$LLVM_VERSION" && \
+    apt-get -qq install -y --no-install-recommends libomp5 && \
     apt-get clean
 
 # Install AOCL-BLAS and AOCL-LAPACK
@@ -897,5 +905,9 @@ RUN <<-"EOT" python3
 EOT
 
 COPY --link --chmod=555 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
+RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
+      /opt/coreweave/bin/distro-pkg-divert --list-removed python3-typing-extensions \
+      | python3 -m pip install -r /dev/stdin; \
+    fi
 
 COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/

@@ -6,4 +6,12 @@ include:
     vision: 0.29.0
     audio: 2.11.0
     nccl: 2.31.2-1
-    nccl-tests-hash: '8ef4f05'
+    nccl-tests-hash: '109629a'
+  - cuda: 13.3.1
+    os: ubuntu26.04
+    abi: 1
+    torch: 2.14.0
+    vision: 0.29.0
+    audio: 2.11.0
+    nccl: 2.31.2-1
+    nccl-tests-hash: '109629a'
