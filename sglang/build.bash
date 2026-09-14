@@ -2,6 +2,16 @@
 set -xeo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+case "${SGLANG_GLM53_PREFLIGHT:-0}" in
+  0|1) ;;
+  *) exit 92 ;;
+esac
+
+_SETUPTOOLS_RUST='setuptools-rust>=1.10'
+if [ "${SGLANG_GLM53_PREFLIGHT:-0}" = 1 ]; then
+  _SETUPTOOLS_RUST='setuptools-rust>=1.11'
+fi
+
 TORCH_CUDA_ARCH_LIST=''
 
 while getopts 'a:' OPT; do
@@ -28,7 +38,7 @@ _PIP_INSTALL() {
 # Rust extension (rust/sglang-grpc) since v0.5.12; we build with `--no-isolation`
 # so it must be present in the host environment.
 _PIP_INSTALL -U pip 'setuptools<82' wheel build ninja \
-  'scikit-build-core>=0.10' 'setuptools-scm>=8.0' 'setuptools-rust>=1.10'
+  'scikit-build-core>=0.10' 'setuptools-scm>=8.0' "${_SETUPTOOLS_RUST}"
 
 # protobuf-compiler: needed by tonic-build (via prost-build) when compiling the
 # sglang-grpc Rust crate.
@@ -48,14 +58,21 @@ git clone --recursive --filter=blob:none https://github.com/sgl-project/sglang
 cd sglang
 git checkout "${SGLANG_COMMIT}"
 
+if [ "${SGLANG_GLM53_PREFLIGHT:-0}" = 1 ]; then
+  git submodule update --init --recursive
+  python3 /build/preflight.py source --commit "${SGLANG_COMMIT}"
+fi
+
 # Relax exact torch-family version pins to be compatible with the base image
-TORCH_VERSION="$(python3 -c 'import torch; print(torch.__version__.partition("+")[0])')"
-sed -Ei \
-  -e "s@\"torch==[0-9]+\.[0-9]+\.[0-9]+\"@\"torch>=${TORCH_VERSION}\"@" \
-  -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.11.0"@' \
-  -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
-  -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
-  python/pyproject.toml
+if [ "${SGLANG_GLM53_PREFLIGHT:-0}" != 1 ]; then
+  TORCH_VERSION="$(python3 -c 'import torch; print(torch.__version__.partition("+")[0])')"
+  sed -Ei \
+    -e "s@\"torch==[0-9]+\.[0-9]+\.[0-9]+\"@\"torch>=${TORCH_VERSION}\"@" \
+    -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.11.0"@' \
+    -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
+    -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
+    python/pyproject.toml
+fi
 
 # Surface the Rust toolchain file at the repo root so rustup's CWD-upward
 # walk finds it when setuptools-rust invokes cargo from python/.
@@ -85,6 +102,11 @@ CMAKE_BUILD_PARALLEL_LEVEL="${_CMAKE_PARALLEL}" \
 # python-module, so this builds sglang-grpc, sglang-mm and sglang-server (the
 # CUDA pyproject.toml sets no [tool.sglang] rust-extensions allowlist).
 _BUILD python |& _LOG sglang.log
+
+if [ "${SGLANG_GLM53_PREFLIGHT:-0}" = 1 ]; then
+  python3 /build/preflight.py wheels --commit "${SGLANG_COMMIT}" \
+    --output /wheels/sglang-build-evidence.json
+fi
 )
 
 apt-get clean

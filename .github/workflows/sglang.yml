@@ -7,6 +7,13 @@ on:
 
 
 jobs:
+  preflight-tests:
+    name: Test SGLang preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Run offline preflight tests
+        run: python3 -B -m unittest discover -s sglang -p 'test_*.py' -v
   get-config:
     name: Get sglang config
     uses: ./.github/workflows/read-configuration.yml
@@ -14,7 +21,7 @@ jobs:
       path: ./.github/configurations/sglang.yml
   build:
     uses: ./.github/workflows/build.yml
-    needs: get-config
+    needs: [get-config, preflight-tests]
     strategy:
       matrix: ${{ fromJSON(needs.get-config.outputs.config) }}
     secrets: inherit
@@ -29,3 +36,4 @@ jobs:
       build-args: |
         BASE_IMAGE=${{ matrix.base-image }}
         SGLANG_COMMIT=${{ matrix.sglang-commit }}
+        SGLANG_GLM53_PREFLIGHT=${{ matrix.glm53-preflight || '0' }}

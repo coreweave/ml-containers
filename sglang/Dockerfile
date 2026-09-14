@@ -16,6 +16,7 @@ ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 ARG TARGETPLATFORM
 
 ARG SGLANG_COMMIT
+ARG SGLANG_GLM53_PREFLIGHT=0
 
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
@@ -32,7 +33,7 @@ ENV CMAKE_CUDA_COMPILER='/opt/nvcc-wrapper.py' \
     CUDACXX='/opt/nvcc-wrapper.py'
 
 WORKDIR /build
-COPY build.bash /build/
+COPY build.bash preflight.py /build/
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
@@ -43,9 +44,11 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     [ "$TARGETPLATFORM" != "linux/arm64" ] || ARCH_LIST="9.0 10.0+PTX" && \
     bash build.bash -a "${ARCH_LIST}" && \
     rm -rf /build/*
-COPY install.bash /wheels/
+COPY install.bash preflight.py /wheels/
 
 FROM ${BASE_IMAGE}
+ARG SGLANG_COMMIT
+ARG SGLANG_GLM53_PREFLIGHT=0
 # The CUDA 13 sgl-deep-ep wheel links against NVSHMEM but does not bundle it.
 # SGLang JIT-compiles its HiCache native hash extension on first use, which
 # requires the OpenSSL headers in addition to the runtime library.

@@ -2,6 +2,11 @@
 set -xeo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+case "${SGLANG_GLM53_PREFLIGHT:-0}" in
+  0|1) ;;
+  *) exit 92 ;;
+esac
+
 _CONSTRAINTS="$(
   python3 -m pip list | sed -En 's@^(torch(vision|audio)?)\s+(\S+)$@\1==\3@p'
 )"
@@ -51,3 +56,8 @@ from sglang.srt.mem_cache.cpp_utils.native_hash import get_native_hash
 digest = get_native_hash([1, 2, 3], None)
 assert len(digest) == 64, digest
 PY
+
+if [ "${SGLANG_GLM53_PREFLIGHT:-0}" = 1 ]; then
+  python3 /wheels/preflight.py installed --commit "${SGLANG_COMMIT:?}" \
+    --output /opt/sglang-build-evidence.json
+fi
