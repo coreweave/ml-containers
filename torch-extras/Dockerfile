@@ -10,6 +10,7 @@ ARG BUILD_MAX_JOBS=""
 ARG SCCACHE_VERSION="0.16.0"
 ARG SCCACHE_BUILD="00f795b"
 ARG CMAKE_VERSION="3.31.12"
+ARG LLVM_VERSION="22"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
 ARG SCCACHE_VERSION
@@ -121,8 +122,8 @@ RUN apt-get -qq update && apt-get -qq install -y \
 
 # Update compiler (GCC) and linker (LLD) versions
 # gfortran-13 is just for compiler_wrapper.f95
-RUN LLVM_VERSION='18' && \
-    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+ARG LLVM_VERSION
+RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
       add-apt-repository -n ppa:ubuntu-toolchain-r/test; \
     fi && \
     apt-get -qq update && apt-get -qq install --no-install-recommends -y \
