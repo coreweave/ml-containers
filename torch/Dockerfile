@@ -25,6 +25,8 @@ ARG UV_VERSION="0.11.16"
 
 ARG CMAKE_VERSION="3.31.12"
 
+ARG LLVM_VERSION="22"
+
 # region Downloads
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -216,6 +218,19 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
 
 # endregion Downloads
 
+# Build a .deb holding an LLVM OpenMP runtime that does not abort with
+# "OMP: Error #13: Assertion failure at kmp_affinity.cpp(3211)" on aarch64
+# hosts whose sysfs CPU topology is unreadable. It is installed in place
+# of libomp5 in the builder and final stages.
+FROM ${BUILDER_BASE_IMAGE} AS libomp-builder
+ENV DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+COPY --chmod=0755 libomp/build-libomp.sh /usr/local/bin/
+RUN build-libomp.sh deps
+
+COPY libomp/kmp-affinity-no-assert.patch /tmp/libomp/
+RUN build-libomp.sh build
+
 ## Build PyTorch on a builder image.
 FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
 ENV DEBIAN_FRONTEND=noninteractive
@@ -225,14 +240,15 @@ COPY --link --from=conf / /
 # ninja-build and lld are optional but improve the build.
 # Remove PEP 668 marker since containers are often single-purpose
 # and thus do not inherently need to be pushed into venv isolation.
-RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
+    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
       PACKAGES='libncurses5 python3-pip python3-distutils'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
       $PACKAGES python3 git apt-utils ssh ca-certificates \
-      libomp5 libpng-dev libjpeg-dev pkg-config \
+      /tmp/libomp5-cw.deb libpng-dev libjpeg-dev pkg-config \
       build-essential ninja-build && \
     apt-get clean && \
     rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
@@ -291,8 +307,8 @@ ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-poi
     CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
 
 # Update compiler (GCC) and linker (LLD) versions
-RUN LLVM_VERSION='22' && \
-    CODENAME="$(lsb_release -cs)" && \
+ARG LLVM_VERSION
+RUN CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
     apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
     SETUP_TOOLCHAIN() { \
@@ -750,14 +766,15 @@ COPY --link --from=conf / /
 # Install core packages.
 # Remove PEP 668 marker since containers are often single-purpose
 # and thus do not inherently need to be pushed into venv isolation.
-RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
+    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
       PACKAGES='libncurses5 python3-pip python3-distutils'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
       $PACKAGES python3 gcc \
-      libomp5 libpng16-16 libjpeg-turbo8 libsodium23 \
+      /tmp/libomp5-cw.deb libpng16-16 libjpeg-turbo8 libsodium23 \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
     apt-get clean && \
@@ -787,12 +804,10 @@ RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
       apt-get clean; \
     fi
 
-RUN LLVM_VERSION='22' && \
-    CODENAME="$(lsb_release -cs)" && \
+ARG LLVM_VERSION
+RUN CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
-    apt-get -qq install -y --no-install-recommends libomp5 && \
-    apt-get clean
+    apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main"
 
 # Install AOCL-BLAS and AOCL-LAPACK
 # See: https://www.amd.com/en/developer/aocl/dense.html
