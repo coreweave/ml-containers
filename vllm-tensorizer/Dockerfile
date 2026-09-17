@@ -77,6 +77,17 @@ RUN printf '%s\n' \
       'exec python3 -m build -o /wheels -w -n "${@:-./}"' \
     | install -m 500 /dev/stdin /opt/build.sh
 
+# The SDK image supplies libraries for both architectures. Native compilation
+# stays in this build stage; the serving image receives only matching wheels.
+FROM --platform=linux/amd64 ghcr.io/run-ai/runai-model-streamer/devcontainer@sha256:ca0b706d40b1aa3f67b149919da694225410d217ff0bb635ec1c641310a1f88b AS streamer-sdks
+
+FROM builder-base AS streamer-builder
+ARG TARGETARCH
+ENV CC=gcc CXX=g++
+COPY --from=streamer-sdks /opt/ /opt/
+COPY --chmod=755 runai-streamer/build.sh /build/runai-streamer.sh
+RUN /build/runai-streamer.sh "$TARGETARCH"
+
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
 ARG VLLM_COMMIT
@@ -434,7 +445,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      'runai-model-streamer[s3,gcs]>=0.15.3' "ray[cgraph]>=2.48.0" \
+      'runai-model-streamer[s3,gcs,azure]==0.16.1' "ray[cgraph]>=2.48.0" \
       'transformers==5.14.1' \
       'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
@@ -443,6 +454,10 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
       python3 -m pip uninstall -y cupy-cuda12x && \
       python3 -m pip install --no-cache-dir --force-reinstall --no-deps cupy-cuda13x; \
     fi
+
+# Keep the cloud dependencies above; replace the four streamer packages together.
+RUN --mount=type=bind,from=streamer-builder,source=/out/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl
 
 # Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
 # `nixl>=1.1.0`) pull the bundled-UCX wheel; purge those, install our wheel + the `nixl` meta
