@@ -18,17 +18,29 @@ ARG AOCL_BASE="/opt/aocl"
 ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
 
-ARG SCCACHE_VERSION="0.15.0"
+ARG SCCACHE_VERSION="0.16.0"
+ARG SCCACHE_BUILD="00f795b"
 
 ARG UV_VERSION="0.11.16"
+
+ARG CMAKE_VERSION="3.31.12"
+
+ARG LLVM_VERSION="22"
 
 # region Downloads
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
 ARG SCCACHE_VERSION
+ARG SCCACHE_BUILD
 RUN ARCH=$(uname -m) && \
-    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
-    | tar xz --strip-components=1 -C /opt/ "sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl/sccache" && \
+    DIST="sccache-v${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl" && \
+    { \
+      curl -fsSL "https://ml-dev.cwobject.com/ci/common/sccache/${SCCACHE_BUILD}/${DIST}.tar.gz" || \
+        { \
+          echo 'warning: falling back to official sccache release' >&2 && \
+          curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${DIST}.tar.gz"; \
+        }; \
+    } | tar xz --strip-components=1 -C /opt/ "${DIST}/sccache" && \
     chmod 755 /opt/sccache
 
 FROM alpine/curl:8.17.0 AS uv-downloader
@@ -37,6 +49,21 @@ RUN ARCH=$(uname -m) && \
     curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz" \
     | tar xz --strip-components=1 -C /opt/ \
       "uv-${ARCH}-unknown-linux-gnu/uv" "uv-${ARCH}-unknown-linux-gnu/uvx"
+
+FROM alpine/curl:8.17.0 AS cmake-downloader
+ARG CMAKE_VERSION
+RUN ARCH="$(uname -m)" && \
+    case "$ARCH" in \
+      x86_64) SHA256='0dc2e9a6860f06bf10bd8fadc03e35d9eeb4df46e33763a7e480e987758f385c' ;; \
+      aarch64) SHA256='83f8fd91d2038a56556e1400390fcfe42f79602940c494f6c6f1cdae7f9e7f40' ;; \
+    esac && \
+    DIST="cmake-${CMAKE_VERSION}-linux-${ARCH}" && \
+    curl -fsSL -o /tmp/cmake.tar.gz \
+      "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${DIST}.tar.gz" && \
+    echo "${SHA256}  /tmp/cmake.tar.gz" | sha256sum -c - && \
+    mkdir /opt/cmake && \
+    tar -C /opt/cmake --strip-components=1 -xzf /tmp/cmake.tar.gz "${DIST}/bin" "${DIST}/share" && \
+    rm /tmp/cmake.tar.gz
 
 
 # Config files for uv and pip
@@ -191,6 +218,19 @@ RUN curl -sSfo- "${AOCL_URL}" | tar xzf - --strip-components 1 && \
 
 # endregion Downloads
 
+# Build a .deb holding an LLVM OpenMP runtime that does not abort with
+# "OMP: Error #13: Assertion failure at kmp_affinity.cpp(3211)" on aarch64
+# hosts whose sysfs CPU topology is unreadable. It is installed in place
+# of libomp5 in the builder and final stages.
+FROM ${BUILDER_BASE_IMAGE} AS libomp-builder
+ENV DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION
+COPY --chmod=0755 libomp/build-libomp.sh /usr/local/bin/
+RUN build-libomp.sh deps
+
+COPY libomp/kmp-affinity-no-assert.patch /tmp/libomp/
+RUN build-libomp.sh build
+
 ## Build PyTorch on a builder image.
 FROM ${BUILDER_BASE_IMAGE} AS builder-base-shared
 ENV DEBIAN_FRONTEND=noninteractive
@@ -200,14 +240,15 @@ COPY --link --from=conf / /
 # ninja-build and lld are optional but improve the build.
 # Remove PEP 668 marker since containers are often single-purpose
 # and thus do not inherently need to be pushed into venv isolation.
-RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
+    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
       PACKAGES='libncurses5 python3-pip python3-distutils'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
       $PACKAGES python3 git apt-utils ssh ca-certificates \
-      libomp5 libpng-dev libjpeg-dev pkg-config \
+      /tmp/libomp5-cw.deb libpng-dev libjpeg-dev pkg-config \
       build-essential ninja-build && \
     apt-get clean && \
     rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
@@ -237,16 +278,12 @@ RUN CUDA_MAJOR_VERSION=$(echo "${CUDA_VERSION}" | cut -d. -f1) && \
     rm /tmp/install_cudnn.sh && \
     apt-get clean
 
-# Add Kitware's apt repository to get a newer version of CMake
+COPY --link --from=cmake-downloader /opt/cmake /usr/local
+
 RUN apt-get -qq update && apt-get -qq install -y \
       software-properties-common lsb-release && \
-    { wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc \
-    | gpg --dearmor -o /etc/apt/trusted.gpg.d/kitware.gpg; } && \
-    apt-add-repository -n "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
-    apt-get -qq update && \
-    apt-get -qq install -y 'cmake=3.31.6-*' 'cmake-data=3.31.6-*' && \
     apt-get clean && \
-    python3 -m pip install 'cmake==3.31.6'
+    python3 -m pip install 'cmake==3.31.10'
 
 # Setup for sccache and its wrappers.
 # Keep the actual sccache binary off the PATH to prevent nesting shenanigans.
@@ -270,10 +307,10 @@ ENV CFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-incompatible-poi
     CXXFLAGS="-Wno-sign-compare -Wno-deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-unused-result"
 
 # Update compiler (GCC) and linker (LLD) versions
-RUN LLVM_VERSION='18' && \
-    CODENAME="$(lsb_release -cs)" && \
+ARG LLVM_VERSION
+RUN CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-    apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
+    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
     SETUP_TOOLCHAIN() { \
         if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
           apt-add-repository -y ppa:ubuntu-toolchain-r/test 2>&1 \
@@ -556,7 +593,11 @@ RUN rm ./dist/*
 ## Build torchvision
 ARG BUILD_TORCH_VISION_VERSION
 ENV TORCH_VISION_VERSION=$BUILD_TORCH_VISION_VERSION
-RUN python3 -m pip install --upgrade \
+COPY --chmod=755 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
+RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
+      /opt/coreweave/bin/distro-pkg-divert python3-typing-extensions; \
+    fi && \
+    python3 -m pip install --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchvision-downloader,source=/git/vision,target=vision/,rw \
@@ -581,7 +622,11 @@ RUN rm ./dist/*
 ## Build torchaudio
 ARG BUILD_TORCH_AUDIO_VERSION
 ENV TORCH_AUDIO_VERSION=$BUILD_TORCH_AUDIO_VERSION
-RUN python3 -m pip install --upgrade \
+COPY --chmod=755 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
+RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
+      /opt/coreweave/bin/distro-pkg-divert python3-typing-extensions; \
+    fi && \
+    python3 -m pip install --upgrade \
     matplotlib numpy typing_extensions requests pillow
 
 RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/,rw \
@@ -721,14 +766,15 @@ COPY --link --from=conf / /
 # Install core packages.
 # Remove PEP 668 marker since containers are often single-purpose
 # and thus do not inherently need to be pushed into venv isolation.
-RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
+    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
       PACKAGES='libncurses5 python3-pip python3-distutils'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
       $PACKAGES python3 gcc \
-      libomp5 libpng16-16 libjpeg-turbo8 libsodium23 \
+      /tmp/libomp5-cw.deb libpng16-16 libjpeg-turbo8 libsodium23 \
       curl git apt-utils ssh ca-certificates tmux nano vim-tiny sudo bash \
       rsync htop wget unzip tini && \
     apt-get clean && \
@@ -758,12 +804,10 @@ RUN apt-get -qq update && apt-get -qq install -y --no-install-recommends \
       apt-get clean; \
     fi
 
-RUN LLVM_VERSION='18' && \
-    CODENAME="$(lsb_release -cs)" && \
+ARG LLVM_VERSION
+RUN CODENAME="$(lsb_release -cs)" && \
     wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-    apt-add-repository "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
-    apt-get -qq install -y --no-install-recommends "libomp5-$LLVM_VERSION" && \
-    apt-get clean
+    apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main"
 
 # Install AOCL-BLAS and AOCL-LAPACK
 # See: https://www.amd.com/en/developer/aocl/dense.html
@@ -897,5 +941,9 @@ RUN <<-"EOT" python3
 EOT
 
 COPY --link --chmod=555 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
+RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
+      /opt/coreweave/bin/distro-pkg-divert --list-removed python3-typing-extensions \
+      | python3 -m pip install -r /dev/stdin; \
+    fi
 
 COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/

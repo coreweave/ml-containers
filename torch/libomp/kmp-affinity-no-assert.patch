@@ -1,0 +1,31 @@
+Return false instead of asserting when no package id can be determined.
+
+On aarch64 the package id comes only from sysfs. When sysfs CPU topology is
+unreadable, as it is in some containers, no cpuinfo record gets a package id
+and all of them reach __kmp_package_id_from_core_siblings_list.
+
+That function asserts when the sibling mask is empty. __kmp_parse_cpu_list
+returns an empty mask for an unreadable core_siblings_list, and for one
+listing CPU ids at or above __kmp_xproc.
+
+Returning false sends the caller through kmp_i18n_str_MissingPhysicalIDField
+to __kmp_affinity_create_flat_map. Then the process gets a flat topology
+rather than an abort.
+
+Drop this patch once upstream fixes the assert. It is still present in
+llvmorg-23.1.1.
+
+--- a/openmp/runtime/src/kmp_affinity.cpp
++++ b/openmp/runtime/src/kmp_affinity.cpp
+@@ -3208,7 +3208,10 @@ static bool __kmp_package_id_from_core_siblings_list(unsigned **threadInfo,
+       return false;
+     }
+   }
+-  KMP_ASSERT(threadInfo[idx][pkgIdIndex] != UINT_MAX);
++  if (threadInfo[idx][pkgIdIndex] == UINT_MAX) {
++    KMP_CPU_FREE(siblings);
++    return false;
++  }
+   KMP_CPU_FREE(siblings);
+   return true;
+ }
