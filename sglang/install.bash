@@ -33,13 +33,16 @@ except PackageNotFoundError:
     print("sgl-deep-ep is not installed; skipping its NCCL discovery check")
 else:
     finder = deep_ep.locate_file("deep_ep/utils/find_pkgs.py")
-    find_nccl_root = runpy.run_path(str(finder))["find_nccl_root"]
-    root = find_nccl_root()
+    if not finder.is_file():
+        print("sgl-deep-ep does not expose NCCL discovery; skipping its check")
+    else:
+        find_nccl_root = runpy.run_path(str(finder))["find_nccl_root"]
+        root = find_nccl_root()
 
-    assert os.path.realpath(root) == os.path.realpath(os.environ["EP_NCCL_ROOT_DIR"]), root
-    assert glob.glob(os.path.join(root, "lib", "libnccl.so*")), root
-    assert os.path.isfile(os.path.join(root, "include", "nccl.h")), root
-    print("DeepEP NCCL root:", root)
+        assert os.path.realpath(root) == os.path.realpath(os.environ["EP_NCCL_ROOT_DIR"]), root
+        assert glob.glob(os.path.join(root, "lib", "libnccl.so*")), root
+        assert os.path.isfile(os.path.join(root, "include", "nccl.h")), root
+        print("DeepEP NCCL root:", root)
 PY
 
 # Compile and exercise the lazy HiCache hash extension during the image build.
