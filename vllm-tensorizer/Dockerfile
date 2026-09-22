@@ -98,13 +98,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
-# Build the native/Rust DeepSeek V4.1 support from the pinned upstream main,
-# together with the remaining runtime integration from upstream PR #56214.
-# Keep the reconciled source in one wheel for this initial development image.
-COPY vllm-patches/ /git/vllm-patches/
-RUN git -C vllm apply -v --stat --apply /git/vllm-patches/*.patch && \
-    rm -rf /git/vllm-patches
-
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
 ARG FLASHINFER_COMMIT
@@ -359,11 +352,8 @@ FROM ${FINAL_BASE_IMAGE} AS base
 
 ARG VLLM_COMMIT
 ARG FLASHINFER_COMMIT
-ARG VLLM_DSV41_INTEGRATION_REF=e47aa780bccf59f59dfa2cbb18e17a10b4fe69ba
 LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
-      com.coreweave.vllm.flashinfer-ref="${FLASHINFER_COMMIT}" \
-      com.coreweave.vllm.dsv41-upstream-pr="56214" \
-      com.coreweave.vllm.dsv41-integration-ref="${VLLM_DSV41_INTEGRATION_REF}"
+      com.coreweave.vllm.flashinfer-ref="${FLASHINFER_COMMIT}"
 
 WORKDIR /workspace
 
