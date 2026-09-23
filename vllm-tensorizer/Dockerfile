@@ -22,7 +22,7 @@ RUN ldconfig
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-      git ninja-build cmake gcc-12 g++-12 && \
+      git ninja-build cmake gcc-12 g++-12 libdw-dev && \
     apt-get clean && \
     python3 -m pip install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
@@ -128,7 +128,7 @@ WORKDIR /git
 # Match _DEEPGEMM_UPSTREAM_TAG in vLLM's cmake/external_projects/deepgemm.cmake
 # at VLLM_COMMIT (vllm-project/DeepGEMM); a stale wheel drifts from the JIT
 # interface vLLM was built against and breaks FP8 MoE GEMMs at serve time.
-ARG DEEPGEMM_COMMIT='8b1392b978f5a03c828dd1711090d7fb50958b8a'
+ARG DEEPGEMM_COMMIT='e1f418c2a4f20818221f6b0e578b4c2f634d4c3f'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
@@ -210,9 +210,9 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
     export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
     [ -n "${CUDA_VERSION}" ] && \
     python3 -m pip uninstall -y flash-attn-4 && \
-    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.6.2' && \
+    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.7.1' && \
     if [ "${CUDA_VERSION%%.*}" = "13" ]; then \
-      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.6.2'; \
+      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.7.1'; \
     fi && \
     python3 -m pip install --no-cache-dir \
       requests nvidia-ml-py ninja tqdm filelock \
@@ -220,7 +220,7 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       "cuda-python~=${CUDA_VERSION%.*}" \
       "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
       "${CUTLASS_DSL_PACKAGE}" \
-      'quack-kernels==0.6.4' \
+      'quack-kernels==0.6.5' \
       'apache-tvm-ffi==0.1.11' && \
     export FLASHINFER_LOCAL_VERSION="$(echo "${CUDA_VERSION}" | sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
       FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
@@ -329,7 +329,7 @@ RUN apt-get -qq update && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
-ARG NIXL_TAG='v1.3.1'
+ARG NIXL_TAG='v1.4.1'
 ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -358,22 +358,23 @@ LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
 WORKDIR /workspace
 
 RUN apt-get -qq update && \
-    apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && \
+    apt-get install -y --no-install-recommends \
+      curl libsodium23 libnuma-dev libdw-dev && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.29 ships its own namespaced FA4 implementation. Remove the inherited
+# vLLM 0.30 ships its own namespaced FA4 implementation. Remove the inherited
 # global FA4 package because its metadata hard-pins CUTLASS DSL 4.6.0.dev0 and
-# apache-tvm-ffi >=0.1.12, which conflict with vLLM's 4.6.2/0.1.11 contract.
+# apache-tvm-ffi >=0.1.12, which conflict with vLLM's 4.7.1/0.1.11 contract.
 RUN python3 -m pip uninstall -y flash-attn-4
 
-# vLLM 0.29 pins nvidia-cutlass-dsl==4.6.2 and quack-kernels==0.6.4.
+# vLLM 0.30 pins nvidia-cutlass-dsl==4.7.1 and quack-kernels==0.6.5.
 # Keep the constraint explicit so the FlashInfer and vLLM installs use the same
 # CUTLASS DSL contract.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
-    echo 'quack-kernels==0.6.4' >> /tmp/constraints.txt
+    echo 'quack-kernels==0.6.5' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
@@ -465,14 +466,14 @@ RUN --mount=type=bind,from=streamer-builder,source=/out/wheels,target=/tmp/wheel
 
 # Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
 # `nixl>=1.1.0`) pull the bundled-UCX wheel; purge those, install our wheel + the `nixl` meta
-# (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back. NIXL 1.3's
+# (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back. NIXL 1.4's
 # meta also ships a `nixl_ep` dispatcher, but our UCX/POSIX-only build intentionally omits its
 # optional EP kernels. Remove that unusable dispatcher so vLLM does not discover and import it.
 RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
     python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
-    python3 -m pip install --no-cache-dir --no-deps nixl==1.3.1 && \
+    python3 -m pip install --no-cache-dir --no-deps nixl==1.4.1 && \
     # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
     # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
     sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
