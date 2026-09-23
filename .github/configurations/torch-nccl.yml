@@ -7,11 +7,11 @@ include:
     audio: 2.11.0
     nccl: 2.32.3-1
     nccl-tests-hash: '284c44a'
-  - cuda: 13.3.1
+  - cuda: 13.0.2
     os: ubuntu26.04
     abi: 1
     torch: 2.14.0
     vision: 0.29.0
     audio: 2.11.0
-    nccl: 2.32.3-1
-    nccl-tests-hash: '284c44a'
+    nccl: 2.29.7-1
+    nccl-tests-hash: '32e529d'
