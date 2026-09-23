@@ -22,7 +22,7 @@ RUN ldconfig
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-      git ninja-build cmake gcc-12 g++-12 && \
+      git ninja-build cmake gcc-12 g++-12 libdw-dev && \
     apt-get clean && \
     python3 -m pip install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
@@ -358,7 +358,8 @@ LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
 WORKDIR /workspace
 
 RUN apt-get -qq update && \
-    apt-get install -y --no-install-recommends curl libsodium23 libnuma-dev && \
+    apt-get install -y --no-install-recommends \
+      curl libsodium23 libnuma-dev libdw-dev && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
