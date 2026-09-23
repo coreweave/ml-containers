@@ -1,5 +1,5 @@
 include:
-  # Development snapshot for DeepSeek V4.1; restore release tracking after upstream integration.
+  # vLLM v0.30.0 release tag.
   - vllm-commit: 'ced6857afa0ea7b2e3f0846a62e1394e90f15607'
     flashinfer-commit: '8bc3b578027791336c6ae87db5c9d76f82cef8bc'
     lmcache-commit: 'v0.4.7'
