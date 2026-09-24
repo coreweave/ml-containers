@@ -4,4 +4,4 @@ include:
     flashinfer-commit: '8bc3b578027791336c6ae87db5c9d76f82cef8bc'
     lmcache-commit: 'v0.4.7'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:greg-versions-test1-4e58f40-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'
-    final-base-image: 'ghghcr.io/coreweave/ml-containers/torch-extras:greg-versions-test1-4e58f40-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'
+    final-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:greg-versions-test1-4e58f40-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'
