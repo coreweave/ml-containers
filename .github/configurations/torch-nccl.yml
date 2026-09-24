@@ -10,7 +10,7 @@ include:
   - cuda: 13.0.3
     os: ubuntu24.04
     abi: 1
-    torch: 2.14.0
+    torch: 2.13.0
     vision: 0.29.0
     audio: 2.11.0
     nccl: 2.30.7-1

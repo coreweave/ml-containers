@@ -3,5 +3,5 @@ include:
   - vllm-commit: 'ced6857afa0ea7b2e3f0846a62e1394e90f15607'
     flashinfer-commit: '8bc3b578027791336c6ae87db5c9d76f82cef8bc'
     lmcache-commit: 'v0.4.7'
-    builder-base-image: 'ghcr.io/coreweave/ml-containers/nightly-torch:greg-versions-test1-680f201-nccl-26092401-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.15.0a0-vision0.30.0a0-audio2.11.0a0'
-    final-base-image: 'ghcr.io/coreweave/ml-containers/nightly-torch:greg-versions-test1-680f201-nccl-26092401-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.15.0a0-vision0.30.0a0-audio2.11.0a0'
+    builder-base-image: 'ghcr.io/coreweave/ml-containers/torch:greg-versions-test1-680f201-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
+    final-base-image: 'ghcr.io/coreweave/ml-containers/torch:greg-versions-test1-680f201-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
