@@ -11,7 +11,7 @@ include:
     os: ubuntu24.04
     abi: 1
     torch: 2.13.0
-    vision: 0.29.0
+    vision: 0.28.0
     audio: 2.11.0
     nccl: 2.30.7-1
     nccl-tests-hash: '5df7d3a'
