@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/nightly-torch:greg-versions-test1-680f201-nccl-26092401-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.15.0a0-vision0.30.0a0-audio2.11.0a0"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/nightly-torch:greg-versions-test1-680f201-nccl-26092401-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.15.0a0-vision0.30.0a0-audio2.11.0a0"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
 ARG SCCACHE_VERSION="0.14.0"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
