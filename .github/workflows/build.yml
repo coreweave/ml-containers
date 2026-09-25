@@ -48,6 +48,8 @@ jobs:
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
+    env:
+      DOCKER_METADATA_SHORT_SHA_LENGTH: 7
     defaults:
       run:
         shell: bash
@@ -65,12 +67,28 @@ jobs:
         run: |
           echo "value=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/${{ inputs.image-name }}" >> "$GITHUB_OUTPUT"
-      - name: Set tag prefix
-        if: github.ref_name != 'main'
-        run: echo "TAG_PREFIX=${{ github.ref_name }}-" >> $GITHUB_ENV
-      - name: Set tag suffix
-        if: inputs.tag-suffix != ''
-        run: echo "TAG_SUFFIX=-${{ inputs.tag-suffix }}" >> $GITHUB_ENV
+      - name: Set tag prefix and suffix
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          VERSION_SUFFIX: ${{ inputs.tag-suffix }}
+        run: |
+          export LC_ALL=C
+          suffix="${VERSION_SUFFIX:+-$VERSION_SUFFIX}"
+          # Reserve space for the SHA and full version suffix.
+          prefix_budget=$((128 - DOCKER_METADATA_SHORT_SHA_LENGTH - ${#suffix}))
+          if (( prefix_budget < 0 )); then
+            echo "::error::SHA and version suffix exceed Docker's 128-character tag limit"
+            exit 1
+          fi
+
+          prefix=""
+          if [[ "$REF_NAME" != main ]] && (( prefix_budget > 1 )); then
+            branch=$(printf '%s' "$REF_NAME" | sed -E 's/[^a-zA-Z0-9_.-]+/-/g; s/^[.-]+//')
+            branch="${branch:0:prefix_budget-1}"
+            prefix="${branch:+$branch-}"
+          fi
+          echo "TAG_PREFIX=$prefix" >> "$GITHUB_ENV"
+          echo "TAG_SUFFIX=$suffix" >> "$GITHUB_ENV"
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf  # v6.0.0
