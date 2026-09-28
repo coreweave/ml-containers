@@ -236,8 +236,6 @@ WORKDIR /wheels
 
 FROM builder-base AS lmcache-builder
 # LMCache must be built from source as it doesn't have pre-built ARM binaries
-# LMCache v0.4.7 hardcodes C++17 for its native extensions, while the Torch
-# 2.15 headers require C++20. Patch every LMCache extension before building.
 RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/workspace,rw \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
@@ -251,9 +249,6 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
-    grep -q -- '-std=c++17' setup.py && \
-    sed -i 's/-std=c++17/-std=c++20/g' setup.py && \
-    ! grep -q -- '-std=c++17' setup.py && \
     /opt/build.sh
 
 
