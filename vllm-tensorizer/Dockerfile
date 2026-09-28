@@ -371,10 +371,22 @@ RUN python3 -m pip uninstall -y flash-attn-4
 # vLLM 0.30 pins nvidia-cutlass-dsl==4.7.1 and quack-kernels==0.6.5.
 # Keep the constraint explicit so the FlashInfer and vLLM installs use the same
 # CUTLASS DSL contract.
+# LMCache v0.4.7 caps opentelemetry-api at 1.40.0. Pin the matching
+# OpenTelemetry release family before installing vLLM so a newer exporter does
+# not remain installed after LMCache downgrades the SDK.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
-    echo 'quack-kernels==0.6.5' >> /tmp/constraints.txt
+    echo 'quack-kernels==0.6.5' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-api==1.40.0' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-sdk==1.40.0' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-exporter-otlp==1.40.0' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-exporter-otlp-proto-common==1.40.0' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-exporter-otlp-proto-grpc==1.40.0' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-exporter-otlp-proto-http==1.40.0' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-proto==1.40.0' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-semantic-conventions==0.61b0' >> /tmp/constraints.txt && \
+    echo 'opentelemetry-exporter-prometheus==0.61b0' >> /tmp/constraints.txt
 
 RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
