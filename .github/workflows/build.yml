@@ -87,6 +87,11 @@ jobs:
             branch="${branch:0:prefix_budget-1}"
             prefix="${branch:+$branch-}"
           fi
+
+          if [[ "$REF_NAME" != main && -z "$prefix" ]]; then
+            echo "::error::Cannot proceed with an empty tag prefix for a non-main ref"
+            exit 1
+          fi
           echo "TAG_PREFIX=$prefix" >> "$GITHUB_ENV"
           echo "TAG_SUFFIX=$suffix" >> "$GITHUB_ENV"
       - name: Extract metadata (tags, labels) for Docker
