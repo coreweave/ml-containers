@@ -15,3 +15,11 @@ include:
     audio: 2.11.0
     nccl: 2.32.3-1
     nccl-tests-hash: '284c44a'
+  - cuda: 13.0.3
+    os: ubuntu24.04
+    abi: 1
+    torch: 2.13.0
+    vision: 0.28.0
+    audio: 2.11.0
+    nccl: 2.30.7-1
+    nccl-tests-hash: '5df7d3a'
