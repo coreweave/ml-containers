@@ -6,12 +6,51 @@ _CONSTRAINTS="$(
   python3 -m pip list | sed -En 's@^(torch(vision|audio)?)\s+(\S+)$@\1==\3@p'
 )"
 _PIP_INSTALL() {
-  python3 -m pip install --no-cache-dir \
-  --constraint=/dev/stdin <<< "${_CONSTRAINTS}" \
-  "$@"
+  if [ "${SGLANG_PACKAGE_PROFILE:-legacy}" = legacy ]; then
+    python3 -m pip install --no-cache-dir \
+      --constraint=/dev/stdin <<< "${_CONSTRAINTS}" "$@"
+  else
+    python3 -m pip install --no-cache-dir \
+      --constraint=/wheels/constraints.txt "$@"
+  fi
 }
 
 _PIP_INSTALL /wheels/*.whl
+
+if [ "${SGLANG_PACKAGE_PROFILE:-legacy}" != legacy ]; then
+  python3 -m pip check
+  mkdir -p /opt/sglang
+  cp /wheels/constraints.txt /opt/sglang/constraints.txt
+  cp /wheels/packages.py /opt/sglang/packages.py
+  cp /wheels/wheel-info.json /opt/sglang/wheel-info.json
+  python3 /wheels/packages.py audit \
+    --wheel-info /wheels/wheel-info.json \
+    --snapshot /wheels/packages-before.json \
+    --constraints /opt/sglang/constraints.txt \
+    --output /opt/sglang/build-info.json
+  CUDA_VISIBLE_DEVICES='' timeout 120s python3 - <<'PY'
+import os
+
+import torch
+from flash_attn.cute import flash_attn_func
+from flashinfer.decode import trtllm_batch_decode_with_kv_cache_mla
+from flashinfer.fused_moe import trtllm_fp4_block_scale_moe
+from sglang.kernels.ops.attention.flash_attn.cute import utils as sglang_cute_utils
+
+assert callable(flash_attn_func)
+assert callable(trtllm_batch_decode_with_kv_cache_mla)
+assert callable(trtllm_fp4_block_scale_moe)
+assert callable(sglang_cute_utils.ex2_emulation_2)
+if os.environ['SGLANG_PACKAGE_PROFILE'] == 'upgrade':
+    import cutlass.cute as cute
+    assert callable(cute.arch.sub_packed_f32x2)
+else:
+    import quack.activation
+    assert callable(quack.activation.sub_packed_f32x2)
+assert not torch.cuda.is_initialized()
+print('FlashAttention, FlashInfer and SGLang CuTe API import checks passed; no GPU kernels executed')
+PY
+fi
 
 # Make PyTorch's shared libs (libc10.so etc.) visible to the dynamic linker
 # so that torchao's CUDA extensions can load them at runtime.

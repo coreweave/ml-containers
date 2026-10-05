@@ -1,0 +1,103 @@
+diff --git a/python/pyproject.toml b/python/pyproject.toml
+--- a/python/pyproject.toml
++++ b/python/pyproject.toml
+@@ -39,7 +39,7 @@
+   "einops",
+   "fastapi",
+   "flash-attn-4>=4.0.0b18",
+-  "flashinfer_python[cu13]==0.6.18", # keep it aligned with jit-cache version in Dockerfile
++  "flashinfer_python[cu13]==0.7.0.post1", # keep it aligned with jit-cache version in Dockerfile
+   "gguf",
+   "humming-kernels[cu13]==0.1.12",
+   "interegular",
+@@ -52,7 +52,7 @@
+   "ninja",
+   "numba==0.65.1",
+   "numpy",
+-  "nvidia-cutlass-dsl[cu13]==4.6.2",
++  "nvidia-cutlass-dsl[cu13]==4.8.0",
+   "nvidia-mathdx==25.6.0",
+   "nvidia-ml-py",
+   "nvshmem4py-cu13",
+@@ -70,7 +70,7 @@
+   "pydantic",
+   "python-multipart",
+   "pyzmq>=25.1.2",
+-  "quack-kernels==0.6.4",
++  "quack-kernels==0.6.5",
+   "requests",
+   "scipy",
+   "sentencepiece",
+diff --git a/python/sglang/kernels/ops/attention/flash_attn/cute/pyproject.toml b/python/sglang/kernels/ops/attention/flash_attn/cute/pyproject.toml
+--- a/python/sglang/kernels/ops/attention/flash_attn/cute/pyproject.toml
++++ b/python/sglang/kernels/ops/attention/flash_attn/cute/pyproject.toml
+@@ -22,17 +22,17 @@
+ ]
+ 
+ dependencies = [
+-    "nvidia-cutlass-dsl==4.6.2",
++    "nvidia-cutlass-dsl[cu13]==4.8.0",
+     "torch",
+     "einops",
+     "typing_extensions",
+     "apache-tvm-ffi>=0.1.5,<0.2",
+     "torch-c-dlpack-ext",
+-    "quack-kernels==0.6.4",
++    "quack-kernels==0.6.5",
+ ]
+ 
+ [project.optional-dependencies]
+-cu13 = ["nvidia-cutlass-dsl[cu13]==4.6.2"]
++cu13 = ["nvidia-cutlass-dsl[cu13]==4.8.0"]
+ dev = [
+     "pytest",
+     "pytest-xdist",
+diff --git a/python/sglang/kernels/ops/attention/flash_attn/cute/utils.py b/python/sglang/kernels/ops/attention/flash_attn/cute/utils.py
+--- a/python/sglang/kernels/ops/attention/flash_attn/cute/utils.py
++++ b/python/sglang/kernels/ops/attention/flash_attn/cute/utils.py
+@@ -9,7 +9,6 @@
+ 
+ import cutlass
+ import cutlass.cute as cute
+-import quack.activation
+ from cutlass import Float32, Int32, const_expr
+ from cutlass._mlir.dialects import llvm, nvvm
+ from cutlass.cute import FastDivmodDivisor
+@@ -925,10 +924,10 @@
+     )
+     # The integer floor of x & y are now in the last 8 bits of xy_rounded
+     # We want the next 2 ops to round to nearest even. The rounding mode is important.
+-    xy_rounded_back = quack.activation.sub_packed_f32x2(
++    xy_rounded_back = cute.arch.sub_packed_f32x2(
+         xy_rounded, (fp32_round_int, fp32_round_int)
+     )
+-    xy_frac = quack.activation.sub_packed_f32x2(xy_clamped, xy_rounded_back)
++    xy_frac = cute.arch.sub_packed_f32x2(xy_clamped, xy_rounded_back)
+     xy_frac_ex2 = evaluate_polynomial_2(*xy_frac, POLY_EX2[poly_degree], loc=loc, ip=ip)
+     x_out = combine_int_frac_ex2(xy_rounded[0], xy_frac_ex2[0], loc=loc, ip=ip)
+     y_out = combine_int_frac_ex2(xy_rounded[1], xy_frac_ex2[1], loc=loc, ip=ip)
+diff --git a/python/sglang/srt/entrypoints/engine.py b/python/sglang/srt/entrypoints/engine.py
+--- a/python/sglang/srt/entrypoints/engine.py
++++ b/python/sglang/srt/entrypoints/engine.py
+@@ -1724,7 +1724,7 @@
+         ):
+             assert_pkg_version(
+                 "flashinfer_python",
+-                "0.6.18",
++                "0.7.0.post1",
+                 "Please uninstall the old version and "
+                 "reinstall the latest version by following the instructions "
+                 "at https://docs.flashinfer.ai/installation.html.",
+diff --git a/python/sglang/srt/layers/attention/flashinfer_mla_backend.py b/python/sglang/srt/layers/attention/flashinfer_mla_backend.py
+--- a/python/sglang/srt/layers/attention/flashinfer_mla_backend.py
++++ b/python/sglang/srt/layers/attention/flashinfer_mla_backend.py
+@@ -934,6 +934,9 @@
+                 valid.copy_(translator.translate_dcp_read_ids(valid))
+         else:
+             kv_indptr, kv_indices = spec_info.kv_indptr, spec_info.kv_indices
++            if not init_metadata_replay:
++                # FlashInfer >= 0.7.0 validates lengths against the draft CSR plan.
++                kv_lens = (kv_indptr[1:] - kv_indptr[:-1]).to(torch.int32)
+ 
+         if not init_metadata_replay:
+             wrapper.plan(

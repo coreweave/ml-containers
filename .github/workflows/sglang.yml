@@ -29,3 +29,5 @@ jobs:
       build-args: |
         BASE_IMAGE=${{ matrix.base-image }}
         SGLANG_COMMIT=${{ matrix.sglang-commit }}
+        FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
+        SGLANG_PACKAGE_PROFILE=${{ matrix.package-profile || 'legacy' }}

@@ -1,0 +1,343 @@
+"""Portable rejection tests for package/source and AOT coverage boundaries."""
+
+import copy
+import base64
+import hashlib
+import json
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+import zipfile
+
+from packaging.requirements import Requirement
+
+import packages as p
+
+
+def requirements(profile="baseline"):
+    selected = p.PROFILES[profile]
+    values = {
+        "flashinfer-python": f"flashinfer_python[cu13]=={selected['flashinfer-python']}",
+        "nvidia-cutlass-dsl": f"nvidia-cutlass-dsl[cu13]=={selected['nvidia-cutlass-dsl']}",
+        "quack-kernels": f"quack-kernels=={selected['quack-kernels']}",
+        "apache-tvm-ffi": "apache-tvm-ffi==0.1.11",
+        "flash-attn-4": "flash-attn-4>=4.0.0b18",
+        "cuda-tile": "cuda-tile==1.6.0rc5",
+        "torch": "torch>=2.13.0",
+        "torchaudio": "torchaudio>=2.11.0",
+    }
+    return {name: Requirement(value) for name, value in values.items()}
+
+
+def base():
+    return {"torch": "2.13.0", "torchvision": "0.28.0", "torchaudio": "2.11.0",
+            "triton": "3.7.1+git5d6048aa", "nixl-cu13": "1.4.0",
+            "cuda-bindings": "13.3.1", "nccl4py": "0.5.0"}
+
+
+def wheel_rows(profile="upgrade"):
+    version = p.PROFILES[profile]["flashinfer-python"] + "+cu132"
+    names = ["sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"]
+    if profile == "upgrade":
+        names.append("flashinfer-jit-cache-sm103a")
+    rows = []
+    for name in names:
+        row = {"name": name, "version": version, "filename": name + ".whl",
+               "bytes": 123, "sha256": "a" * 64, "requires": [], "key_modules": {}}
+        if name.startswith("flashinfer-"):
+            row["build_metadata"] = {"__version__": version, "__git_version__": p.PROFILES[profile]["source"]}
+        if name == "flashinfer-jit-cache-sm103a":
+            row["provider_manifest"] = {
+                "schema_version": 1, "provider_id": "sm103a", "distribution": name,
+                "version": version, "cuda_architectures": ["sm103a"], "modules": list(p.KEY_MODULES),
+            }
+        rows.append(row)
+    critical = rows[-1] if profile == "upgrade" else rows[4]
+    critical["key_modules"] = {mod: {"path": mod + ".so", "sha256": "b" * 64, "bytes": 4}
+                               for mod in p.KEY_MODULES}
+    if profile == "upgrade":
+        rows[4]["requires"] = ["flashinfer-jit-cache-sm103a==" + version]
+    return rows
+
+
+class ConstraintTests(unittest.TestCase):
+    def test_source_owned_selected_and_inherited_native(self):
+        selected, preserved, pins = p.make_constraints("upgrade", requirements("upgrade"), base())
+        self.assertEqual(pins["nvidia-cutlass-dsl"], "4.8.0")
+        self.assertEqual(selected["nccl-extensions"], "0.1.0")
+        self.assertEqual(preserved["nixl-cu13"], "1.4.0")
+        self.assertEqual(preserved["triton"], "3.7.1+git5d6048aa")
+        self.assertNotIn("torch", selected)
+
+    def test_missing_native_base_fails(self):
+        value = base(); value.pop("triton")
+        with self.assertRaisesRegex(ValueError, "missing: triton"):
+            p.make_constraints("baseline", requirements(), value)
+
+    def test_wrong_torch_rejected(self):
+        value = base(); value["torch"] = "2.11.0"
+        with self.assertRaisesRegex(ValueError, "Base torch violates"):
+            p.make_constraints("baseline", requirements(), value)
+
+    def test_local_torch_preserved(self):
+        value = base(); value["torch"] = "2.13.0+cu132"
+        self.assertEqual(p.make_constraints("baseline", requirements(), value)[1]["torch"], "2.13.0+cu132")
+
+    def test_plain_constraints_without_extras(self):
+        pins = p.make_constraints("upgrade", requirements("upgrade"), base())[2]
+        self.assertTrue(all("[" not in name for name in pins))
+
+    def test_wrong_source_pair_rejected(self):
+        with patch.object(p, "revision", side_effect=[p.SGLANG_SOURCE, "f" * 40]):
+            with self.assertRaisesRegex(ValueError, "Wrong FlashInfer source"):
+                p.source_contract("baseline", Path("sg"), Path("fi"))
+
+    def test_unreviewed_patch_rejected(self):
+        with patch.object(p, "PATCH_SHA256", "0" * 64):
+            with self.assertRaisesRegex(ValueError, "Unreviewed compatibility patch"):
+                p.source_evidence("upgrade", Path("unused"))
+
+    def test_exact_version_rejects_range_and_wildcard(self):
+        self.assertIsNone(p.exact_version(Requirement("x>=1")))
+        self.assertIsNone(p.exact_version(Requirement("x==1.*")))
+
+
+class WheelSetTests(unittest.TestCase):
+    def check(self, rows, profile="upgrade"):
+        return p.validate_wheel_set(profile, rows, ["sm103a"], p.PROFILES[profile]["source"])
+
+    def test_upgrade_complete_set(self):
+        self.assertEqual(self.check(wheel_rows())["name"], "flashinfer-jit-cache-sm103a")
+
+    def test_baseline_complete_set(self):
+        self.check(wheel_rows("baseline"), "baseline")
+
+    def test_shim_without_provider_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing built"):
+            self.check(wheel_rows()[:-1])
+
+    def test_empty_critical_provider_fails(self):
+        rows = wheel_rows(); rows[-1]["key_modules"] = {}
+        with self.assertRaisesRegex(ValueError, "Missing GLM"):
+            self.check(rows)
+
+    def test_one_missing_critical_module_fails(self):
+        rows = wheel_rows(); rows[-1]["key_modules"].pop("fmha_gen")
+        with self.assertRaisesRegex(ValueError, "Missing GLM"):
+            self.check(rows)
+
+    def test_wrong_local_cuda_version_fails(self):
+        rows = wheel_rows(); rows[-1]["version"] = "0.7.0.post1+cu130"
+        with self.assertRaisesRegex(ValueError, "versions/local CUDA"):
+            self.check(rows)
+
+    def test_uniform_wrong_local_cuda_label_rejected(self):
+        rows = wheel_rows("baseline")
+        for row in rows:
+            if row["name"].startswith("flashinfer-"):
+                row["version"] = "0.6.18+cu130"
+                row["build_metadata"]["__version__"] = row["version"]
+        with self.assertRaisesRegex(ValueError, "differs from active nvcc"):
+            p.validate_wheel_set("baseline", rows, ["sm103a"], p.PROFILES["baseline"]["source"], "cu132")
+
+    def test_wrong_source_fails(self):
+        rows = wheel_rows(); rows[2]["build_metadata"]["__git_version__"] = "e" * 40
+        with self.assertRaisesRegex(ValueError, "source mismatch"):
+            self.check(rows)
+
+    def test_unexpected_provider_fails(self):
+        rows = wheel_rows(); new = copy.deepcopy(rows[-1]); new["name"] = "flashinfer-jit-cache-sm120a"; rows.append(new)
+        with self.assertRaisesRegex(ValueError, "Unexpected FlashInfer"):
+            self.check(rows)
+
+    def test_shim_version_range_rejected(self):
+        rows = wheel_rows(); rows[4]["requires"] = ["flashinfer-jit-cache-sm103a>=0.7"]
+        with self.assertRaisesRegex(ValueError, "Shim provider requirements"):
+            self.check(rows)
+
+    def test_duplicate_distribution_rejected(self):
+        rows = wheel_rows(); rows.append(copy.deepcopy(rows[0]))
+        with self.assertRaisesRegex(ValueError, "Duplicate wheel"):
+            self.check(rows)
+
+    def test_wrong_manifest_target_rejected(self):
+        rows = wheel_rows(); rows[-1]["provider_manifest"]["cuda_architectures"] = ["sm100a"]
+        with self.assertRaisesRegex(ValueError, "manifest identity"):
+            self.check(rows)
+
+
+class ArtifactTests(unittest.TestCase):
+    def test_header_payload_is_bound_to_wheel_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / "headers.whl"
+            root = "f.data/purelib/flashinfer_cubin/include/trtllmGen_bmm_export/"
+            rows = []
+            with zipfile.ZipFile(wheel, "w") as archive:
+                for suffix, data in (("gen/a.h", b"header"), ("gen/a.h.lock", b"")):
+                    name = root + suffix
+                    info = zipfile.ZipInfo(name); info.external_attr = 0o100644 << 16
+                    archive.writestr(info, data)
+                    checksum = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip("=")
+                    rows.append(f"{name},sha256={checksum},{len(data)}")
+                archive.writestr("f.dist-info/RECORD", "\n".join(rows))
+            with zipfile.ZipFile(wheel) as archive:
+                value = p.cubin_headers(archive)
+            self.assertEqual(value["path"], "flashinfer_cubin/include/trtllmGen_bmm_export")
+            self.assertEqual(value["directories"], ["gen"])
+            self.assertEqual(len(value["files"]), 2)
+            with zipfile.ZipFile(wheel, "a") as archive:
+                archive.writestr("f.dist-info/RECORD", "bad")
+            with zipfile.ZipFile(wheel) as archive, self.assertRaises(ValueError):
+                p.cubin_headers(archive)
+
+    def test_data_purelib_paths_match_normal_pip_location(self):
+        self.assertEqual(p.installed_path("f-1.data/purelib/flashinfer_jit_cache/cache/x.so"),
+                         "flashinfer_jit_cache/cache/x.so")
+
+    def test_wheel_static_inspection_and_relocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / "fixture.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("f.dist-info/METADATA", "Name: flashinfer-jit-cache\nVersion: 0.6.18+cu132\n")
+                prefix = "f.data/purelib/flashinfer_jit_cache/"
+                archive.writestr(prefix + "_build_meta.py", "__version__='0.6.18+cu132'\n__git_version__='abc'\n")
+                for module in p.KEY_MODULES:
+                    archive.writestr(prefix + f"cached_ops/{module}/{module}.so", b"\x7fELFtest")
+            row = p.inspect_wheel(wheel)
+            self.assertEqual(set(row["key_modules"]), set(p.KEY_MODULES))
+            self.assertTrue(all(value["path"].startswith("flashinfer_jit_cache/")
+                                for value in row["key_modules"].values()))
+
+    def test_nonliteral_metadata_is_never_executed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / "fixture.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("x/_build_meta.py", "__version__=__import__('os').getcwd()")
+            with zipfile.ZipFile(wheel) as archive, self.assertRaises(ValueError):
+                p.literal_build_metadata(archive)
+
+    def test_provider_report_bound_to_wheel_and_sm103(self):
+        row = wheel_rows()[-1]
+        report = {
+            "schema_version": 1, "provider_id": "sm103a", "version": row["version"],
+            "modules": sorted(p.KEY_MODULES), "wheels": {row["name"]: {
+                "filename": row["filename"], "size_bytes": row["bytes"], "sha256": row["sha256"]}},
+            "module_cuda_architecture_summary": {"incompatible_targets": 0},
+            "module_cuda_architectures": {"fp4_quantization_103": ["sm103a"]},
+        }
+        p.validate_provider_report(row, report)
+        report["module_cuda_architectures"]["fp4_quantization_103"] = ["sm100a"]
+        with self.assertRaisesRegex(ValueError, "actual SM103"):
+            p.validate_provider_report(row, report)
+        report["module_cuda_architectures"]["fp4_quantization_103"] = ["sm103a"]
+        report["wheels"][row["name"]]["sha256"] = "c" * 64
+        with self.assertRaisesRegex(ValueError, "wheel binding"):
+            p.validate_provider_report(row, report)
+
+    def test_architectures_require_sm103_and_exact_unique_targets(self):
+        self.assertEqual(p.architectures("9.0a 10.0a 10.3a"), ["sm100a", "sm103a", "sm90a"])
+        for value in ("9.0a", "10.3a 10.3a", "10.3+PTX"):
+            with self.assertRaises(ValueError):
+                p.architectures(value)
+
+
+class InstalledTests(unittest.TestCase):
+    def test_compact_record_keeps_validated_provider_and_payload_identity(self):
+        row = wheel_rows()[-1]
+        report = {"schema_version": 1, "provider_id": "sm103a", "version": row["version"],
+                  "modules": sorted(p.KEY_MODULES), "wheels": {row["name"]: {
+                      "filename": row["filename"], "size_bytes": row["bytes"], "sha256": row["sha256"]}},
+                  "module_cuda_architecture_summary": {"incompatible_targets": 0},
+                  "module_cuda_architectures": {"fp4_quantization_103": ["sm103a"]}}
+        info = {"wheels": [row], "provider_validation": {"sm103a": {"sha256": "d" * 64, "report": report}}}
+        compact = p.compact_build_record(info, {"torch": "2.13.0"}, [{"module": "fp4_quantization_103"}], "e" * 64)
+        self.assertNotIn("modules", compact["wheels"][0]["provider_manifest"])
+        self.assertEqual(compact["wheels"][0]["provider_manifest"]["module_count"], 4)
+        self.assertEqual(compact["wheels"][0]["key_modules"], row["key_modules"])
+        self.assertNotIn("report", compact["provider_validation"]["sm103a"])
+        self.assertEqual(compact["provider_validation"]["sm103a"]["summary"]["critical_module_cuda_architectures"],
+                         {"fp4_quantization_103": ["sm103a"]})
+        self.assertIn("report", info["provider_validation"]["sm103a"])
+        self.assertEqual(compact["wheel_info_sha256"], "e" * 64)
+        report["module_cuda_architecture_summary"]["incompatible_targets"] = 1
+        with self.assertRaisesRegex(ValueError, "incompatible CUDA"):
+            p.compact_build_record(info, {}, [], "e" * 64)
+
+    def test_compact_record_explicit_size_bound(self):
+        with patch.object(p, "MAX_BUILD_INFO_BYTES", 64):
+            with self.assertRaisesRegex(ValueError, "size bound"):
+                p.compact_build_record({"wheels": [], "provider_validation": {}}, {}, [], "e" * 64)
+
+    def test_loader_families_preserved_and_new_resolution_frozen(self):
+        before = base() | {"safetensors": "0.7.0", "runai-model-streamer": "0.15.7"}
+        _, preserved, _ = p.make_constraints("baseline", requirements(), before)
+        self.assertEqual(preserved["safetensors"], "0.7.0")
+        self.assertEqual(preserved["runai-model-streamer"], "0.15.7")
+        snapshot = {"selected_versions": {}, "preserved_versions": preserved, "optional_versions": {}}
+        new = p.newly_resolved_native(snapshot, before | {"huggingface-hub": "1.10.0", "hf-xet": "1.5.0"})
+        self.assertEqual(new, {"huggingface-hub": "1.10.0", "hf-xet": "1.5.0"})
+        info = {"selected_versions": {}, "preserved_versions": preserved, "resolved_native_versions": new, "wheels": []}
+        with self.assertRaises(ValueError):
+            p.validate_installed(info, before | {"huggingface-hub": "1.10.1", "hf-xet": "1.5.0"})
+
+    def test_newly_resolved_native_is_frozen_without_unrelated_python(self):
+        snapshot = {"selected_versions": {"nvidia-cutlass-dsl": "4.8.0"},
+                    "preserved_versions": {"torch": "2.13.0"}, "optional_versions": {}}
+        resolved = p.newly_resolved_native(snapshot, {"torch": "2.13.0", "nvidia-cutlass-dsl": "4.8.0",
+                                                      "nccl4py": "0.5.0", "requests": "2.0"})
+        self.assertEqual(resolved, {"nccl4py": "0.5.0"})
+        info = {"preserved_versions": {}, "selected_versions": {}, "wheels": [], "resolved_native_versions": resolved}
+        with self.assertRaisesRegex(ValueError, "Inherited native dependency changed"):
+            p.validate_installed(info, {"nccl4py": "0.6.0"})
+
+    def test_optional_constraints_do_not_force_unused_libraries(self):
+        info = {"preserved_versions": {}, "selected_versions": {}, "wheels": [],
+                "optional_versions": {"nvidia-cutlass-dsl-libs-cu12": "4.8.0"}}
+        p.validate_installed(info, {})
+        p.validate_installed(info, {"nvidia-cutlass-dsl-libs-cu12": "4.8.0"})
+        with self.assertRaisesRegex(ValueError, "optional dependency mismatch"):
+            p.validate_installed(info, {"nvidia-cutlass-dsl-libs-cu12": "4.6.2"})
+
+    def test_preserved_native_drift_rejected(self):
+        info = {"preserved_versions": base(), "selected_versions": {}, "wheels": []}
+        versions = base(); versions["nixl-cu13"] = "1.3.1"
+        with self.assertRaisesRegex(ValueError, "Inherited native dependency changed: nixl-cu13"):
+            p.validate_installed(info, versions)
+
+    def test_local_cuda_source_version_accepted(self):
+        info = {"preserved_versions": {}, "selected_versions": {"flashinfer-python": "0.7.0.post1"}, "wheels": []}
+        p.validate_installed(info, {"flashinfer-python": "0.7.0.post1+cu132"})
+
+    def test_pip_cannot_replace_built_local_wheel(self):
+        info = {"preserved_versions": {}, "selected_versions": {},
+                "wheels": [{"name": "flashinfer-python", "version": "0.7.0.post1+cu132"}]}
+        with self.assertRaisesRegex(ValueError, "Built wheel was replaced"):
+            p.validate_installed(info, {"flashinfer-python": "0.7.0.post1"})
+
+    def test_installed_payload_tamper_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); payload = root / "module.so"; payload.write_bytes(b"\x7fELFbytes")
+            info = {"preserved_versions": {}, "selected_versions": {}, "torch_abi": {"cuda": "13.2"},
+                    "wheels": [{"name": "flashinfer-jit-cache", "version": "0.6.18+cu132",
+                                "key_modules": {"test": {"path": "module.so", "bytes": payload.stat().st_size,
+                                                          "sha256": p.sha256(payload)}}}]}
+            dist = SimpleNamespace(locate_file=lambda path: root / path)
+            with patch.object(p, "installed", return_value={"flashinfer-jit-cache": "0.6.18+cu132"}), \
+                 patch.object(p, "torch_abi", return_value=info["torch_abi"]), \
+                 patch.object(p.metadata, "distribution", return_value=dist):
+                p.audit_installed(info)
+                payload.write_bytes(b"\x7fELFother")
+                with self.assertRaisesRegex(ValueError, "Installed AOT module changed"):
+                    p.audit_installed(info)
+
+    def test_torch_abi_drift_rejected(self):
+        info = {"preserved_versions": {}, "selected_versions": {}, "wheels": [], "torch_abi": {"cxx11_abi": True}}
+        with patch.object(p, "installed", return_value={}), patch.object(p, "torch_abi", return_value={"cxx11_abi": False}):
+            with self.assertRaisesRegex(ValueError, "Torch ABI differs"):
+                p.audit_installed(info)
+
+
+if __name__ == "__main__":
+    unittest.main()

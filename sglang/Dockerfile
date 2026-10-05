@@ -16,6 +16,8 @@ ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 ARG TARGETPLATFORM
 
 ARG SGLANG_COMMIT
+ARG FLASHINFER_COMMIT
+ARG SGLANG_PACKAGE_PROFILE=legacy
 
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
@@ -32,20 +34,28 @@ ENV CMAKE_CUDA_COMPILER='/opt/nvcc-wrapper.py' \
     CUDACXX='/opt/nvcc-wrapper.py'
 
 WORKDIR /build
-COPY build.bash /build/
+COPY build.bash packages.py test_packages.py /build/
+COPY patches/ /build/patches/
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=tmpfs,target=/sccache \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     mkdir /wheels && \
+    if [ "${SGLANG_PACKAGE_PROFILE}" != legacy ]; then python3 -m unittest -v test_packages; fi && \
     ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}" && \
     [ "$TARGETPLATFORM" != "linux/arm64" ] || ARCH_LIST="9.0 10.0+PTX" && \
     bash build.bash -a "${ARCH_LIST}" && \
     rm -rf /build/*
-COPY install.bash /wheels/
+COPY install.bash packages.py /wheels/
 
 FROM ${BASE_IMAGE}
+ARG SGLANG_COMMIT
+ARG FLASHINFER_COMMIT
+ARG SGLANG_PACKAGE_PROFILE=legacy
+LABEL com.coreweave.sglang.source-ref="${SGLANG_COMMIT}" \
+      com.coreweave.sglang.flashinfer-ref="${FLASHINFER_COMMIT}" \
+      com.coreweave.sglang.package-profile="${SGLANG_PACKAGE_PROFILE}"
 # The CUDA 13 sgl-deep-ep wheel links against NVSHMEM but does not bundle it.
 # SGLang JIT-compiles its HiCache native hash extension on first use, which
 # requires the OpenSSL headers in addition to the runtime library.
