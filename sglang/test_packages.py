@@ -3,9 +3,12 @@
 import copy
 import base64
 import hashlib
+import importlib.metadata
+import io
 import json
 from pathlib import Path
 import tempfile
+import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -61,6 +64,87 @@ def wheel_rows(profile="upgrade"):
         rows[4]["requires"] = ["flashinfer-jit-cache-sm103a==" + version]
     return rows
 
+
+class DistributionSelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+
+    def distribution(self, root, name, version):
+        path = self.root / root / (name.replace("-", "_") + "-" + version + ".dist-info")
+        path.mkdir(parents=True)
+        (path / "METADATA").write_text(f"Name: {name}\nVersion: {version}\n")
+        return importlib.metadata.Distribution.at(path)
+
+    def lookup(self, observations, search_roots, *, strict=(), evidence=None):
+        with patch.object(p.metadata, "distributions", return_value=observations), \
+             patch.object(sys, "path", [str(self.root / value) for value in search_roots]), \
+             patch.object(sys, "stderr", new_callable=io.StringIO) as diagnostics:
+            result = p.installed(strict, evidence=evidence)
+        return result, diagnostics.getvalue()
+
+    def test_unrelated_duplicate_uses_python_lookup_not_enumeration_order(self):
+        selected = self.distribution("pip", "cryptography", "46.0.0")
+        shadowed = self.distribution("system", "cryptography", "41.0.7")
+        evidence = {}
+        result, diagnostic = self.lookup([shadowed, selected], ["pip", "system"], evidence=evidence)
+        self.assertEqual(result, {"cryptography": "46.0.0"})
+        row = evidence["duplicates"][0]
+        self.assertEqual(row["selected"]["version"], "46.0.0")
+        self.assertEqual({x["version"] for x in row["candidates"]}, {"41.0.7", "46.0.0"})
+        self.assertEqual(len({x["metadata_path"] for x in row["candidates"]}), 2)
+        self.assertFalse(evidence["module_import_ownership_verified"])
+        self.assertFalse(json.loads(diagnostic)["protected"])
+
+    def test_same_root_two_metadata_versions_record_lookup_choice(self):
+        first = self.distribution("pip", "cryptography", "46.0.0")
+        second = self.distribution("pip", "cryptography", "41.0.7")
+        evidence = {}
+        with patch.object(sys, "path", [str(self.root / "pip")]):
+            expected = p.distribution_identity(p.metadata.distribution("cryptography"))
+        result, _ = self.lookup([second, first], ["pip"], evidence=evidence)
+        self.assertEqual(result["cryptography"], expected["version"])
+        self.assertEqual(evidence["duplicates"][0]["selected"], expected)
+        self.assertEqual(len(evidence["duplicates"][0]["candidates"]), 2)
+
+    def test_repeated_enumeration_is_not_two_installations(self):
+        dist = self.distribution("pip", "torch", "2.13.0")
+        evidence = {}
+        result, diagnostics = self.lookup([dist, dist], ["pip"], evidence=evidence)
+        self.assertEqual(result, {"torch": "2.13.0"})
+        self.assertEqual(evidence["duplicates"], [])
+        self.assertEqual(len(evidence["critical_selected"]), 1)
+        self.assertEqual(diagnostics, "")
+
+    def test_duplicate_native_loader_sglang_and_flashinfer_are_rejected(self):
+        for index, name in enumerate(("torch", "sglang", "flashinfer-python", "flashinfer-jit-cache-sm103a",
+                                      "nvidia-cutlass-dsl", "huggingface-hub")):
+            with self.subTest(name=name):
+                first = self.distribution(f"pip{index}", name, "1.0")
+                second = self.distribution(f"system{index}", name, "1.0")
+                with self.assertRaisesRegex(ValueError, "Duplicate protected") as error:
+                    self.lookup([first, second], [f"pip{index}", f"system{index}"])
+                self.assertIn(str(self.root / f"pip{index}"), str(error.exception))
+                self.assertIn(str(self.root / f"system{index}"), str(error.exception))
+
+    def test_explicit_selected_constraint_is_strict(self):
+        first = self.distribution("pip", "cryptography", "46.0.0")
+        second = self.distribution("system", "cryptography", "41.0.7")
+        with self.assertRaisesRegex(ValueError, "Duplicate protected"):
+            self.lookup([first, second], ["pip", "system"], strict={"cryptography"})
+
+    def test_selected_location_must_belong_to_observed_metadata(self):
+        observed = self.distribution("pip", "cryptography", "46.0.0")
+        unknown = self.distribution("elsewhere", "cryptography", "46.0.0")
+        with patch.object(p.metadata, "distribution", return_value=unknown), \
+             self.assertRaisesRegex(ValueError, "not enumerated"):
+            self.lookup([observed], ["pip"])
+
+    def test_missing_metadata_location_is_rejected(self):
+        dist = SimpleNamespace(metadata={"Name": "cryptography"}, version="46.0.0")
+        with self.assertRaisesRegex(ValueError, "metadata location"):
+            p.distribution_identity(dist)
 
 class ConstraintTests(unittest.TestCase):
     def test_source_owned_selected_and_inherited_native(self):
@@ -269,6 +353,20 @@ class InstalledTests(unittest.TestCase):
         with patch.object(p, "MAX_BUILD_INFO_BYTES", 64):
             with self.assertRaisesRegex(ValueError, "size bound"):
                 p.compact_build_record({"wheels": [], "provider_validation": {}}, {}, [], "e" * 64)
+
+    def test_compact_selection_provenance_remains_bounded(self):
+        selected = [{"name": f"nvidia-fixture-{n}", "version": "13.2.1",
+                     "metadata_path": f"/usr/local/lib/python3.12/dist-packages/nvidia_fixture_{n}-13.2.1.dist-info",
+                     "location": "/usr/local/lib/python3.12/dist-packages"} for n in range(100)]
+        evidence = {"schema": "distribution-selection/v1", "resolution": "importlib.metadata.distribution",
+                    "module_import_ownership_verified": False, "critical_selected": selected, "duplicates": []}
+        info = {"wheels": [], "provider_validation": {}, "distribution_selection_build": evidence}
+        record = p.compact_build_record(info, {f"fixture-{n}": "1.0.0" for n in range(500)}, [], "a" * 64, evidence)
+        self.assertNotIn("distribution_selection_build", record)
+        self.assertEqual(record["distribution_selection_installed"], evidence)
+        self.assertEqual(record["distribution_selection_build_sha256"],
+                         hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
+        self.assertLess(len(json.dumps(record, indent=2, sort_keys=True).encode()), p.MAX_BUILD_INFO_BYTES)
 
     def test_loader_families_preserved_and_new_resolution_frozen(self):
         before = base() | {"safetensors": "0.7.0", "runai-model-streamer": "0.15.7"}

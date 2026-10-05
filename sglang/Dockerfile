@@ -44,7 +44,7 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     mkdir /wheels && \
     if [ "${SGLANG_PACKAGE_PROFILE}" != legacy ]; then python3 -m unittest -v test_packages; fi && \
     ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}" && \
-    [ "$TARGETPLATFORM" != "linux/arm64" ] || ARCH_LIST="9.0 10.0+PTX" && \
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH_LIST="9.0 10.0+PTX"; fi && \
     bash build.bash -a "${ARCH_LIST}" && \
     rm -rf /build/*
 COPY install.bash packages.py /wheels/

@@ -59,7 +59,8 @@ LOADER_NAMES = {
 
 
 def controlled_package(name):
-    return name.startswith(NATIVE_PREFIXES) or name in LOADER_NAMES
+    return (name.startswith(NATIVE_PREFIXES) or name in LOADER_NAMES
+            or name == "sglang" or name.startswith("flashinfer-"))
 KEY_MODULES = (
     "fused_moe_trtllm_sm100", "fp4_quantization_103", "fmha_gen", "trtllm_utils",
 )
@@ -94,12 +95,43 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
-def installed():
-    result = {}
+def distribution_identity(dist):
+    name = canonicalize_name(dist.metadata["Name"])
+    path = getattr(dist, "_path", None)
+    require(path is not None, f"Distribution metadata location is unavailable: {name}")
+    return {"name": name, "version": dist.version,
+            "metadata_path": str(Path(path).resolve()),
+            "location": str(Path(dist.locate_file("")).resolve())}
+
+
+def installed(strict_names=(), *, evidence=None):
+    strict = {canonicalize_name(name) for name in strict_names}
+    groups = {}
     for dist in metadata.distributions():
         name = canonicalize_name(dist.metadata["Name"])
-        require(name not in result, f"Duplicate installed distribution: {name}")
-        result[name] = dist.version
+        groups.setdefault(name, []).append(distribution_identity(dist))
+    result, duplicates, critical = {}, [], []
+    for name, observations in sorted(groups.items()):
+        unique = {row["metadata_path"]: row for row in observations}
+        require(all(unique[row["metadata_path"]] == row for row in observations),
+                f"Distribution metadata changed during enumeration: {name}")
+        candidates = sorted(unique.values(), key=lambda row: row["metadata_path"])
+        selected = distribution_identity(metadata.distribution(name))
+        require(selected in candidates, f"Selected distribution metadata was not enumerated: {name}: {selected}")
+        protected = controlled_package(name) or name in strict
+        if len(candidates) > 1:
+            observation = {"name": name, "selected": selected, "candidates": candidates}
+            print(json.dumps({"schema": "distribution-selection/v1", "duplicate": observation,
+                              "resolution": "importlib.metadata.distribution", "protected": protected,
+                              "module_import_ownership_verified": False}, sort_keys=True), file=sys.stderr)
+            require(not protected, "Duplicate protected distribution metadata: " + json.dumps(observation, sort_keys=True))
+            duplicates.append(observation)
+        if protected:
+            critical.append(selected)
+        result[name] = selected["version"]
+    if evidence is not None:
+        evidence.update(schema="distribution-selection/v1", resolution="importlib.metadata.distribution",
+                        module_import_ownership_verified=False, critical_selected=critical, duplicates=duplicates)
     return result
 
 
@@ -203,7 +235,9 @@ def dsl_sibling_constraints(selected):
 
 def constraints(args):
     reqs = source_contract(args.profile, args.sglang_source, args.flashinfer_source)
-    before = installed()
+    selection = {}
+    strict = {name for name, req in reqs.items() if exact_version(req) is not None} | set(FIXED)
+    before = installed(strict, evidence=selection)
     selected, preserved, pins = make_constraints(args.profile, reqs, before)
     lines = [f"{name}=={version}" for name, version in sorted(pins.items())]
     Path(args.output).write_text("\n".join(lines) + "\n")
@@ -232,6 +266,7 @@ def constraints(args):
         "schema": "sglang-package-constraints/v1", "profile": args.profile,
         "sources": {"sglang": SGLANG_SOURCE, "flashinfer": PROFILES[args.profile]["source"]},
         "before": before, "selected_versions": selected, "preserved_versions": preserved,
+        "distribution_selection_before": selection,
         "optional_versions": dsl_sibling_constraints(selected),
         "constraints_sha256": sha256(args.output),
         "build_requirements_sha256": sha256(args.requirements),
@@ -459,7 +494,9 @@ def wheels(args):
     else:
         path = Path(args.wheel_dir) / critical["filename"]
         reports["sm103a"] = inspect_baseline_device_code(path, critical, args.cuobjdump)
-    added_native = newly_resolved_native(snapshot, installed())
+    selection = {}
+    strict = set(snapshot["selected_versions"]) | set(snapshot["preserved_versions"]) | set(snapshot["optional_versions"])
+    added_native = newly_resolved_native(snapshot, installed(strict, evidence=selection))
     if added_native:
         with Path(args.constraints).open("a") as stream:
             stream.write("\n# Native dependencies resolved while preparing this build.\n")
@@ -472,6 +509,7 @@ def wheels(args):
         "selected_versions": snapshot["selected_versions"], "preserved_versions": snapshot["preserved_versions"],
         "optional_versions": snapshot["optional_versions"],
         "wheels": rows, "provider_validation": reports,
+        "distribution_selection_build": selection,
         "sglang_source_evidence": evidence, "torch_abi": snapshot["torch_abi"],
         "cuda_version": os.environ.get("CUDA_VERSION"),
         "nvcc_version": nvcc_version,
@@ -492,8 +530,11 @@ def validate_installed(info, versions):
         require(versions.get(row["name"]) == row["version"], f"Built wheel was replaced: {row['name']}")
 
 
-def audit_installed(info):
-    versions = installed()
+def audit_installed(info, selection=None):
+    strict = set(info["selected_versions"]) | set(info["preserved_versions"]) | set(info.get("optional_versions", {}))
+    strict.update(info.get("resolved_native_versions", {}))
+    strict.update(row["name"] for row in info["wheels"])
+    versions = installed(strict, evidence=selection)
     validate_installed(info, versions)
     require(torch_abi() == info["torch_abi"], "Installed Torch ABI differs from wheel build")
     module_rows = []
@@ -513,8 +554,12 @@ def audit_installed(info):
     return versions, module_rows
 
 
-def compact_build_record(info, versions, module_rows, wheel_info_sha256):
+def compact_build_record(info, versions, module_rows, wheel_info_sha256, selection=None):
     record = json.loads(json.dumps(info))
+    if "distribution_selection_build" in record:
+        observed = record.pop("distribution_selection_build")
+        record["distribution_selection_build_sha256"] = hashlib.sha256(
+            json.dumps(observed, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     for row in record["wheels"]:
         if "provider_manifest" not in row:
             continue
@@ -540,6 +585,8 @@ def compact_build_record(info, versions, module_rows, wheel_info_sha256):
         }
     record.update(schema="sglang-package-build/v1", installed_versions=versions,
                   key_module_files=module_rows, wheel_info_sha256=wheel_info_sha256)
+    if selection is not None:
+        record["distribution_selection_installed"] = selection
     require(len((json.dumps(record, indent=2, sort_keys=True) + "\n").encode()) <= MAX_BUILD_INFO_BYTES,
             "Compact build-info exceeds its explicit size bound")
     return record
@@ -550,8 +597,9 @@ def audit(args):
     require(info["schema"] == "sglang-package-wheels/v1", "Unsupported wheel record")
     require(info["snapshot_sha256"] == sha256(args.snapshot)
             and info["constraints_sha256"] == sha256(args.constraints), "Build record input changed")
-    versions, module_rows = audit_installed(info)
-    record = compact_build_record(info, versions, module_rows, sha256(args.wheel_info))
+    selection = {}
+    versions, module_rows = audit_installed(info, selection)
+    record = compact_build_record(info, versions, module_rows, sha256(args.wheel_info), selection)
     write_json(args.output, record)
 
 
@@ -562,12 +610,14 @@ def verify_installed(args):
     require(info["constraints_sha256"] == sha256(args.constraints), "Inherited constraints changed")
     require(info["wheel_info_sha256"] == sha256(Path(args.build_info).with_name("wheel-info.json")),
             "Retained full wheel evidence changed")
-    versions, modules = audit_installed(info)
+    selection = {}
+    versions, modules = audit_installed(info, selection)
     write_json(args.output, {
         "schema": "sglang-package-final/v1", "profile": args.profile,
         "build_info_sha256": sha256(args.build_info),
         "constraints_sha256": sha256(args.constraints), "sources": info["sources"],
         "installed_versions": versions, "key_module_files": modules,
+        "distribution_selection_installed": selection,
     })
 
 
