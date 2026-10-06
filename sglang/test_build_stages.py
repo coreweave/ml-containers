@@ -47,6 +47,45 @@ class StageTests(unittest.TestCase):
         self.assertIn('set -e', stage)
         self.assertIn('unittest -v test_packages', stage)
 
+    def test_protocol_gate_precedes_compile_and_follows_final_pip_check(self):
+        stage = stages()['package-contract']
+        self.assertLess(stage.index('packages.py constraints'), stage.index('packages.py protocol-requirements'))
+        self.assertLess(stage.index('--label protocol-install'), stage.index('--label protocol-check'))
+        self.assertIn('--constraint /contract/constraints.txt', stage)
+        self.assertIn('--requirement /contract/protocol-requirements.txt', stage)
+        self.assertIn('timeout 120s python3 /build/packages.py verify-protocol', stage)
+        source = (SOURCE / 'install.bash').read_text()
+        self.assertLess(source.index('python3 -m pip check'), source.index('packages.py verify-protocol'))
+        self.assertLess(source.index('packages.py verify-protocol'), source.index('packages.py audit'))
+
+    def test_contract_protocol_failure_is_terminal_and_legacy_bypasses_it(self):
+        contract = stages()['package-contract'].split("RUN <<'CONTRACT'\n", 1)[1].rsplit('\nCONTRACT', 1)[0]
+        for profile in ('baseline', 'upgrade', 'legacy'):
+            for failed in ('', 'protocol-install', 'protocol-check'):
+                with self.subTest(profile=profile, failed=failed), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    bindir = root / 'bin'; bindir.mkdir()
+                    python = bindir / 'python3'
+                    python.write_text('#!' + sys.executable + '\n' +
+                        'import json,os,sys\n'
+                        'args=sys.argv[1:]\n'
+                        'with open(os.environ["TRACE"],"a") as f:f.write(json.dumps(args)+"\\n")\n'
+                        'if "--label" in args and args[args.index("--label")+1]==os.environ["FAIL_PHASE"]:sys.exit(7)\n')
+                    python.chmod(0o755)
+                    result = subprocess.run(['bash', '-c', contract.replace('/contract', str(root / 'contract'))],
+                        env=dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ['PATH'],
+                                 SGLANG_PACKAGE_PROFILE=profile, TRACE=str(root / 'trace'), FAIL_PHASE=failed),
+                        cwd=root, capture_output=True, timeout=10)
+                    trace = [json.loads(line) for line in (root / 'trace').read_text().splitlines()]
+                    labels = [row[row.index('--label')+1] for row in trace if '--label' in row]
+                    if profile == 'legacy':
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(labels, [])
+                    else:
+                        self.assertEqual(result.returncode, 7 if failed else 0, result.stderr)
+                        self.assertEqual(labels, ['package-constraints', 'protocol-install'] +
+                                         ([] if failed == 'protocol-install' else ['protocol-check']))
+
     def test_final_image_excludes_full_logs_and_remains_default_target(self):
         rows = stages()
         self.assertEqual(list(rows)[-1], '<final>')

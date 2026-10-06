@@ -121,7 +121,7 @@ class DistributionSelectionTests(unittest.TestCase):
 
     def test_duplicate_native_loader_sglang_and_flashinfer_are_rejected(self):
         for index, name in enumerate(("torch", "sglang", "flashinfer-python", "flashinfer-jit-cache-sm103a",
-                                      "nvidia-cutlass-dsl", "huggingface-hub")):
+                                      "nvidia-cutlass-dsl", "huggingface-hub", *p.PROTOCOL_PINS)):
             with self.subTest(name=name):
                 first = self.distribution(f"pip{index}", name, "1.0")
                 second = self.distribution(f"system{index}", name, "1.0")
@@ -188,6 +188,81 @@ class ConstraintTests(unittest.TestCase):
     def test_exact_version_rejects_range_and_wildcard(self):
         self.assertIsNone(p.exact_version(Requirement("x>=1")))
         self.assertIsNone(p.exact_version(Requirement("x==1.*")))
+
+
+class ProtocolTests(unittest.TestCase):
+    @staticmethod
+    def protocol_metadata():
+        return {"protobuf": [], "grpcio": ["typing-extensions~=4.12"],
+                "grpcio-health-checking": ["protobuf>=6.33.5,<7", "grpcio>=1.81.1"],
+                "grpcio-reflection": ["protobuf>=6.33.5,<7", "grpcio>=1.81.1"]}
+
+    def test_both_profiles_select_protocol_pins_without_source_direct_requirement(self):
+        for profile in ("baseline", "upgrade"):
+            with self.subTest(profile=profile):
+                before = base() | {"protobuf": "7.36.2", "grpcio-health-checking": "1.84.0"}
+                selected, preserved, pins = p.make_constraints(profile, requirements(profile), before)
+                for name, version in p.PROTOCOL_PINS.items():
+                    self.assertEqual(selected[name], version)
+                    self.assertEqual(pins[name], version)
+                    self.assertNotIn(name, preserved)
+                    self.assertNotIn(name, p.FIXED)
+                p.validate_installed({"selected_versions": selected, "preserved_versions": preserved,
+                                      "wheels": []}, pins)
+
+    def test_requirements_are_narrow_exact_four_package_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "protocol.txt"
+            p.protocol_requirements(SimpleNamespace(output=path))
+            self.assertEqual(path.read_text().splitlines(), [
+                f"{name}=={version}" for name, version in sorted(p.PROTOCOL_PINS.items())])
+
+    def test_supported_metadata_intersection_passes(self):
+        checked = p.validate_protocol_metadata(p.PROTOCOL_PINS, self.protocol_metadata())
+        self.assertEqual(len(checked), 4)
+
+    def test_seven_only_health_or_reflection_metadata_rejected(self):
+        for name in ("grpcio-health-checking", "grpcio-reflection"):
+            with self.subTest(name=name):
+                requirements = self.protocol_metadata()
+                requirements[name][0] = "protobuf>=7.35.1,<8"
+                with self.assertRaisesRegex(ValueError, "Protocol metadata conflict"):
+                    p.validate_protocol_metadata(p.PROTOCOL_PINS, requirements)
+
+    def test_selected_version_drift_or_missing_rejected(self):
+        for name in p.PROTOCOL_PINS:
+            for observed in ("1.0.0", None):
+                with self.subTest(name=name, observed=observed):
+                    versions = dict(p.PROTOCOL_PINS)
+                    if observed is None:
+                        versions.pop(name)
+                    else:
+                        versions[name] = observed
+                    with self.assertRaisesRegex(ValueError, "Protocol dependency mismatch"):
+                        p.validate_protocol_metadata(versions, self.protocol_metadata())
+
+    def test_source_requirement_conflicting_with_protocol_pin_is_rejected(self):
+        for profile in ("baseline", "upgrade"):
+            reqs = requirements(profile) | {"protobuf": Requirement("protobuf>=7")}
+            with self.assertRaisesRegex(ValueError, "Constraint for protobuf conflicts"):
+                p.make_constraints(profile, reqs, base())
+
+    def test_inactive_optional_metadata_does_not_force_protocol_upgrade(self):
+        reqs = self.protocol_metadata()
+        reqs["grpcio"].append('protobuf>=7; extra == "optional"')
+        self.assertEqual(len(p.validate_protocol_metadata(p.PROTOCOL_PINS, reqs)), 4)
+
+    def test_protocol_check_fails_before_import_or_receipt_on_version_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "check.json"
+            versions = dict(p.PROTOCOL_PINS, protobuf="7.36.2")
+            with patch.object(p, "installed", return_value=versions), \
+                 patch.object(p.metadata, "distribution", side_effect=lambda n: SimpleNamespace(requires=self.protocol_metadata()[n])), \
+                 patch.object(p.importlib, "import_module") as imported, \
+                 self.assertRaisesRegex(ValueError, "Protocol dependency mismatch"):
+                p.verify_protocol(SimpleNamespace(output=output))
+            imported.assert_not_called()
+            self.assertFalse(output.exists())
 
 
 class WheelSetTests(unittest.TestCase):

@@ -43,6 +43,7 @@ _INSTALL_WHEELS /wheels/*.whl
 if [ "${SGLANG_PACKAGE_PROFILE:-legacy}" != legacy ]; then
   python3 -m pip check
   mkdir -p /opt/sglang
+  timeout 120s python3 /wheels/packages.py verify-protocol --output /opt/sglang/protocol-check.json
   cp /wheels/constraints.txt /opt/sglang/constraints.txt
   cp /wheels/packages.py /opt/sglang/packages.py
   cp /wheels/wheel-info.json /opt/sglang/wheel-info.json

@@ -8,6 +8,7 @@ import configparser
 import csv
 import email
 import hashlib
+import importlib
 import importlib.metadata as metadata
 import io
 import json
@@ -42,6 +43,12 @@ PROFILES = {
     },
 }
 FIXED = {"flash-attn-4": "4.0.0b19", "apache-tvm-ffi": "0.1.11"}
+PROTOCOL_PINS = {
+    "protobuf": "6.33.6",
+    "grpcio": "1.84.0",
+    "grpcio-health-checking": "1.81.1",
+    "grpcio-reflection": "1.81.1",
+}
 BUILD_SELECTED = {
     "nvidia-cutlass-dsl", "quack-kernels", "apache-tvm-ffi", "cuda-tile",
 }
@@ -59,7 +66,7 @@ LOADER_NAMES = {
 
 
 def controlled_package(name):
-    return (name.startswith(NATIVE_PREFIXES) or name in LOADER_NAMES
+    return (name.startswith(NATIVE_PREFIXES) or name in LOADER_NAMES or name in PROTOCOL_PINS
             or name == "sglang" or name.startswith("flashinfer-"))
 KEY_MODULES = (
     "fused_moe_trtllm_sm100", "fp4_quantization_103", "fmha_gen", "trtllm_utils",
@@ -206,6 +213,7 @@ def make_constraints(profile, requirements, before):
     selected = {name: exact_version(req) for name, req in requirements.items()
                 if exact_version(req) is not None}
     selected.update(FIXED)
+    selected.update(PROTOCOL_PINS)
     selected["flashinfer-cubin"] = selected["flashinfer-python"]
     selected["flashinfer-jit-cache"] = selected["flashinfer-python"]
     if profile == "upgrade":
@@ -276,6 +284,77 @@ def constraints(args):
         "torch_abi": torch_abi(),
     })
 
+
+def protocol_requirements(args):
+    Path(args.output).write_text("\n".join(
+        f"{name}=={version}" for name, version in sorted(PROTOCOL_PINS.items())) + "\n")
+
+
+def validate_protocol_metadata(versions, requirements):
+    for name, expected in PROTOCOL_PINS.items():
+        require(versions.get(name) == expected,
+                f"Protocol dependency mismatch: {name}; expected={expected}; actual={versions.get(name, '<missing>')}")
+    checked = []
+    for owner in PROTOCOL_PINS:
+        for value in requirements[owner]:
+            req = Requirement(value)
+            name = canonicalize_name(req.name)
+            if name not in PROTOCOL_PINS or (req.marker and not req.marker.evaluate({"extra": ""})):
+                continue
+            require(req.specifier.contains(versions[name], prereleases=True),
+                    f"Protocol metadata conflict: {owner} requires {req}; selected {name}=={versions[name]}")
+            checked.append({"distribution": owner, "requirement": str(req)})
+    return checked
+
+
+def verify_protocol(args):
+    selection = {}
+    versions = installed(PROTOCOL_PINS, evidence=selection)
+    requirements = {name: metadata.distribution(name).requires or [] for name in PROTOCOL_PINS}
+    checked = validate_protocol_metadata(versions, requirements)
+    import grpc
+    import google.protobuf
+    require(grpc.__version__ == PROTOCOL_PINS["grpcio"], "Imported grpc runtime differs from selected metadata")
+    require(google.protobuf.__version__ == PROTOCOL_PINS["protobuf"],
+            "Imported protobuf runtime differs from selected metadata")
+    module_rows, modules = [], {}
+    for distribution, prefix in (("grpcio-health-checking", "grpc_health.v1.health"),
+                                 ("grpcio-reflection", "grpc_reflection.v1alpha.reflection")):
+        dist = metadata.distribution(distribution)
+        owned = {str(path) for path in dist.files or []}
+        for suffix in ("_pb2", "_pb2_grpc"):
+            name = prefix + suffix
+            relative = name.replace(".", "/") + ".py"
+            require(relative in owned, f"Generated protocol module is not distribution-owned: {name}")
+            module = importlib.import_module(name)
+            path = Path(dist.locate_file(relative)).resolve()
+            require(Path(module.__file__).resolve() == path and path.is_file(),
+                    f"Imported protocol module differs from selected distribution: {name}")
+            modules[name] = module
+            module_rows.append({"distribution": distribution, "module": name,
+                                "sha256": sha256(path), "bytes": path.stat().st_size})
+    health = modules["grpc_health.v1.health_pb2"]
+    reflection = modules["grpc_reflection.v1alpha.reflection_pb2"]
+    require(callable(modules["grpc_health.v1.health_pb2_grpc"].HealthStub)
+            and callable(modules["grpc_reflection.v1alpha.reflection_pb2_grpc"].ServerReflectionStub),
+            "Generated gRPC stubs are unavailable")
+    messages = [health.HealthCheckRequest(service="protocol-build-check"),
+                health.HealthCheckResponse(status=health.HealthCheckResponse.SERVING),
+                reflection.ServerReflectionRequest(file_containing_symbol="grpc.health.v1.Health"),
+                reflection.ServerReflectionResponse(list_services_response=reflection.ListServiceResponse(
+                    service=[reflection.ServiceResponse(name="grpc.health.v1.Health")]))]
+    roundtrips = []
+    for message in messages:
+        payload = message.SerializeToString(deterministic=True)
+        require(0 < len(payload) <= 4096 and type(message).FromString(payload) == message,
+                "Generated protocol binary roundtrip failed")
+        roundtrips.append({"message": message.DESCRIPTOR.full_name, "bytes": len(payload),
+                           "sha256": hashlib.sha256(payload).hexdigest()})
+    result = {"schema": "sglang-protocol-check/v1", "status": "PASS", "versions": PROTOCOL_PINS,
+              "checked_requirements": checked, "generated_modules": module_rows, "roundtrips": roundtrips,
+              "scope": "Selected metadata, generated imports and binary serialization; no GPU or RPC execution"}
+    write_json(args.output, result)
+    print(json.dumps(result, sort_keys=True))
 
 def architectures(value):
     result = []
@@ -646,6 +725,10 @@ def main():
         if command == "audit":
             sub.add_argument("--wheel-info", required=True)
         sub.set_defaults(function=globals()[command])
+    for command, function in (("protocol-requirements", protocol_requirements), ("verify-protocol", verify_protocol)):
+        sub = subs.add_parser(command)
+        sub.add_argument("--output", required=True)
+        sub.set_defaults(function=function)
     final = subs.add_parser("verify-installed")
     final.add_argument("--profile", choices=PROFILES, required=True)
     final.add_argument("--build-info", required=True)

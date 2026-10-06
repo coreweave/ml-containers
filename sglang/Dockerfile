@@ -104,6 +104,12 @@ else
     --sglang-source /build/sglang --flashinfer-source /build/flashinfer \
     --output /contract/constraints.txt --requirements /contract/build-requirements.txt \
     --snapshot /contract/packages-before.json
+  python3 /build/packages.py protocol-requirements --output /contract/protocol-requirements.txt
+  python3 /opt/build_progress.py --label protocol-install --log-path /build-logs/protocol-install.log -- \
+    python3 -m pip install --no-cache-dir --constraint /contract/constraints.txt \
+    --requirement /contract/protocol-requirements.txt
+  python3 /opt/build_progress.py --label protocol-check --log-path /build-logs/protocol-check.log -- \
+    timeout 120s python3 /build/packages.py verify-protocol --output /contract/protocol-check.json
 fi
 CONTRACT
 
