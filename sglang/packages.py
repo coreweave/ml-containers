@@ -518,7 +518,10 @@ def wheels(args):
 
 def validate_installed(info, versions):
     for name, version in {**info["preserved_versions"], **info.get("resolved_native_versions", {})}.items():
-        require(versions.get(name) == version, f"Inherited native dependency changed: {name}")
+        origin = "builder-resolved" if name in info.get("resolved_native_versions", {}) else "inherited"
+        require(versions.get(name) == version,
+                f"Pinned native/loader dependency mismatch: {name}; origin={origin}; "
+                f"expected={version}; actual={versions.get(name, '<missing>')}")
     for name, version in info["selected_versions"].items():
         # A local CUDA version is permitted for a source-owned public version pin.
         require(name in versions and Requirement(f"{name}=={version}").specifier.contains(versions[name], prereleases=True),

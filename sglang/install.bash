@@ -15,7 +15,30 @@ _PIP_INSTALL() {
   fi
 }
 
-_PIP_INSTALL /wheels/*.whl
+_INSTALL_WHEELS() {
+  if [ "${SGLANG_PACKAGE_PROFILE:-legacy}" = legacy ]; then
+    _PIP_INSTALL "$@"
+    return
+  fi
+  local wheel sglang_count=0
+  local -a requests=()
+  for wheel in "$@"; do
+    case "${wheel##*/}" in
+      sglang-*.whl)
+        requests+=("${wheel}[runai]")
+        sglang_count=$((sglang_count + 1))
+        ;;
+      *) requests+=("${wheel}") ;;
+    esac
+  done
+  if [ "${sglang_count}" -ne 1 ]; then
+    echo "Expected exactly one SGLang wheel for its runtime loader extra; found ${sglang_count}" >&2
+    return 1
+  fi
+  _PIP_INSTALL "${requests[@]}"
+}
+
+_INSTALL_WHEELS /wheels/*.whl
 
 if [ "${SGLANG_PACKAGE_PROFILE:-legacy}" != legacy ]; then
   python3 -m pip check

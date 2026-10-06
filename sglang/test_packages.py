@@ -6,7 +6,9 @@ import hashlib
 import importlib.metadata
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import sys
 from types import SimpleNamespace
@@ -327,6 +329,91 @@ class ArtifactTests(unittest.TestCase):
                 p.architectures(value)
 
 
+class RuntimeLoaderInstallTests(unittest.TestCase):
+    def requests(self, profile, wheels):
+        source = Path(__file__).with_name("install.bash").read_text()
+        function = source.split("_INSTALL_WHEELS() {", 1)[1].split("\n_INSTALL_WHEELS /wheels/*.whl", 1)[0]
+        script = "_INSTALL_WHEELS() {" + function + '\n_PIP_INSTALL() { printf "%s\\0" "$@"; }\n_INSTALL_WHEELS "$@"\n'
+        return subprocess.run(["bash", "-ec", script, "test-install", *map(str, wheels)],
+                              env=os.environ | {"SGLANG_PACKAGE_PROFILE": profile}, capture_output=True, timeout=30)
+
+    def test_profile_requests_only_sglang_extra_and_legacy_unchanged(self):
+        wheels = ["/wheels/flashinfer_python-0.6.18+cu132-py3-none-any.whl",
+                  "/wheels/sglang-0.5.20-py3-none-any.whl", "/wheels/sglang_kernel-0.4.7-py3-none-any.whl"]
+        for profile in ("legacy", "baseline", "upgrade"):
+            with self.subTest(profile=profile):
+                result = self.requests(profile, wheels)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = wheels.copy()
+                if profile != "legacy":
+                    expected[1] += "[runai]"
+                self.assertEqual(result.stdout.decode().rstrip("\0").split("\0"), expected)
+
+    def test_missing_or_ambiguous_sglang_rejected_before_pip(self):
+        for wheels in (["/wheels/flashinfer_python-0.6.18-py3-none-any.whl"],
+                       ["/wheels/sglang-0.5.20-py3-none-any.whl", "/wheels/sglang-0.5.17-py3-none-any.whl"]):
+            with self.subTest(wheels=wheels):
+                result = self.requests("baseline", wheels)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, b"")
+                self.assertIn(b"Expected exactly one SGLang wheel", result.stderr)
+
+    @staticmethod
+    def wheel(root, name, version, metadata=""):
+        stem = name.replace("-", "_") + "-" + version
+        path = root / (stem + "-py3-none-any.whl")
+        prefix = stem + ".dist-info/"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr(prefix + "METADATA", f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n" + metadata)
+            archive.writestr(prefix + "WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+            archive.writestr(prefix + "RECORD", "")
+        return path
+
+    def test_offline_pip_resolves_source_owned_loader_backends_under_constraints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sglang = self.wheel(root, "sglang", "0.5.20", 'Provides-Extra: runai\nRequires-Dist: runai-model-streamer[s3,gcs,azure]>=0.15.7; extra == "runai"\n')
+            loader_metadata = "".join(f'Provides-Extra: {extra}\nRequires-Dist: runai-model-streamer-{extra}>=0.15.7; extra == "{extra}"\n'
+                                      for extra in ("s3", "gcs", "azure"))
+            expected = {"sglang": "0.5.20", "runai-model-streamer": "0.15.7"}
+            self.wheel(root, "runai-model-streamer", "0.15.7", loader_metadata)
+            self.wheel(root, "runai-model-streamer", "0.16.1", loader_metadata)
+            for extra in ("s3", "gcs", "azure"):
+                name = "runai-model-streamer-" + extra
+                expected[name] = "0.15.7"
+                self.wheel(root, name, "0.15.7")
+                self.wheel(root, name, "0.16.1")
+            constraints = root / "constraints.txt"
+            constraints.write_text("".join(f"{name}=={version}\n" for name, version in sorted(expected.items())))
+            for profile in ("legacy", "baseline", "upgrade"):
+                with self.subTest(profile=profile):
+                    requests = self.requests(profile, [sglang])
+                    self.assertEqual(requests.returncode, 0, requests.stderr)
+                    report = root / (profile + ".json")
+                    result = subprocess.run([sys.executable, "-m", "pip", "--isolated", "--disable-pip-version-check",
+                                             "install", "--dry-run", "--ignore-installed", "--no-index", "--no-cache-dir",
+                                             "--find-links", str(root), "--constraint", str(constraints), "--report", str(report),
+                                             *requests.stdout.decode().rstrip("\0").split("\0")],
+                                            capture_output=True, timeout=30)
+                    self.assertEqual(result.returncode, 0, result.stderr.decode())
+                    resolved = {p.canonicalize_name(item["metadata"]["name"]): item["metadata"]["version"]
+                                for item in json.loads(report.read_text())["install"]}
+                    self.assertEqual(resolved, {"sglang": "0.5.20"} if profile == "legacy" else expected)
+            self.wheel(root, "runai-model-streamer", "0.15.6", loader_metadata)
+            constraints.write_text("runai-model-streamer==0.15.6\n")
+            requests = self.requests("baseline", [sglang])
+            self.assertEqual(requests.returncode, 0, requests.stderr)
+            incompatible = subprocess.run([sys.executable, "-m", "pip", "--isolated", "--disable-pip-version-check",
+                                           "install", "--dry-run", "--ignore-installed", "--no-index", "--no-cache-dir",
+                                           "--find-links", str(root), "--constraint", str(constraints),
+                                           "--report", str(root / "incompatible.json"),
+                                           *requests.stdout.decode().rstrip("\0").split("\0")],
+                                          capture_output=True, timeout=30)
+            self.assertNotEqual(incompatible.returncode, 0)
+            self.assertIn(b"ResolutionImpossible", incompatible.stderr)
+            self.assertFalse((root / "incompatible.json").exists())
+
+
 class InstalledTests(unittest.TestCase):
     def test_compact_record_keeps_validated_provider_and_payload_identity(self):
         row = wheel_rows()[-1]
@@ -387,7 +474,7 @@ class InstalledTests(unittest.TestCase):
                                                       "nccl4py": "0.5.0", "requests": "2.0"})
         self.assertEqual(resolved, {"nccl4py": "0.5.0"})
         info = {"preserved_versions": {}, "selected_versions": {}, "wheels": [], "resolved_native_versions": resolved}
-        with self.assertRaisesRegex(ValueError, "Inherited native dependency changed"):
+        with self.assertRaisesRegex(ValueError, "Pinned native/loader dependency mismatch"):
             p.validate_installed(info, {"nccl4py": "0.6.0"})
 
     def test_optional_constraints_do_not_force_unused_libraries(self):
@@ -401,8 +488,20 @@ class InstalledTests(unittest.TestCase):
     def test_preserved_native_drift_rejected(self):
         info = {"preserved_versions": base(), "selected_versions": {}, "wheels": []}
         versions = base(); versions["nixl-cu13"] = "1.3.1"
-        with self.assertRaisesRegex(ValueError, "Inherited native dependency changed: nixl-cu13"):
+        with self.assertRaisesRegex(ValueError, "Pinned native/loader dependency mismatch: nixl-cu13"):
             p.validate_installed(info, versions)
+
+    def test_missing_or_changed_loader_keeps_exact_audit_with_diagnostics(self):
+        for origin in ("preserved_versions", "resolved_native_versions"):
+            info = {"preserved_versions": {}, "resolved_native_versions": {}, "selected_versions": {}, "wheels": []}
+            info[origin] = {"runai-model-streamer": "0.15.7"}
+            p.validate_installed(info, {"runai-model-streamer": "0.15.7"})
+            for observed in ({}, {"runai-model-streamer": "0.16.1"}):
+                with self.subTest(origin=origin, observed=observed), self.assertRaises(ValueError) as raised:
+                    p.validate_installed(info, observed)
+                self.assertIn("expected=0.15.7", str(raised.exception))
+                self.assertIn("actual=" + observed.get("runai-model-streamer", "<missing>"), str(raised.exception))
+                self.assertIn("origin=" + ("inherited" if origin == "preserved_versions" else "builder-resolved"), str(raised.exception))
 
     def test_local_cuda_source_version_accepted(self):
         info = {"preserved_versions": {}, "selected_versions": {"flashinfer-python": "0.7.0.post1"}, "wheels": []}
