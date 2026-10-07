@@ -74,7 +74,7 @@ _CMAKE_PARALLEL=32
 _COMPILE_THREADS=16
 # Bound both job-level and nvcc-internal parallelism: the previous ARM settings
 # (20 jobs, 10 compiler threads) OOM-killed the builder on SGLang v0.5.21.
-[ "$(uname -m)" != 'aarch64' ] || { _CMAKE_PARALLEL=4; _COMPILE_THREADS=1; }
+[ "$(uname -m)" != 'aarch64' ] || { _CMAKE_PARALLEL=8; _COMPILE_THREADS=4; }
 CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSGL_KERNEL_COMPILE_THREADS=${_COMPILE_THREADS}" \
 CMAKE_BUILD_PARALLEL_LEVEL="${_CMAKE_PARALLEL}" \
   python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
