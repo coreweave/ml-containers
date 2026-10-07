@@ -1,60 +1,17 @@
 #!/bin/bash
-set -xeo pipefail
+set -eo pipefail
 export DEBIAN_FRONTEND=noninteractive
-
+export PATH="/root/.cargo/bin:${PATH}"
 TORCH_CUDA_ARCH_LIST=''
-
 while getopts 'a:' OPT; do
   case "${OPT}" in
     a) TORCH_CUDA_ARCH_LIST="${OPTARG}" ;;
     *) exit 92 ;;
   esac
 done
-
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0 10.0+PTX}"
-
-mkdir -p /wheels/logs
-
-_BUILD() { python3 -m build -w -n -v -o /wheels "${1:-.}"; }
-_LOG() { tee -a "/wheels/logs/${1:?}"; }
-_CONSTRAINTS="$(python3 -m pip list | sed -En 's@^(torch(vision|audio)?)\s+(\S+)$@\1==\3@p')"
-_PIP_INSTALL() {
-  python3 -m pip install --no-cache-dir \
-  --constraint=/dev/stdin <<< "${_CONSTRAINTS}" \
-  "$@"
-}
-
-# Install build dependencies explicitly because wheel builds disable isolation.
-_PIP_INSTALL -U pip 'setuptools<82' wheel build ninja \
-  'scikit-build-core>=0.10' 'setuptools-scm>=8.0' 'setuptools-rust>=1.11'
-
-# protobuf-compiler: needed by tonic-build (via prost-build) when compiling the
-# sglang-grpc Rust crate.
-apt-get -qq update && apt-get -q install --no-install-recommends -y \
-  protobuf-compiler
-
-# rustup only; --default-toolchain none defers to rust-toolchain.toml on first cargo run.
-curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup.rs \
-  | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
-export PATH="/root/.cargo/bin:${PATH}"
-
-# sglang (includes sglang-kernel)
-: "${SGLANG_COMMIT:?}"
-(
-echo 'Building sglang'
-git clone --recursive --filter=blob:none https://github.com/sgl-project/sglang
-cd sglang
-git checkout "${SGLANG_COMMIT}"
-
-# Relax exact torch-family version pins to be compatible with the base image
-TORCH_VERSION="$(python3 -c 'import torch; print(torch.__version__.partition("+")[0])')"
-sed -Ei \
-  -e "s@\"torch==[0-9]+\.[0-9]+\.[0-9]+\"@\"torch>=${TORCH_VERSION}\"@" \
-  -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.11.0"@' \
-  -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
-  -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
-  python/pyproject.toml
-
+_RUN() { local label="$1"; shift; python3 /opt/build_progress.py --label "$label" --log-path "/build-logs/${label}.log" -- "$@"; }
+cd /build/sglang
 # Surface the Rust toolchain file at the repo root so rustup's CWD-upward
 # walk finds it when setuptools-rust invokes cargo from python/.
 # Since v0.5.16 the toolchain file lives at the cargo workspace root (rust/)
@@ -77,14 +34,22 @@ _COMPILE_THREADS=16
 [ "$(uname -m)" != 'aarch64' ] || { _CMAKE_PARALLEL=8; _COMPILE_THREADS=4; }
 CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSGL_KERNEL_COMPILE_THREADS=${_COMPILE_THREADS}" \
 CMAKE_BUILD_PARALLEL_LEVEL="${_CMAKE_PARALLEL}" \
-  python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels . |& _LOG sglang.log
+  _RUN sglang-kernel python3 -m pip wheel --no-build-isolation --no-deps -v -w /wheels .
 )
 
 # Build sglang python package. Since v0.5.16 setup.py auto-discovers every
 # crate in the rust/ cargo workspace declaring [package.metadata.sglang]
 # python-module, so this builds sglang-grpc, sglang-mm and sglang-server (the
 # CUDA pyproject.toml sets no [tool.sglang] rust-extensions allowlist).
-_BUILD python |& _LOG sglang.log
-)
+_RUN sglang-python python3 -m build -w -n -v -o /wheels python
+if [ "${SGLANG_PACKAGE_PROFILE}" != legacy ]; then
+  FLASHINFER_ARCHITECTURES="$(cat /wheels/flashinfer-architectures.txt)"
+  _RUN package-wheel-audit python3 /build/packages.py wheels \
+    --profile "${SGLANG_PACKAGE_PROFILE}" \
+    --sglang-source /build/sglang --flashinfer-source /build/flashinfer \
+    --wheel-dir /wheels --architectures "${FLASHINFER_ARCHITECTURES}" \
+    --snapshot /wheels/packages-before.json --constraints /wheels/constraints.txt \
+    --cuobjdump /usr/local/cuda/bin/cuobjdump --output /wheels/wheel-info.json
+fi
 
 apt-get clean
