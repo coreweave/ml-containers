@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -82,6 +83,40 @@ class BuildProgressTests(unittest.TestCase):
             self.assertIn(value, self.log.read_text())
             self.assertNotIn(value.encode(), result.stdout + result.stderr)
         self.assertIn("[REDACTED]", events[-1]["tail"])
+
+    def load(self):
+        spec = importlib.util.spec_from_file_location("build_progress_under_test", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_label_cut_by_tail_window_does_not_expose_its_value(self):
+        module = self.load()
+        filler = ("f" * 383 + "\n") * 39
+        value = "s" * (module.TAIL_BYTES - len(filler) - 1)
+        self.log.write_text("preamble\n" * 3 + "password=" + value + "\n" + filler)
+        # The tail window starts exactly after "password=", so only the value sits inside it.
+        self.assertEqual(self.log.stat().st_size - module.TAIL_BYTES, len("preamble\n" * 3 + "password="))
+        tail = module.failure_tail(self.log, "label")["tail"]
+        self.assertNotIn("ssss", tail)
+        self.assertEqual(tail.splitlines(), ["f" * 383] * 39)
+
+    def test_huge_record_with_label_before_window_is_redacted(self):
+        module = self.load()
+        self.log.write_text("password=" + "y" * 30000 + " END")
+        tail = module.failure_tail(self.log, "label")["tail"]
+        self.assertNotIn("yyyy", tail)
+        self.assertIn("[REDACTED]", tail)
+        self.assertTrue(tail.endswith("END"))
+
+    def test_output_bound_drops_whole_records_first(self):
+        module = self.load()
+        lines = ["record-" + str(n) + "-" + "z" * 990 for n in range(40)]
+        self.log.write_text("\n".join(lines) + "\n")
+        event = module.failure_tail(self.log, "label")
+        self.assertLessEqual(len(module.encoded(event).encode()), module.TAIL_BYTES)
+        kept = event["tail"].splitlines()
+        self.assertEqual(kept, lines[-len(kept):])
 
     def test_missing_executable_returns_127_without_echoing_it(self):
         missing = str(self.root / "private-command-name")

@@ -12,6 +12,8 @@ import time
 
 TAIL_BYTES = 16 * 1024
 TAIL_LINES = 40
+# How far back to look for the start of a record that the tail window cuts in half.
+RECORD_SCAN_BYTES = 1024 * 1024
 SECRET_NAME = re.compile(r"TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|ACCESS_KEY|PRIVATE_KEY|AUTHORIZATION", re.I)
 SENSITIVE_FIELD = re.compile(r"(?i)(\b(?:token|password|passwd|secret|credential|authorization|access[_-]?key)\b\s*(?:[:=]\s*|\s+))(?:Bearer\s+)?[^\s,;]+")
 
@@ -29,18 +31,49 @@ def emit(event):
         sys.stdout = open(os.devnull, "w")
 
 
-def failure_tail(path, label):
+def tail_records(path):
+    """Return the last complete records of the log; a record the window cuts is dropped or completed.
+
+    Redaction below keys on labels such as "password=". A window that starts inside a record
+    would hide the label while keeping the value, so the partial first record is never kept
+    as is: it is dropped when a complete record follows, or completed by reading back to the
+    record start (bounded by RECORD_SCAN_BYTES) when the window holds no newline at all.
+    """
+    size = path.stat().st_size
+    start = max(0, size - TAIL_BYTES)
     with path.open("rb") as stream:
-        stream.seek(max(0, path.stat().st_size - TAIL_BYTES))
-        raw = stream.read(TAIL_BYTES)
-    text = "\n".join(raw.decode("utf-8", errors="replace").splitlines()[-TAIL_LINES:])
+        stream.seek(start)
+        raw = stream.read()
+        if start > 0:
+            newline = raw.find(b"\n")
+            if newline >= 0:
+                raw = raw[newline + 1:]
+            else:
+                scan_start = max(0, start - RECORD_SCAN_BYTES)
+                stream.seek(scan_start)
+                head = stream.read(start - scan_start)
+                raw = head[head.rfind(b"\n") + 1:] + raw
+    return raw.decode("utf-8", errors="replace").splitlines()[-TAIL_LINES:]
+
+
+def redact(text):
     for name, value in os.environ.items():
         if value and SECRET_NAME.search(name):
             text = text.replace(value, "[REDACTED]")
     text = SENSITIVE_FIELD.sub(lambda match: match.group(1) + "[REDACTED]", text)
-    text = re.sub(r"(https?://)[^/\s:@]+:[^/\s@]+@", r"\1[REDACTED]@", text)
-    event = {"event": "build_failure_tail", "label": label, "tail": text}
+    return re.sub(r"(https?://)[^/\s:@]+:[^/\s@]+@", r"\1[REDACTED]@", text)
+
+
+def failure_tail(path, label):
+    lines = redact("\n".join(tail_records(path))).splitlines()
+    event = {"event": "build_failure_tail", "label": label, "tail": "\n".join(lines)}
+    # Fit the output bound by dropping whole redacted records first; cutting inside a record
+    # could otherwise separate a label from its value.
+    while len(lines) > 1 and len(encoded(event).encode()) > TAIL_BYTES:
+        lines.pop(0)
+        event["tail"] = "\n".join(lines)
     if len(encoded(event).encode()) > TAIL_BYTES:
+        text = event["tail"]
         low, high = 0, len(text)
         while low < high:
             middle = (low + high) // 2
