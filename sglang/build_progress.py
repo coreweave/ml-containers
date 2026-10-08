@@ -15,7 +15,9 @@ TAIL_LINES = 40
 # How far back to look for the start of a record that the tail window cuts in half.
 RECORD_SCAN_BYTES = 1024 * 1024
 SECRET_NAME = re.compile(r"TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|ACCESS_KEY|PRIVATE_KEY|AUTHORIZATION", re.I)
-SENSITIVE_FIELD = re.compile(r"(?i)(\b(?:token|password|passwd|secret|credential|authorization|access[_-]?key)\b\s*(?:[:=]\s*|\s+))(?:Bearer\s+)?[^\s,;]+")
+SENSITIVE_FIELD = re.compile(
+    r"""(?i)(\b(?:token|password|passwd|secret|credential|authorization|access[_-]?key)\b["']?\s*(?:[:=]\s*|\s+))(?:Bearer\s+)?(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)"""
+)
 
 
 def encoded(event):
@@ -52,7 +54,11 @@ def tail_records(path):
                 scan_start = max(0, start - RECORD_SCAN_BYTES)
                 stream.seek(scan_start)
                 head = stream.read(start - scan_start)
-                raw = head[head.rfind(b"\n") + 1:] + raw
+                record_start = head.rfind(b"\n")
+                if scan_start > 0 and record_start < 0:
+                    raw = b""
+                else:
+                    raw = head[record_start + 1:] + raw
     return raw.decode("utf-8", errors="replace").splitlines()[-TAIL_LINES:]
 
 

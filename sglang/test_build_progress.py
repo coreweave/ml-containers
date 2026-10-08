@@ -118,6 +118,19 @@ class BuildProgressTests(unittest.TestCase):
         kept = event["tail"].splitlines()
         self.assertEqual(kept, lines[-len(kept):])
 
+    def test_quoted_sensitive_values_are_redacted(self):
+        module = self.load()
+        self.assertEqual(module.redact('"password": "a b c", "x": 1'), '"password": [REDACTED], "x": 1')
+        self.assertEqual(module.redact("secret='x y' tail"), "secret=[REDACTED] tail")
+        self.assertEqual(module.redact("token: Bearer abc.def ghi"), "token: [REDACTED] ghi")
+        self.assertEqual(module.redact("tokenizer=gpt2 password_hash=abc"), "tokenizer=gpt2 password_hash=abc")
+
+    def test_partial_record_beyond_scan_bound_is_dropped(self):
+        module = self.load()
+        with self.log.open("wb") as stream:
+            stream.write(b"password=" + b"y" * (module.RECORD_SCAN_BYTES + module.TAIL_BYTES) + b" END")
+        self.assertEqual(module.failure_tail(self.log, "label")["tail"], "")
+
     def test_missing_executable_returns_127_without_echoing_it(self):
         missing = str(self.root / "private-command-name")
         result = subprocess.run(self.argv([missing]), capture_output=True, timeout=5)
