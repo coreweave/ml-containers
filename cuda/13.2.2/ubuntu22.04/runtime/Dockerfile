@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: 2019-2021 NVIDIA CORPORATION
+# SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+ARG IMAGE_NAME
+ARG BASE_IMAGE=${IMAGE_NAME}:13.2.2-base-ubuntu22.04
+FROM ${BASE_IMAGE} AS base
+
+ENV NV_CUDA_LIB_VERSION=13.2.2-1
+
+FROM base AS base-amd64
+
+ENV NV_NVTX_VERSION=13.2.86-1
+ENV NV_LIBNPP_VERSION=13.1.0.59-1
+ENV NV_LIBNPP_PACKAGE=libnpp-13-2=${NV_LIBNPP_VERSION}
+ENV NV_LIBCUSPARSE_VERSION=12.7.10.12-1
+
+ENV NV_LIBCUBLAS_PACKAGE_NAME=libcublas-13-2
+ENV NV_LIBCUBLAS_VERSION=13.4.1.3-1
+ENV NV_LIBCUBLAS_PACKAGE=${NV_LIBCUBLAS_PACKAGE_NAME}=${NV_LIBCUBLAS_VERSION}
+
+ENV NV_LIBNCCL_PACKAGE_NAME=libnccl2
+ENV NV_LIBNCCL_PACKAGE_VERSION=2.30.4-1
+ENV NCCL_VERSION=2.30.4-1
+ENV NV_LIBNCCL_PACKAGE=${NV_LIBNCCL_PACKAGE_NAME}=${NV_LIBNCCL_PACKAGE_VERSION}+cuda13.2
+
+FROM base AS base-arm64
+
+ENV NV_NVTX_VERSION=13.2.86-1
+ENV NV_LIBNPP_VERSION=13.1.0.59-1
+ENV NV_LIBNPP_PACKAGE=libnpp-13-2=${NV_LIBNPP_VERSION}
+ENV NV_LIBCUSPARSE_VERSION=12.7.10.12-1
+
+ENV NV_LIBCUBLAS_PACKAGE_NAME=libcublas-13-2
+ENV NV_LIBCUBLAS_VERSION=13.4.1.3-1
+ENV NV_LIBCUBLAS_PACKAGE=${NV_LIBCUBLAS_PACKAGE_NAME}=${NV_LIBCUBLAS_VERSION}
+
+ENV NV_LIBNCCL_PACKAGE_NAME=libnccl2
+ENV NV_LIBNCCL_PACKAGE_VERSION=2.30.4-1
+ENV NCCL_VERSION=2.30.4-1
+ENV NV_LIBNCCL_PACKAGE=${NV_LIBNCCL_PACKAGE_NAME}=${NV_LIBNCCL_PACKAGE_VERSION}+cuda13.2
+
+FROM base-${TARGETARCH}
+
+ARG TARGETARCH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cuda-libraries-13-2=${NV_CUDA_LIB_VERSION} \
+    ${NV_LIBNPP_PACKAGE} \
+    cuda-nvtx-13-2=${NV_NVTX_VERSION} \
+    libcusparse-13-2=${NV_LIBCUSPARSE_VERSION} \
+    ${NV_LIBCUBLAS_PACKAGE} \
+    ${NV_LIBNCCL_PACKAGE} \
+    && rm -rf /var/lib/apt/lists/*
+
+# Keep apt from auto upgrading the cublas and nccl packages. See https://gitlab.com/nvidia/container-images/cuda/-/issues/88
+RUN apt-mark hold ${NV_LIBCUBLAS_PACKAGE_NAME} ${NV_LIBNCCL_PACKAGE_NAME}
+
+# Add entrypoint items
+ADD https://gitlab.com/nvidia/container-images/cuda.git#121385f98a06bf94a52326896dddf0b87d83870e:entrypoint.d \
+    /opt/nvidia/entrypoint.d/
+ADD --checksum=sha256:de08317631ccc093aba39d5f2bc1e2ca9070cff49bc9a11eb550e6e8794de7f9 --chmod=755 \
+    https://gitlab.com/nvidia/container-images/cuda/-/raw/121385f98a06bf94a52326896dddf0b87d83870e/nvidia_entrypoint.sh \
+    /opt/nvidia/nvidia_entrypoint.sh
+ENV NVIDIA_PRODUCT_NAME="CUDA"
+ENTRYPOINT ["/opt/nvidia/nvidia_entrypoint.sh"]
