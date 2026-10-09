@@ -1,0 +1,68 @@
+on:
+  workflow_call:
+    inputs:
+      cuda-version:
+        required: true
+        type: string
+      os:
+        required: true
+        type: string
+
+jobs:
+  base:
+    name: Build cuda:base
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: cuda
+      folder: cuda/${{ inputs.cuda-version }}/${{ inputs.os }}/base
+      tag-suffix: ${{ inputs.cuda-version }}-base-${{ inputs.os }}
+      cache-key: ${{ inputs.cuda-version }}-base-${{ inputs.os }}
+  runtime:
+    name: Build cuda:runtime
+    needs: base
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: cuda
+      folder: cuda/${{ inputs.cuda-version }}/${{ inputs.os }}/runtime
+      tag-suffix: ${{ inputs.cuda-version }}-runtime-${{ inputs.os }}
+      cache-key: ${{ inputs.cuda-version }}-runtime-${{ inputs.os }}
+      build-args: |
+        BASE_IMAGE=${{ needs.base.outputs.tags }}
+  devel:
+    name: Build cuda:devel
+    needs: runtime
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: cuda
+      folder: cuda/${{ inputs.cuda-version }}/${{ inputs.os }}/devel
+      tag-suffix: ${{ inputs.cuda-version }}-devel-${{ inputs.os }}
+      cache-key: ${{ inputs.cuda-version }}-devel-${{ inputs.os }}
+      build-args: |
+        BASE_IMAGE=${{ needs.runtime.outputs.tags }}
+  cudnn-runtime:
+    name: Build cuda:cudnn-runtime
+    needs: runtime
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: cuda
+      folder: cuda/${{ inputs.cuda-version }}/${{ inputs.os }}/runtime/cudnn
+      tag-suffix: ${{ inputs.cuda-version }}-cudnn-runtime-${{ inputs.os }}
+      cache-key: ${{ inputs.cuda-version }}-cudnn-runtime-${{ inputs.os }}
+      build-args: |
+        BASE_IMAGE=${{ needs.runtime.outputs.tags }}
+  cudnn-devel:
+    name: Build cuda:cudnn-devel
+    needs: devel
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      image-name: cuda
+      folder: cuda/${{ inputs.cuda-version }}/${{ inputs.os }}/devel/cudnn
+      tag-suffix: ${{ inputs.cuda-version }}-cudnn-devel-${{ inputs.os }}
+      cache-key: ${{ inputs.cuda-version }}-cudnn-devel-${{ inputs.os }}
+      build-args: |
+        BASE_IMAGE=${{ needs.devel.outputs.tags }}

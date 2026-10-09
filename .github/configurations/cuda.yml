@@ -1,0 +1,2 @@
+cuda: [ 13.2.2 ]
+os: [ ubuntu22.04, ubuntu24.04 ]
