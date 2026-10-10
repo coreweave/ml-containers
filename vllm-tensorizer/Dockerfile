@@ -91,9 +91,19 @@ RUN /build/runai-streamer.sh "$TARGETARCH"
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
 ARG VLLM_COMMIT
-RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
-      https://github.com/vllm-project/vllm && \
+# VLLM_REPO defaults to upstream. A fork (for example Reflection's Beam fork,
+# Inferact/lin) is cloned from the same URL shape; when the repository is
+# private, the build secret vllm_git_token is used for the clone only and is
+# not written into the image.
+ARG VLLM_REPO="https://github.com/vllm-project/vllm"
+RUN --mount=type=secret,id=vllm_git_token \
+    url="${VLLM_REPO}" && \
+    if [ -s /run/secrets/vllm_git_token ]; then \
+      url="$(printf '%s' "${VLLM_REPO}" | sed -E "s#^https://#https://x-access-token:$(cat /run/secrets/vllm_git_token)@#")"; \
+    fi && \
+    git clone --filter=tree:0 --no-single-branch --no-checkout "${url}" vllm && \
     cd vllm && \
+    git remote set-url origin "${VLLM_REPO}" && \
     git checkout "${VLLM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
