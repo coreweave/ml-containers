@@ -249,7 +249,22 @@ RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/
       cd "${DIR}" && \
       /opt/build.sh; \
     ); done && \
-    ( cd flashinfer-jit-cache && CXX_WRAPPED=g++-12 CC_WRAPPED=gcc-12 /opt/build.sh )
+    if [ -d flashinfer-jit-cache-provider ]; then \
+      # FlashInfer >= 0.7 splits the JIT cache into one provider wheel per CUDA
+      # architecture plus a metadata-only shim that depends on them. Build a
+      # provider for each architecture FlashInfer compiles ahead of time (8.0 and
+      # newer; 7.5 and 8.6 fall back to runtime JIT, matching upstream's
+      # published provider set), then the shim with the same list.
+      PROVIDER_ARCHS="$(echo "${FLASHINFER_CUDA_ARCH_LIST}" | tr ' ' '\n' | grep -v -E '^(7\.5|8\.6)$' | tr '\n' ' ')" && \
+      echo "jit-cache providers: ${PROVIDER_ARCHS}" && \
+      for ARCH in ${PROVIDER_ARCHS}; do ( \
+        cd flashinfer-jit-cache-provider && \
+        FLASHINFER_JIT_CACHE_PROVIDER_ARCH="${ARCH}" CXX_WRAPPED=g++-12 CC_WRAPPED=gcc-12 /opt/build.sh; \
+      ) || exit 1; done && \
+      ( cd flashinfer-jit-cache && FLASHINFER_JIT_CACHE_PROVIDER_ARCHS="${PROVIDER_ARCHS}" /opt/build.sh ); \
+    else \
+      ( cd flashinfer-jit-cache && CXX_WRAPPED=g++-12 CC_WRAPPED=gcc-12 /opt/build.sh ); \
+    fi
 
 WORKDIR /wheels
 
