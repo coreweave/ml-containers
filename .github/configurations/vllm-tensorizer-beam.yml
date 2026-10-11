@@ -1,9 +1,10 @@
 include:
-  # Reflection Beam vLLM fork (github.com/Inferact/lin, branch lin-tracking, 2026-10-09).
+  # Reflection Beam vLLM fork (github.com/Inferact/lin): lin-tracking 8d75fd27 (2026-10-09) plus the two
+  # commits of PR #77 (lenient parameter end in the tool-call grammar), head ffa6cba8 (2026-10-11).
   # The repository is private: the build needs the VLLM_GIT_TOKEN repository secret.
   # FlashInfer is the fork's pinned release v0.7.0.post1. vllm-commit is replaced by the
   # commit Reflection names for launch.
-  - vllm-commit: '8d75fd2795bfc2abef0d469c3219e29c25c190d2'
+  - vllm-commit: 'ffa6cba82cac65d62dff9a3edbcd5a738412dd37'
     vllm-repo: 'https://github.com/Inferact/lin'
     flashinfer-commit: '946200de1ae94fc93fdd0926f0a13afd1fa7f0f1'
     lmcache-commit: 'v0.4.7'
