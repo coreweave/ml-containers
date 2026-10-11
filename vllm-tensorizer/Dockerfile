@@ -168,7 +168,14 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
-    bash build_rust.sh && \
+    if [ -f requirements/build/rust.txt ]; then \
+      python3 -m pip install --no-cache-dir -r requirements/build/rust.txt; \
+    fi && \
+    if [ -f tools/build_rust.sh ]; then \
+      bash tools/build_rust.sh; \
+    else \
+      bash build_rust.sh; \
+    fi && \
     install -D -m755 vllm/vllm-rs /out/vllm-rs && \
     cp vllm/_rust_*.so /out/
 
@@ -192,7 +199,9 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' \
       grpcio-tools 'setuptools-rust>=1.9.0' && \
-    if [ -f 'use_existing_torch.py' ]; then \
+    if [ -f 'tools/use_existing_torch.py' ]; then \
+      python3 tools/use_existing_torch.py --prefix; \
+    elif [ -f 'use_existing_torch.py' ]; then \
       python3 use_existing_torch.py; \
     else \
       git cat-file blob \

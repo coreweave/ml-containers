@@ -50,5 +50,6 @@ jobs:
         VLLM_COMMIT=${{ matrix.vllm-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
         LMCACHE_COMMIT=${{ matrix.lmcache-commit }}
+        DEEPGEMM_COMMIT=${{ matrix.deepgemm-commit || 'e1f418c2a4f20818221f6b0e578b4c2f634d4c3f' }}
         BUILDER_BASE_IMAGE=${{ matrix.builder-base-image }}
         FINAL_BASE_IMAGE=${{ matrix.final-base-image }}

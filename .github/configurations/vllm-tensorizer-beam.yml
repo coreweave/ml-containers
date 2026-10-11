@@ -7,5 +7,7 @@ include:
     vllm-repo: 'https://github.com/Inferact/lin'
     flashinfer-commit: '946200de1ae94fc93fdd0926f0a13afd1fa7f0f1'
     lmcache-commit: 'v0.4.7'
+    # _DEEPGEMM_UPSTREAM_TAG in the fork's cmake/external_projects/deepgemm.cmake at vllm-commit.
+    deepgemm-commit: '1e1842a833699298f7afc02eefb2ed168fff6938'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'
     final-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'
