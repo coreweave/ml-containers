@@ -177,7 +177,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
       bash build_rust.sh; \
     fi && \
     install -D -m755 vllm/vllm-rs /out/vllm-rs && \
-    cp vllm/_rust_*.so /out/
+    # vLLM main no longer builds PyO3 extension modules; copy them only when present.
+    for f in vllm/_rust_*.so; do [ -e "$f" ] && cp "$f" /out/; done; true
 
 
 FROM builder-base AS vllm-builder
@@ -209,7 +210,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
         | python3 -; \
     fi && \
     install -D -m755 /opt/rust-artifacts/vllm-rs vllm/vllm-rs && \
-    cp /opt/rust-artifacts/_rust_*.so vllm/ && \
+    for f in /opt/rust-artifacts/_rust_*.so; do [ -e "$f" ] && cp "$f" vllm/; done && \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
