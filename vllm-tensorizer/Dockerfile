@@ -103,10 +103,10 @@ RUN --mount=type=secret,id=vllm_git_token \
     fi && \
     git clone --filter=tree:0 --no-single-branch --no-checkout "${url}" vllm && \
     cd vllm && \
-    git remote set-url origin "${VLLM_REPO}" && \
     git checkout "${VLLM_COMMIT}" && \
     git submodule update --init --recursive --jobs 8 \
-      --depth 1 --filter=tree:0
+      --depth 1 --filter=tree:0 && \
+    git remote set-url origin "${VLLM_REPO}"
 
 FROM alpine/git:2.36.3 AS flashinfer-downloader
 WORKDIR /git
