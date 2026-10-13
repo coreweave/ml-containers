@@ -158,7 +158,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
-    bash build_rust.sh && \
+    bash tools/build_rust.sh && \
     install -D -m755 vllm/vllm-rs /out/vllm-rs && \
     cp vllm/_rust_*.so /out/
 
