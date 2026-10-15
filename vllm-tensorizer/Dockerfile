@@ -22,7 +22,7 @@ RUN ldconfig
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-      git ninja-build cmake gcc-12 g++-12 libdw-dev && \
+      git ninja-build cmake libdw-dev && \
     apt-get clean && \
     python3 -m pip install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
 
@@ -98,16 +98,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
-FROM alpine/git:2.36.3 AS flashinfer-downloader
-WORKDIR /git
-ARG FLASHINFER_COMMIT
-RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
-      https://github.com/flashinfer-ai/flashinfer && \
-    cd flashinfer && \
-    git checkout "${FLASHINFER_COMMIT}" && \
-    git submodule update --init --recursive --jobs 8 \
-      --depth 1 --filter=tree:0
-
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
 ARG LMCACHE_COMMIT
@@ -158,7 +148,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
-    bash build_rust.sh && \
+    bash tools/build_rust.sh && \
     install -D -m755 vllm/vllm-rs /out/vllm-rs && \
     cp vllm/_rust_*.so /out/
 
@@ -195,41 +185,6 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
       /opt/build.sh
-
-WORKDIR /wheels
-
-
-FROM builder-base AS flashinfer-builder
-RUN --mount=type=bind,from=flashinfer-downloader,source=/git/flashinfer,target=/workspace,rw \
-    --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && \
-    . /opt/arch_flags.sh && \
-    export TORCH_CUDA_ARCH_LIST="$(echo "${TORCH_CUDA_ARCH_LIST}" | sed 's@[67]\.0 \+@@g')" && \
-    [ -n "${CUDA_VERSION}" ] && \
-    python3 -m pip uninstall -y flash-attn-4 && \
-    CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl==4.7.1' && \
-    if [ "${CUDA_VERSION%%.*}" = "13" ]; then \
-      CUTLASS_DSL_PACKAGE='nvidia-cutlass-dsl[cu13]==4.7.1'; \
-    fi && \
-    python3 -m pip install --no-cache-dir \
-      requests nvidia-ml-py ninja tqdm filelock \
-      'nvidia-cudnn-frontend>=1.25.0' \
-      "cuda-python~=${CUDA_VERSION%.*}" \
-      "nvidia-nvshmem-cu${CUDA_VERSION%%.*}<3.6" \
-      "${CUTLASS_DSL_PACKAGE}" \
-      'quack-kernels==0.6.5' \
-      'apache-tvm-ffi==0.1.11' && \
-    export FLASHINFER_LOCAL_VERSION="$(echo "${CUDA_VERSION}" | sed -E 's@([[:digit:]]+)\.([[:digit:]]+).*$@cu\1\2@')" \
-      FLASHINFER_AOT_USE_PY_LIMITED_API='0' \
-      FLASHINFER_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" && \
-    for DIR in . flashinfer-cubin; do ( \
-      cd "${DIR}" && \
-      /opt/build.sh; \
-    ); done && \
-    ( cd flashinfer-jit-cache && CXX_WRAPPED=g++-12 CC_WRAPPED=gcc-12 /opt/build.sh )
 
 WORKDIR /wheels
 
@@ -351,9 +306,9 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
 FROM ${FINAL_BASE_IMAGE} AS base
 
 ARG VLLM_COMMIT
-ARG FLASHINFER_COMMIT
+ARG FLASHINFER_VERSION='0.7.0.post1'
 LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
-      com.coreweave.vllm.flashinfer-ref="${FLASHINFER_COMMIT}"
+      com.coreweave.vllm.flashinfer-version="${FLASHINFER_VERSION}"
 
 WORKDIR /workspace
 
@@ -363,12 +318,12 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.30 ships its own namespaced FA4 implementation. Remove the inherited
+# vLLM 0.31 ships its own namespaced FA4 implementation. Remove the inherited
 # global FA4 package because its metadata hard-pins CUTLASS DSL 4.6.0.dev0 and
 # apache-tvm-ffi >=0.1.12, which conflict with vLLM's 4.7.1/0.1.11 contract.
 RUN python3 -m pip uninstall -y flash-attn-4
 
-# vLLM 0.30 pins nvidia-cutlass-dsl==4.7.1 and quack-kernels==0.6.5.
+# vLLM 0.31 pins nvidia-cutlass-dsl==4.7.1 and quack-kernels==0.6.5.
 # Keep the constraint explicit so the FlashInfer and vLLM installs use the same
 # CUTLASS DSL contract.
 # LMCache v0.4.7 caps opentelemetry-api at 1.40.0. Pin the matching
@@ -377,6 +332,8 @@ RUN python3 -m pip uninstall -y flash-attn-4
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
+    echo 'nvidia-cutlass-dsl==4.7.1' >> /tmp/constraints.txt && \
+    echo 'apache-tvm-ffi==0.1.11' >> /tmp/constraints.txt && \
     echo 'quack-kernels==0.6.5' >> /tmp/constraints.txt && \
     echo 'opentelemetry-api==1.40.0' >> /tmp/constraints.txt && \
     echo 'opentelemetry-sdk==1.40.0' >> /tmp/constraints.txt && \
@@ -388,13 +345,24 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     echo 'opentelemetry-semantic-conventions==0.61b0' >> /tmp/constraints.txt && \
     echo 'opentelemetry-exporter-prometheus==0.61b0' >> /tmp/constraints.txt
 
-RUN --mount=type=bind,from=flashinfer-builder,source=/wheels,target=/tmp/wheels \
-    python3 -m pip install --no-cache-dir /tmp/wheels/*.whl -c /tmp/constraints.txt && \
+# Install published FlashInfer packages as upstream vLLM does.
+RUN CUDA_MAJOR="${CUDA_VERSION%%.*}" && \
+    python3 -m pip install --no-cache-dir --only-binary=:all: \
+      "flashinfer-python[cu${CUDA_MAJOR}]==${FLASHINFER_VERSION}" \
+      "flashinfer-cubin==${FLASHINFER_VERSION}" \
+      --extra-index-url https://flashinfer.ai/whl/ \
+      -c /tmp/constraints.txt && \
     python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
 
-# Install the locally built FlashInfer wheels first so the vLLM resolver checks
-# the pinned release contract without fetching or downgrading FlashInfer.
+# The CUDA-specific shim installs its exact provider dependencies.
+RUN CUDA_LABEL="cu$(echo "${CUDA_VERSION}" | cut -d. -f1,2 | tr -d '.')" && \
+    python3 -m pip install --no-cache-dir --only-binary=:all: \
+      "flashinfer-jit-cache==${FLASHINFER_VERSION}+${CUDA_LABEL}" \
+      --index-url "https://flashinfer.ai/whl/${CUDA_LABEL}" \
+      -c /tmp/constraints.txt
+
+# Install FlashInfer first so the vLLM resolver checks the pinned release contract.
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
@@ -509,11 +477,13 @@ RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /e
 RUN python3 - <<'PY'
 from importlib import metadata
 from inspect import Parameter, signature
+import os
 
 from packaging.requirements import Requirement
 from packaging.version import Version
 
 from flashinfer.mla import BatchMLAPagedAttentionWrapper
+from flashinfer_jit_cache import get_jit_cache_providers
 
 requirements = [Requirement(value) for value in metadata.requires("vllm") or ()]
 flashinfer_requirement = next(
@@ -526,12 +496,31 @@ assert flashinfer_requirement.specifier.contains(installed_python, prereleases=T
     f"vLLM requires {flashinfer_requirement}, but flashinfer-python {installed_python} "
     "is installed"
 )
-expected_flashinfer = Version("0.6.18.post1")
-for distribution in ("flashinfer-python", "flashinfer-cubin"):
+expected_flashinfer = Version(os.environ["FLASHINFER_VERSION"])
+for distribution in ("flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"):
     installed = metadata.version(distribution)
     assert Version(installed).public == expected_flashinfer.public, (
         f"expected {distribution} {expected_flashinfer}, found {installed}"
     )
+provider_requirements = [
+    Requirement(value) for value in metadata.requires("flashinfer-jit-cache") or ()
+]
+assert provider_requirements, "FlashInfer JIT cache shim has no provider dependencies"
+providers = {provider.distribution: provider for provider in get_jit_cache_providers()}
+assert set(providers) == {requirement.name for requirement in provider_requirements}, (
+    "FlashInfer JIT cache provider inventory does not match the shim"
+)
+for requirement in provider_requirements:
+    provider = providers[requirement.name]
+    installed = metadata.version(requirement.name)
+    assert requirement.specifier.contains(installed, prereleases=True), requirement
+    assert provider.version == installed == metadata.version("flashinfer-jit-cache"), (
+        f"FlashInfer JIT cache provider version mismatch: {requirement.name}"
+    )
+    assert provider.modules and all(
+        (provider.jit_cache_dir / module / f"{module}.so").is_file()
+        for module in provider.modules
+    ), f"FlashInfer JIT cache provider has missing kernels: {requirement.name}"
 parameters = signature(BatchMLAPagedAttentionWrapper.run).parameters
 assert (
     "ckv_scale_arr" in parameters
