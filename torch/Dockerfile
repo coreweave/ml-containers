@@ -452,7 +452,7 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     if [ "$BUILD_TRITON" = '1' ]; then \
-      python3 -m pip install pybind11 lit && \
+      python3 -m pip install pybind11 lit 'nanobind==2.10.2' && \
       export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
       if [ -f 'triton/python/setup.py' ]; then \
         /build/build-wheel.sh triton/python; \
