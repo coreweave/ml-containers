@@ -26,13 +26,13 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 
-SGLANG_SOURCE = "e00930c5489053f26d86b179cee0d087f846acbb"
+SGLANG_SOURCE = "baa9befa381511cd4d56f83980951e5a45fffc6d"
 PROFILES = {
     "baseline": {
-        "source": "69ff11fc4954396d98326656dc85debd2223f637",
-        "flashinfer-python": "0.6.18",
-        "nvidia-cutlass-dsl": "4.6.2",
-        "quack-kernels": "0.6.4",
+        "source": "0b46115d238d29ea2e92c6b9b2cb077d40fbc352",
+        "flashinfer-python": "0.7.1",
+        "nvidia-cutlass-dsl": "4.8.0",
+        "quack-kernels": "0.6.5",
     },
 }
 FIXED = {"flash-attn-4": "4.0.0b19", "apache-tvm-ffi": "0.1.11"}
