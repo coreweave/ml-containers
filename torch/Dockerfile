@@ -869,6 +869,9 @@ WORKDIR /usr/src/app
 
 # Install custom PyTorch wheels.
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
+    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '26.04' ]; then \
+      python3 -m pip install --ignore-installed --no-deps typing_extensions; \
+    fi && \
     python3 -m pip install -U numpy packaging && \
     python3 -m pip install -U ./*.whl
 

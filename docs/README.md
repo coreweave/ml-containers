@@ -37,7 +37,7 @@ Versions compiled against CUDA 12.9, 13.2, and 13.3 are available in this reposi
       [`coreweave/nccl-tests`](https://github.com/coreweave/nccl-tests/blob/master/README.md).
 
 > [!NOTE]
-> Most `torch` images have both a variant built on Ubuntu 22.04 and a variant built on Ubuntu 24.04.
+> Torch 2.14 and current nightly builds omit Ubuntu 22.04 because their Triton requires Python 3.11 or newer.
 > - Ubuntu 26.04 is special
 >  - Ubuntu 26.04 is only built with CUDA 13.3
 >  - CUDA 13.3 is only built with Ubuntu 26.04
