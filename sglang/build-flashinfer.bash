@@ -33,4 +33,14 @@ export FLASHINFER_CUDA_ARCH_LIST
 printf '%s\n' "$FLASHINFER_CUDA_ARCH_LIST" > /wheels/flashinfer-architectures.txt
 _BUILD flashinfer-python .
 _BUILD flashinfer-cubin flashinfer-cubin
+# FlashInfer 0.7 ships a shim plus one native provider per CUDA target.
+export FLASHINFER_JIT_CACHE_PROVIDER_ARCHS="$FLASHINFER_CUDA_ARCH_LIST"
+for provider_arch in $FLASHINFER_CUDA_ARCH_LIST; do
+  # Each provider shares a source package directory; discard the previous
+  # provider's staged payload and setuptools output before selecting a new SM.
+  rm -rf flashinfer-jit-cache-provider/build \
+    flashinfer-jit-cache-provider/flashinfer_jit_cache_provider/jit_cache
+  export FLASHINFER_JIT_CACHE_PROVIDER_ARCH="$provider_arch"
+  _BUILD "flashinfer-provider-${provider_arch}" flashinfer-jit-cache-provider
+done
 _BUILD flashinfer-jit-cache flashinfer-jit-cache

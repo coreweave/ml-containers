@@ -111,6 +111,7 @@ label=args[args.index('--label')+1]
 command=args[args.index('--')+1:]
 row={'label':label,'argv':command,'environment':{k:os.getenv(k) for k in (
  'FLASHINFER_CUDA_ARCH_LIST','FLASHINFER_LOCAL_VERSION',
+ 'FLASHINFER_JIT_CACHE_PROVIDER_ARCH','FLASHINFER_JIT_CACHE_PROVIDER_ARCHS',
  'FLASHINFER_BUILD_NO_PIP','BUILD_NIXL_EP','MAX_JOBS','FLASHINFER_NVCC_THREADS',
  'TORCH_CUDA_ARCH_LIST','CMAKE_BUILD_PARALLEL_LEVEL','DEBIAN_FRONTEND','PATH')}}
 with open(os.environ['TRACE'],'a') as f:f.write(json.dumps(row)+'\\n')
@@ -151,10 +152,16 @@ if label==os.getenv('FAIL_PHASE'):sys.exit(7)
                     e = row['environment']
                     self.assertEqual((e['FLASHINFER_BUILD_NO_PIP'], e['BUILD_NIXL_EP']), ('1', '0'))
                     self.assertEqual((e['MAX_JOBS'], e['FLASHINFER_NVCC_THREADS'], e['FLASHINFER_LOCAL_VERSION']), ('8', '4', 'cu132'))
-                self.assertEqual([r['label'] for r in rows[1:]], ['flashinfer-python', 'flashinfer-cubin', 'flashinfer-jit-cache'])
+                provider_targets = targets.split()
+                self.assertEqual([r['label'] for r in rows[1:]],
+                                 ['flashinfer-python', 'flashinfer-cubin'] +
+                                 ['flashinfer-provider-' + target for target in provider_targets] + ['flashinfer-jit-cache'])
+                for row, target in zip(rows[3:-1], provider_targets):
+                    self.assertEqual(row['environment']['FLASHINFER_JIT_CACHE_PROVIDER_ARCH'], target)
+                self.assertEqual(rows[-1]['environment']['FLASHINFER_JIT_CACHE_PROVIDER_ARCHS'], targets)
 
     def test_failed_flashinfer_phase_stops_later_phases(self):
-        for phase in ('flashinfer-dependencies', 'flashinfer-python', 'flashinfer-cubin'):
+        for phase in ('flashinfer-dependencies', 'flashinfer-python', 'flashinfer-cubin', 'flashinfer-provider-9.0a', 'flashinfer-jit-cache'):
             with self.subTest(phase=phase):
                 result, rows, _ = self.run_phase('build-flashinfer.bash', 'baseline', failed=phase)
                 self.assertEqual(result.returncode, 7, result.stderr)

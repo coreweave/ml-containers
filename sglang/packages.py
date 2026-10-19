@@ -434,10 +434,12 @@ def inspect_wheel(path):
         return result
 
 
-def validate_wheel_set(profile, rows, source, cuda_local=None):
+def validate_wheel_set(profile, rows, source, cuda_local=None, targets=("sm103a",)):
     require(len(rows) == len({row["name"] for row in rows}), "Duplicate wheel distributions")
     by_name = {row["name"]: row for row in rows}
     required = {"sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"}
+    providers = {f"flashinfer-jit-cache-{target}" for target in targets}
+    required |= providers
     require(required <= set(by_name), f"Missing built distributions: {required - set(by_name)}")
     fi_rows = [row for row in rows if row["name"].startswith("flashinfer-")]
     require({row["name"] for row in fi_rows} == {n for n in required if n.startswith("flashinfer-")},
@@ -454,7 +456,13 @@ def validate_wheel_set(profile, rows, source, cuda_local=None):
         require(build.get("__version__") == version, "Wheel build metadata/version mismatch")
         require(build.get("__git_version__", build.get("__git_commit__")) == source,
                 "FlashInfer wheel source mismatch")
-    critical = by_name["flashinfer-jit-cache"]
+    shim = by_name["flashinfer-jit-cache"]
+    dependencies = {canonicalize_name(req.name): req for value in shim["requires"]
+                    if (req := Requirement(value)).name.startswith("flashinfer-jit-cache-")}
+    require(set(dependencies) == providers, "Shim provider dependencies differ from built targets")
+    require(all(exact_version(req) == version for req in dependencies.values()),
+            "Shim provider version mismatch")
+    critical = by_name["flashinfer-jit-cache-sm103a"]
     require(set(critical["key_modules"]) == set(KEY_MODULES), "Missing GLM SM103 key AOT modules")
     return critical
 
@@ -494,7 +502,7 @@ def wheels(args):
     require(torch_abi() == snapshot["torch_abi"], "Torch ABI changed during build")
     paths = sorted(Path(args.wheel_dir).glob("*.whl"))
     rows = [inspect_wheel(path) for path in paths]
-    critical = validate_wheel_set(args.profile, rows, PROFILES[args.profile]["source"], cuda_local)
+    critical = validate_wheel_set(args.profile, rows, PROFILES[args.profile]["source"], cuda_local, targets)
     reports = {}
     path = Path(args.wheel_dir) / critical["filename"]
     reports["sm103a"] = inspect_baseline_device_code(path, critical, args.cuobjdump)

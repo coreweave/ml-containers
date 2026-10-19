@@ -44,7 +44,7 @@ def base():
 
 def wheel_rows(profile="baseline"):
     version = p.PROFILES[profile]["flashinfer-python"] + "+cu132"
-    names = ["sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"]
+    names = ["sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache", "flashinfer-jit-cache-sm103a"]
     rows = []
     for name in names:
         row = {"name": name, "version": version, "filename": name + ".whl",
@@ -52,7 +52,8 @@ def wheel_rows(profile="baseline"):
         if name.startswith("flashinfer-"):
             row["build_metadata"] = {"__version__": version, "__git_version__": p.PROFILES[profile]["source"]}
         rows.append(row)
-    critical = rows[4]
+    rows[4]["requires"] = [f"flashinfer-jit-cache-sm103a=={version}"]
+    critical = rows[-1]
     critical["key_modules"] = {mod: {"path": mod + ".so", "sha256": "b" * 64, "bytes": 4}
                                for mod in p.KEY_MODULES}
     return rows
@@ -255,7 +256,24 @@ class WheelSetTests(unittest.TestCase):
         return p.validate_wheel_set(profile, rows, p.PROFILES[profile]["source"])
 
     def test_baseline_complete_set(self):
-        self.assertEqual(self.check(wheel_rows("baseline"), "baseline")["name"], "flashinfer-jit-cache")
+        self.assertEqual(self.check(wheel_rows("baseline"), "baseline")["name"], "flashinfer-jit-cache-sm103a")
+
+    def test_shim_cannot_reference_unbuilt_provider(self):
+        rows = wheel_rows()
+        rows[4]["requires"].append("flashinfer-jit-cache-sm90a==0.7.1+cu132")
+        with self.assertRaisesRegex(ValueError, "provider dependencies"):
+            self.check(rows)
+
+    def test_shim_cannot_resolve_different_provider_version(self):
+        rows = wheel_rows()
+        rows[4]["requires"] = ["flashinfer-jit-cache-sm103a==0.7.1"]
+        with self.assertRaisesRegex(ValueError, "provider version"):
+            self.check(rows)
+
+    def test_requested_provider_must_be_built(self):
+        with self.assertRaisesRegex(ValueError, "Missing built"):
+            p.validate_wheel_set("baseline", wheel_rows(), p.PROFILES["baseline"]["source"],
+                                 targets=("sm90a", "sm103a"))
 
     def test_missing_jit_cache_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing built"):
