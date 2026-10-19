@@ -20,6 +20,26 @@ def stages():
 
 
 class StageTests(unittest.TestCase):
+    def test_kernel_build_and_runtime_require_base_torch(self):
+        stage = stages()['sglang-source']
+        command = stage[stage.rindex('sed -Ei'):].split('\nSOURCE', 1)[0]
+        # Omit in-place editing so this exercises the same expression on BSD/GNU sed.
+        command = command.replace('sed -Ei', 'sed -E')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = root / 'python/sglang/kernels/aot/pyproject.toml'
+            metadata.parent.mkdir(parents=True)
+            metadata.write_text('[build-system]\nrequires = ["torch==2.14.1", "wheel"]\n'
+                                '[project]\ndependencies = ["torch==2.14.1"]\n')
+            result = subprocess.run(['bash', '-ec', command], cwd=root,
+                env=dict(os.environ, TORCH_VERSION='2.14.0'),
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            import tomllib
+            metadata = tomllib.loads(result.stdout)
+            self.assertEqual(metadata['build-system']['requires'], ['torch==2.14.0', 'wheel'])
+            self.assertEqual(metadata['project']['dependencies'], ['torch==2.14.0'])
+
     def test_flashinfer_inputs_exclude_validation_code_and_sglang_source(self):
         stage = stages()['flashinfer-build-base']
         self.assertTrue(stage.startswith('FROM builder-base AS flashinfer-build-base'))
@@ -164,8 +184,8 @@ if label==os.getenv('FAIL_PHASE'):sys.exit(7)
             self.assertIn('--no-deps', rows[1]['argv'])
             self.assertIn('--no-deps', rows[2]['argv'])
             self.assertNotIn('--no-deps', rows[3]['argv'])
-            self.assertIn('flashinfer-jit-cache==0.7.1+cu132', rows[3]['argv'])
-            self.assertIn('https://flashinfer.ai/whl/cu132', rows[3]['argv'])
+            self.assertIn('flashinfer-jit-cache==0.7.1+cu130', rows[3]['argv'])
+            self.assertIn('https://flashinfer.ai/whl/cu130', rows[3]['argv'])
             self.assertIn('10.3a', actual)
 
     def test_separate_download_phases_do_not_repeat_dependencies(self):

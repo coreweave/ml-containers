@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:b903737-nccl-cuda13.2.1-ubuntu24.04-nccl2.32.3-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1"
 ARG BUILDER_IMAGE="${BASE_IMAGE}"
 ARG SCCACHE_VERSION="0.14.0"
 
@@ -73,6 +73,10 @@ sed -Ei \
   -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
   -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
   python/pyproject.toml
+# The AOT wheel is compiled without build isolation against the base Torch.
+# Keep both its build requirement and runtime metadata tied to that version.
+sed -Ei "s@\"torch==[0-9]+\.[0-9]+\.[0-9]+\"@\"torch==${TORCH_VERSION}\"@" \
+  python/sglang/kernels/aot/pyproject.toml
 SOURCE
 
 FROM builder-base AS package-contract

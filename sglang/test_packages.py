@@ -295,13 +295,20 @@ class WheelSetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "versions/local CUDA"):
             self.check(rows)
 
+    def test_published_cuda_selection_is_limited_to_reviewed_pair(self):
+        self.assertEqual(p.flashinfer_cuda_label("baseline", "cu132"), "cu130")
+        for label in ("cu130", "cu129", "cu134"):
+            self.assertEqual(p.flashinfer_cuda_label("baseline", label), label)
+        with patch.dict(p.PROFILES["baseline"], {"flashinfer-python": "0.7.2"}):
+            self.assertEqual(p.flashinfer_cuda_label("baseline", "cu132"), "cu132")
+
     def test_uniform_wrong_local_cuda_label_rejected(self):
         rows = wheel_rows("baseline")
         for row in rows:
             if row["name"].startswith("flashinfer-"):
                 row["version"] = "0.7.1+cu130"
                 row["build_metadata"]["__version__"] = row["version"]
-        with self.assertRaisesRegex(ValueError, "differs from active nvcc"):
+        with self.assertRaisesRegex(ValueError, "differs from selected provider toolkit"):
             p.validate_wheel_set("baseline", rows, p.PROFILES["baseline"]["source"], "cu132")
 
     def test_wrong_source_fails(self):

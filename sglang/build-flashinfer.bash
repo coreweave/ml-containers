@@ -27,6 +27,11 @@ if [ "$PHASE" = all ] || [ "$PHASE" = dependencies ]; then
 fi
 CUDA_RELEASE="$(/usr/local/cuda/bin/nvcc --version | sed -nE 's/.*release ([0-9]+)\.([0-9]+),.*/\1\2/p')"
 [ -n "$CUDA_RELEASE" ]
+# FlashInfer 0.7.1 publishes cu130, not cu132. Keep the newer base toolkit
+# while using the older CUDA 13 provider binaries; packages.py audits this pair.
+if [ "${FLASHINFER_VERSION}:${CUDA_RELEASE}" = '0.7.1:132' ]; then
+  CUDA_RELEASE=130
+fi
 if [ "$PHASE" = all ] || [ "$PHASE" = python ]; then
   _RUN flashinfer-python python3 -m pip download --only-binary=:all: --no-deps \
     --dest "$WHEEL_DIR" --constraint /wheels/constraints.txt \

@@ -454,7 +454,7 @@ def validate_wheel_set(profile, rows, source, cuda_local=None, targets=("sm103a"
     require(Version(version).public == PROFILES[profile]["flashinfer-python"], "Wrong FI public version")
     require(re.fullmatch(r"cu13\d+", Version(version).local or ""), "Missing exact CUDA13 local label")
     if cuda_local is not None:
-        require(Version(version).local == cuda_local, "FI wheel CUDA label differs from active nvcc")
+        require(Version(version).local == cuda_local, "FI wheel CUDA label differs from selected provider toolkit")
     require(all(exact_version(req) == version for req in dependencies.values()),
             "Shim provider version mismatch")
     for row in fi_rows:
@@ -489,6 +489,14 @@ def newly_resolved_native(snapshot, versions):
             if controlled_package(name) and name not in constrained}
 
 
+def flashinfer_cuda_label(profile, toolkit_label):
+    # Published FI 0.7.1 has no cu132 artifacts. This is the sole mixed-toolkit
+    # selection; all providers must still carry the same exact cu130 version.
+    if (PROFILES[profile]["flashinfer-python"], toolkit_label) == ("0.7.1", "cu132"):
+        return "cu130"
+    return toolkit_label
+
+
 def wheels(args):
     source_contract(args.profile, args.sglang_source, args.flashinfer_source)
     snapshot = json.loads(Path(args.snapshot).read_text())
@@ -498,7 +506,7 @@ def wheels(args):
     nvcc_version = subprocess.check_output([str(Path(args.cuobjdump).with_name("nvcc")), "--version"], text=True)
     release = re.search(r"release\s+(\d+)\.(\d+),", nvcc_version)
     require(release is not None and release[1] == "13", "Expected CUDA13 nvcc release")
-    cuda_local = "cu" + release[1] + release[2]
+    cuda_local = flashinfer_cuda_label(args.profile, "cu" + release[1] + release[2])
     evidence = source_evidence(args.sglang_source)
     require(evidence == snapshot["sglang_source_evidence"], "SGLang sources changed during build")
     require(torch_abi() == snapshot["torch_abi"], "Torch ABI changed during build")
