@@ -21,8 +21,8 @@ def stages():
 
 class StageTests(unittest.TestCase):
     def test_flashinfer_inputs_exclude_validation_code_and_sglang_source(self):
-        stage = stages()['flashinfer-builder']
-        self.assertTrue(stage.startswith('FROM builder-base AS flashinfer-builder'))
+        stage = stages()['flashinfer-build-base']
+        self.assertTrue(stage.startswith('FROM builder-base AS flashinfer-build-base'))
         self.assertNotIn('SGLANG_COMMIT', stage)
         for name in ('packages.py', 'test_', 'packages-before.json', '--from=sglang-source'):
             self.assertNotIn(name, stage)
@@ -31,6 +31,20 @@ class StageTests(unittest.TestCase):
         for name in ('builder-base', 'flashinfer-source'):
             self.assertNotIn('SGLANG_COMMIT', stages()[name])
             self.assertNotIn('packages.py', stages()[name])
+
+    def test_cubin_and_providers_fork_before_the_expensive_work(self):
+        rows = stages()
+        self.assertTrue(rows['flashinfer-cubin'].startswith('FROM flashinfer-python AS'))
+        self.assertTrue(rows['flashinfer-provider-80'].startswith('FROM flashinfer-python AS'))
+        parent = 'flashinfer-python'
+        for target in ('80', '86', '89', '90a', '100a', '103a'):
+            name = 'flashinfer-provider-' + target
+            self.assertTrue(rows[name].startswith('FROM ' + parent + ' AS'))
+            self.assertEqual(rows[name].count('RUN '), 1)
+            self.assertNotIn('--from=flashinfer-cubin', rows[name])
+            parent = name
+        self.assertTrue(rows['flashinfer-builder'].startswith('FROM ' + parent + ' AS'))
+        self.assertIn('--from=flashinfer-cubin /cubin-wheels/ /wheels/', rows['flashinfer-builder'])
 
     def test_sglang_inherits_compiler_dependency_environment_and_current_audit(self):
         stage = stages()['builder']
@@ -95,7 +109,7 @@ class StageTests(unittest.TestCase):
 
 
 class PhaseTests(unittest.TestCase):
-    def run_phase(self, script, profile, arch='aarch64', failed='', fi_pin='a' * 40):
+    def run_phase(self, script, profile, arch='aarch64', failed='', fi_pin='a' * 40, phase=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ('build/flashinfer', 'build/sglang/python/sglang/kernels/aot', 'build/sglang/rust',
@@ -132,7 +146,10 @@ if label==os.getenv('FAIL_PHASE'):sys.exit(7)
                        TRACE=str(root / 'trace.jsonl'), FAIL_PHASE=failed)
             for name in ('MAX_JOBS', 'FLASHINFER_NVCC_THREADS'):
                 env.pop(name, None)
-            result = subprocess.run(['bash', str(target), '-a', '9.0 10.0+PTX'], env=env,
+            command = ['bash', str(target), '-a', '9.0 10.0+PTX']
+            if phase is not None:
+                command += ['-p', phase]
+            result = subprocess.run(command, env=env,
                                     cwd=root, capture_output=True, text=True, timeout=10)
             trace = [json.loads(line) for line in (root / 'trace.jsonl').read_text().splitlines()] if (root / 'trace.jsonl').exists() else []
             architecture = (root / 'wheels/flashinfer-architectures.txt').read_text().strip()
@@ -159,6 +176,31 @@ if label==os.getenv('FAIL_PHASE'):sys.exit(7)
                 for row, target in zip(rows[3:-1], provider_targets):
                     self.assertEqual(row['environment']['FLASHINFER_JIT_CACHE_PROVIDER_ARCH'], target)
                 self.assertEqual(rows[-1]['environment']['FLASHINFER_JIT_CACHE_PROVIDER_ARCHS'], targets)
+
+    def test_separate_phases_build_the_same_wheels_without_reinstalling_dependencies(self):
+        phases = ['dependencies', 'python', 'cubin', 'provider-8.0', 'provider-8.6',
+                  'provider-8.9', 'provider-9.0a', 'provider-10.0a', 'provider-10.3a', 'shim']
+        for arch in ('aarch64', 'x86_64'):
+            with self.subTest(arch=arch):
+                _, all_rows, _ = self.run_phase('build-flashinfer.bash', 'baseline', arch)
+                separate = []
+                for phase in phases:
+                    result, rows, _ = self.run_phase('build-flashinfer.bash', 'baseline', arch, phase=phase)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    separate.extend(rows)
+                self.assertEqual([r['label'] for r in separate], [r['label'] for r in all_rows])
+
+    def test_single_provider_failure_is_terminal(self):
+        result, rows, _ = self.run_phase('build-flashinfer.bash', 'baseline',
+                                       phase='provider-10.3a', failed='flashinfer-provider-10.3a')
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual([r['label'] for r in rows], ['flashinfer-provider-10.3a'])
+
+    def test_unknown_phase_and_unsupported_provider_fail(self):
+        for phase in ('unknown', 'provider-12.0', 'provider-typo'):
+            result, rows, _ = self.run_phase('build-flashinfer.bash', 'baseline', phase=phase)
+            self.assertEqual(result.returncode, 92)
+            self.assertEqual(rows, [])
 
     def test_failed_flashinfer_phase_stops_later_phases(self):
         for phase in ('flashinfer-dependencies', 'flashinfer-python', 'flashinfer-cubin', 'flashinfer-provider-9.0a', 'flashinfer-jit-cache'):
