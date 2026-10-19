@@ -438,30 +438,32 @@ def validate_wheel_set(profile, rows, source, cuda_local=None, targets=("sm103a"
     require(len(rows) == len({row["name"] for row in rows}), "Duplicate wheel distributions")
     by_name = {row["name"]: row for row in rows}
     required = {"sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"}
-    providers = {f"flashinfer-jit-cache-{target}" for target in targets}
+    require(required <= set(by_name), f"Missing built distributions: {required - set(by_name)}")
+    shim = by_name["flashinfer-jit-cache"]
+    dependencies = {canonicalize_name(req.name): req for value in shim["requires"]
+                    if (req := Requirement(value)).name.startswith("flashinfer-jit-cache-")}
+    providers = set(dependencies)
+    require({f"flashinfer-jit-cache-{target}" for target in targets} <= providers,
+            "Missing required GPU provider in published shim")
     required |= providers
     require(required <= set(by_name), f"Missing built distributions: {required - set(by_name)}")
     fi_rows = [row for row in rows if row["name"].startswith("flashinfer-")]
     require({row["name"] for row in fi_rows} == {n for n in required if n.startswith("flashinfer-")},
             "Unexpected FlashInfer distribution in wheelhouse")
-    versions = {row["version"] for row in fi_rows}
-    require(len(versions) == 1, "FlashInfer package versions/local CUDA labels differ")
-    version = versions.pop()
+    version = shim["version"]
     require(Version(version).public == PROFILES[profile]["flashinfer-python"], "Wrong FI public version")
     require(re.fullmatch(r"cu13\d+", Version(version).local or ""), "Missing exact CUDA13 local label")
     if cuda_local is not None:
         require(Version(version).local == cuda_local, "FI wheel CUDA label differs from active nvcc")
-    for row in fi_rows:
-        build = row["build_metadata"]
-        require(build.get("__version__") == version, "Wheel build metadata/version mismatch")
-        require(build.get("__git_version__", build.get("__git_commit__")) == source,
-                "FlashInfer wheel source mismatch")
-    shim = by_name["flashinfer-jit-cache"]
-    dependencies = {canonicalize_name(req.name): req for value in shim["requires"]
-                    if (req := Requirement(value)).name.startswith("flashinfer-jit-cache-")}
-    require(set(dependencies) == providers, "Shim provider dependencies differ from built targets")
     require(all(exact_version(req) == version for req in dependencies.values()),
             "Shim provider version mismatch")
+    for row in fi_rows:
+        expected = Version(version).public if row["name"] in ("flashinfer-python", "flashinfer-cubin") else version
+        require(row["version"] == expected, "FlashInfer package versions/local CUDA labels differ")
+        build = row["build_metadata"]
+        require(build.get("__version__") == row["version"], "Wheel build metadata/version mismatch")
+        require(build.get("__git_version__", build.get("__git_commit__")) == source,
+                "FlashInfer wheel source mismatch")
     critical = by_name["flashinfer-jit-cache-sm103a"]
     require(set(critical["key_modules"]) == set(KEY_MODULES), "Missing GLM SM103 key AOT modules")
     return critical

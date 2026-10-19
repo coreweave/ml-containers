@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:8c5de3e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
 ARG BUILDER_IMAGE="${BASE_IMAGE}"
 ARG SCCACHE_VERSION="0.14.0"
 
@@ -47,7 +47,7 @@ case "${SGLANG_PACKAGE_PROFILE}" in
     git clone --filter=blob:none --no-checkout https://github.com/flashinfer-ai/flashinfer /build/flashinfer
     git -C /build/flashinfer checkout "${FLASHINFER_COMMIT}"
     test "$(git -C /build/flashinfer rev-parse HEAD)" = "${FLASHINFER_COMMIT}"
-    git -C /build/flashinfer submodule update --init --recursive --jobs 8
+    # Only metadata is needed; published wheels contain the native kernels.
     ;;
   *) exit 1 ;;
 esac
@@ -106,11 +106,10 @@ fi
 CONTRACT
 
 FROM builder-base AS flashinfer-build-base
-ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 ARG FLASHINFER_COMMIT
+ARG FLASHINFER_VERSION=0.7.1
 ARG SGLANG_PACKAGE_PROFILE=legacy
-COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/
-# Validation-only edits do not invalidate the compiler dependency environment.
+# Metadata-derived constraints also protect the SGLang compiler environment.
 COPY --link --from=package-contract /contract/constraints.txt /contract/build-requirements.txt /wheels/
 COPY build-flashinfer.bash /build/
 RUN bash /build/build-flashinfer.bash -p dependencies
@@ -118,61 +117,17 @@ RUN bash /build/build-flashinfer.bash -p dependencies
 FROM flashinfer-build-base AS flashinfer-python
 RUN bash /build/build-flashinfer.bash -p python
 
-# Cubin download/packaging can overlap provider compilation. Keep its output
-# separate so the join does not copy stale wheels or the compiler source tree.
-FROM flashinfer-python AS flashinfer-cubin
+# Download the large cubin wheel independently of the CUDA-specific providers.
+FROM flashinfer-build-base AS flashinfer-cubin
 RUN mkdir /cubin-wheels && bash /build/build-flashinfer.bash -p cubin -o /cubin-wheels
 
-# One completed layer per target. Providers remain sequential to bound peak
-# compiler memory; each retains MAX_JOBS=8 and FLASHINFER_NVCC_THREADS=4.
-FROM flashinfer-python AS flashinfer-provider-80
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && bash /build/build-flashinfer.bash -p provider-8.0
-
-FROM flashinfer-provider-80 AS flashinfer-provider-86
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && bash /build/build-flashinfer.bash -p provider-8.6
-
-FROM flashinfer-provider-86 AS flashinfer-provider-89
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && bash /build/build-flashinfer.bash -p provider-8.9
-
-FROM flashinfer-provider-89 AS flashinfer-provider-90a
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && bash /build/build-flashinfer.bash -p provider-9.0a
-
-FROM flashinfer-provider-90a AS flashinfer-provider-100a
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && bash /build/build-flashinfer.bash -p provider-10.0a
-
-FROM flashinfer-provider-100a AS flashinfer-provider-103a
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && bash /build/build-flashinfer.bash -p provider-10.3a
-
-FROM flashinfer-provider-103a AS flashinfer-builder
-RUN bash /build/build-flashinfer.bash -p shim
+FROM flashinfer-python AS flashinfer-builder
+RUN bash /build/build-flashinfer.bash -p cache
 COPY --link --from=flashinfer-cubin /cubin-wheels/ /wheels/
 COPY --link --from=flashinfer-cubin /build-logs/ /build-logs/
 
 FROM flashinfer-builder AS builder
+COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/
 ARG SGLANG_COMMIT
 ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 ARG TARGETPLATFORM

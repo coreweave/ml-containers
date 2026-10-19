@@ -50,7 +50,8 @@ def wheel_rows(profile="baseline"):
         row = {"name": name, "version": version, "filename": name + ".whl",
                "bytes": 123, "sha256": "a" * 64, "requires": [], "key_modules": {}}
         if name.startswith("flashinfer-"):
-            row["build_metadata"] = {"__version__": version, "__git_version__": p.PROFILES[profile]["source"]}
+            row["version"] = p.PROFILES[profile]["flashinfer-python"] if name in ("flashinfer-python", "flashinfer-cubin") else version
+            row["build_metadata"] = {"__version__": row["version"], "__git_version__": p.PROFILES[profile]["source"]}
         rows.append(row)
     rows[4]["requires"] = [f"flashinfer-jit-cache-sm103a=={version}"]
     critical = rows[-1]
@@ -261,7 +262,7 @@ class WheelSetTests(unittest.TestCase):
     def test_shim_cannot_reference_unbuilt_provider(self):
         rows = wheel_rows()
         rows[4]["requires"].append("flashinfer-jit-cache-sm90a==0.7.1+cu132")
-        with self.assertRaisesRegex(ValueError, "provider dependencies"):
+        with self.assertRaisesRegex(ValueError, "Missing built"):
             self.check(rows)
 
     def test_shim_cannot_resolve_different_provider_version(self):
@@ -271,7 +272,7 @@ class WheelSetTests(unittest.TestCase):
             self.check(rows)
 
     def test_requested_provider_must_be_built(self):
-        with self.assertRaisesRegex(ValueError, "Missing built"):
+        with self.assertRaisesRegex(ValueError, "Missing required GPU provider"):
             p.validate_wheel_set("baseline", wheel_rows(), p.PROFILES["baseline"]["source"],
                                  targets=("sm90a", "sm103a"))
 
