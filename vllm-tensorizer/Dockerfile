@@ -127,11 +127,8 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       --depth 1 --filter=tree:0
 
 
-# vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
-# rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95).
-# v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
-# via setuptools-rust. Build both in a dedicated stage and copy the artifacts
-# into the wheel build below so the heavy wheel stage doesn't need cargo.
+# Build vllm-rs separately using rust-toolchain.toml so the wheel stage needs no cargo.
+# vLLM 0.32 removed the PyO3 tool-parser bridge and produces no _rust_*.so files.
 FROM builder-base AS vllm-rust-builder
 ENV CARGO_BUILD_JOBS=4 \
     CC=gcc CXX=g++ \
@@ -149,8 +146,7 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
     bash tools/build_rust.sh && \
-    install -D -m755 vllm/vllm-rs /out/vllm-rs && \
-    cp vllm/_rust_*.so /out/
+    install -D -m755 vllm/vllm-rs /out/vllm-rs
 
 
 FROM builder-base AS vllm-builder
@@ -174,7 +170,6 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
       grpcio-tools 'setuptools-rust>=1.9.0' && \
     python3 tools/use_existing_torch.py --prefix && \
     install -D -m755 /opt/rust-artifacts/vllm-rs vllm/vllm-rs && \
-    cp /opt/rust-artifacts/_rust_*.so vllm/ && \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
