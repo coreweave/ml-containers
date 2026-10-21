@@ -5,10 +5,10 @@ ARG FINAL_BASE_IMAGE="nvidia/cuda:13.2.0-base-ubuntu22.04"
 ARG BUILD_TORCH_VERSION="2.14.1"
 ARG BUILD_TORCH_VISION_VERSION="0.29.1"
 ARG BUILD_TORCH_AUDIO_VERSION="2.11.0"
-ARG BUILD_TRANSFORMERENGINE_VERSION="2.12"
-ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
+ARG BUILD_TRANSFORMERENGINE_VERSION="2.20.2"
+ARG BUILD_FLASH_ATTN_VERSION="2.8.3.post2"
 ARG BUILD_FLASH_ATTN_3_VERSION="15270e66dc88d70d08f6ba6003eb17e7307149b0"
-ARG BUILD_FLASH_ATTN_4_VERSION="2409214a03797b168f648ea30df1adbc09ce658a"
+ARG BUILD_FLASH_ATTN_4_VERSION="e7a6402a9ff099de5eb628ce207a88a3f0aa5378"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
@@ -153,16 +153,14 @@ RUN if grep -qF '#include <float.h>' \
 FROM downloader-base AS transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
 RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
-# Make TE compatible with both the FA3 beta and the official
-# flash-attn-3 3.0.0 wheels. See te-fa3-api-compat.patch for details.
-COPY te-fa3-api-compat.patch /git/te-fa3-api-compat.patch
-RUN git -C TransformerEngine apply -v --stat --apply /git/te-fa3-api-compat.patch
 
 FROM downloader-base AS flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
-# Cherry-pick a patch for FA2 to coexist with FA4, cf. flash-attention#2331
+# Let FA2 coexist with FA4, cf. flash-attention#2331.
+# See flash-attn-fa4-coexistence.patch for details.
+COPY flash-attn-fa4-coexistence.patch /git/flash-attn-fa4-coexistence.patch
 RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}" && \
-    git -C flash-attention cherry-pick -n 4219765dfdd8913bfe26134f748dd5ffcedd3c39 && \
+    git -C flash-attention apply -v --stat --apply /git/flash-attn-fa4-coexistence.patch && \
     sed -i -E 's@(-std=|/std:)c\+\+17@\1c++20@g' flash-attention/setup.py
 
 FROM downloader-base AS flash-attn-3-downloader
@@ -647,11 +645,15 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
 
 FROM builder-base AS transformerengine-builder
 RUN rm ./dist/*
+RUN python3 -m pip install 'nvidia-cudnn-frontend>=1.29.0'
 
 # Build TransformerEngine
 ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
-ENV NVTE_CMAKE_EXTRA_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF'
+# TransformerEngine passes CMake its own -DCMAKE_CUDA_COMPILER pointing at
+# the real nvcc, which takes precedence over CUDACXX. The later
+# -DCMAKE_CUDA_COMPILER here overrides it with the nvcc wrapper.
+ENV NVTE_CMAKE_EXTRA_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF -DCMAKE_CUDA_COMPILER=/build/nvcc-wrapper.py'
 
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -886,59 +888,6 @@ RUN if [ -z "${BUILD_FLASH_ATTN_4_VERSION}" ]; then exit 0; fi && \
         "${EXTRA}" "${BUILD_FLASH_ATTN_4_VERSION}"; \
     )" && \
     python3 -m pip install "${FA4_PACKAGE}"
-
-# Make a symlink to flash-attn v3 where TransformerEngine expects it,
-# and modify the installation record so that pip uninstall knows how to
-# fully remove it.
-RUN <<-"EOT" python3
-	#!/bin/env python3
-	from base64 import urlsafe_b64encode as b64
-	from hashlib import sha256
-	from importlib import metadata
-	from pathlib import Path
-	from py_compile import compile
-
-	try:
-	    dist = metadata.distribution("flash-attn-3")
-	    record_pattern = "flash?attn?3-*.dist-info/RECORD"
-	except metadata.PackageNotFoundError:
-	    dist = metadata.distribution("flashattn-hopper")
-	    record_pattern = "flashattn?hopper-*.dist-info/RECORD"
-	p = dist.locate_file("flash_attn_interface.py")
-	print("flash_attn_interface:", p)
-	root = p.parent
-
-	if not p.exists():
-	    raise SystemExit("flash_attn_interface not found")
-	if not p.is_file():
-	    raise SystemExit("flash_attn_interface path is not a file")
-
-	d = root / "flash_attn_3"
-	d.mkdir(mode=0o755, parents=False, exist_ok=True)
-
-	new = d / p.name
-	if new.exists():
-	    raise SystemExit(f'"{new}" already exists')
-	new.symlink_to(p)
-	print(f"Created new symlink at {new}")
-
-	compiled = Path(compile(new))
-
-
-	def record_entry(path: Path) -> str:
-	    content = path.read_bytes()
-	    digest = b64(sha256(content).digest()).rstrip(b"=").decode()
-	    package_path = path.relative_to(root).as_posix()
-	    return f"{package_path},sha256={digest},{len(content):d}\r\n"
-
-
-	for f in dist.files:
-	    if f.match(record_pattern):
-	        with f.locate().open("a", encoding="utf-8", newline="") as record:
-	            for added in (new, compiled):
-	                record.write(record_entry(added))
-	        break
-EOT
 
 COPY --link --chmod=555 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
 RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
