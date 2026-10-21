@@ -1,4 +1,4 @@
-cuda: [ 12.9.2, 13.2.1 ]
+cuda: [ 12.9.2, 13.2.2 ]
 os: [ ubuntu22.04, ubuntu24.04 ]
 abi: [ 1 ]
 include:
@@ -6,7 +6,7 @@ include:
     vision: 0.29.0
     audio: 2.11.0
     nccl: 2.32.3-1
-    nccl-tests-hash: '284c44a'
+    nccl-tests-hash: '46ac0de'
   - cuda: 13.3.1
     os: ubuntu26.04
     abi: 1
@@ -14,7 +14,7 @@ include:
     vision: 0.29.0
     audio: 2.11.0
     nccl: 2.32.3-1
-    nccl-tests-hash: '284c44a'
+    nccl-tests-hash: '46ac0de'
   - cuda: 13.0.3
     os: ubuntu24.04
     abi: 1
