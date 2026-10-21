@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:bc8c66e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.11.0-vision0.26.0-audio2.11.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
 ARG SCCACHE_VERSION="0.14.0"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -24,7 +24,7 @@ RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
       git ninja-build cmake libdw-dev && \
     apt-get clean && \
-    python3 -m pip install -U --no-cache-dir pip packaging 'setuptools>=77.0.3,<81.0.0' wheel setuptools_scm regex build
+    python3 -m pip install -U --no-cache-dir pip 'packaging>=24.2' 'setuptools>=78.1.1,<81.0.0' wheel setuptools_scm regex build
 
 # Create the /wheels directory
 WORKDIR /wheels
@@ -118,7 +118,7 @@ WORKDIR /git
 # Match _DEEPGEMM_UPSTREAM_TAG in vLLM's cmake/external_projects/deepgemm.cmake
 # at VLLM_COMMIT (vllm-project/DeepGEMM); a stale wheel drifts from the JIT
 # interface vLLM was built against and breaks FP8 MoE GEMMs at serve time.
-ARG DEEPGEMM_COMMIT='e1f418c2a4f20818221f6b0e578b4c2f634d4c3f'
+ARG DEEPGEMM_COMMIT='1e1842a833699298f7afc02eefb2ed168fff6938'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
@@ -127,11 +127,8 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       --depth 1 --filter=tree:0
 
 
-# vLLM v0.22.0+ ships a Rust frontend (`vllm-rs`) whose build requires the
-# rust toolchain pinned by rust-toolchain.toml (edition 2024, channel 1.95).
-# v0.24+ also builds PyO3 extensions (e.g. `_rust_tool_parser.so`)
-# via setuptools-rust. Build both in a dedicated stage and copy the artifacts
-# into the wheel build below so the heavy wheel stage doesn't need cargo.
+# Build vllm-rs separately using rust-toolchain.toml so the wheel stage needs no cargo.
+# vLLM 0.32 removed the PyO3 tool-parser bridge and produces no _rust_*.so files.
 FROM builder-base AS vllm-rust-builder
 ENV CARGO_BUILD_JOBS=4 \
     CC=gcc CXX=g++ \
@@ -143,14 +140,13 @@ RUN apt-get -qq update && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain none && \
     python3 -m pip install --no-cache-dir \
-      'setuptools>=77.0.3,<81.0.0' 'setuptools-rust>=1.9.0' wheel
+      'setuptools>=78.1.1,<81.0.0' 'setuptools-scm>=9.2.0' 'setuptools-rust>=1.9.0' wheel
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/workspace/rust/target \
     bash tools/build_rust.sh && \
-    install -D -m755 vllm/vllm-rs /out/vllm-rs && \
-    cp vllm/_rust_*.so /out/
+    install -D -m755 vllm/vllm-rs /out/vllm-rs
 
 
 FROM builder-base AS vllm-builder
@@ -172,15 +168,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' \
       grpcio-tools 'setuptools-rust>=1.9.0' && \
-    if [ -f 'use_existing_torch.py' ]; then \
-      python3 use_existing_torch.py; \
-    else \
-      git cat-file blob \
-        e489ad7a210f4234db696d1f2749d5f3662fa65b:use_existing_torch.py \
-        | python3 -; \
-    fi && \
+    python3 tools/use_existing_torch.py --prefix && \
     install -D -m755 /opt/rust-artifacts/vllm-rs vllm/vllm-rs && \
-    cp /opt/rust-artifacts/_rust_*.so vllm/ && \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     VLLM_MAIN_CUDA_VERSION="${CUDA_VERSION%.*}" \
@@ -199,7 +188,7 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
     python3 -m pip install --no-cache-dir \
-    'setuptools>=77.0.3,<81.0.0' \
+    'setuptools>=78.1.1,<81.0.0' \
     'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
@@ -284,7 +273,7 @@ RUN apt-get -qq update && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
-ARG NIXL_TAG='v1.4.1'
+ARG NIXL_TAG='v1.5.0'
 ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -306,9 +295,7 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
 FROM ${FINAL_BASE_IMAGE} AS base
 
 ARG VLLM_COMMIT
-ARG FLASHINFER_VERSION='0.7.0.post1'
-LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}" \
-      com.coreweave.vllm.flashinfer-version="${FLASHINFER_VERSION}"
+LABEL com.coreweave.vllm.source-ref="${VLLM_COMMIT}"
 
 WORKDIR /workspace
 
@@ -318,21 +305,17 @@ RUN apt-get -qq update && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
-# vLLM 0.31 ships its own namespaced FA4 implementation. Remove the inherited
-# global FA4 package because its metadata hard-pins CUTLASS DSL 4.6.0.dev0 and
-# apache-tvm-ffi >=0.1.12, which conflict with vLLM's 4.7.1/0.1.11 contract.
+# Remove inherited FA4, whose CUTLASS DSL/TVM FFI pins conflict with vLLM's.
 RUN python3 -m pip uninstall -y flash-attn-4
 
-# vLLM 0.31 pins nvidia-cutlass-dsl==4.7.1 and quack-kernels==0.6.5.
-# Keep the constraint explicit so the FlashInfer and vLLM installs use the same
-# CUTLASS DSL contract.
+# Match vLLM 0.32's CUTLASS DSL, TVM FFI, and QuACK requirements.
 # LMCache v0.4.7 caps opentelemetry-api at 1.40.0. Pin the matching
 # OpenTelemetry release family before installing vLLM so a newer exporter does
 # not remain installed after LMCache downgrades the SDK.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
-    echo 'nvidia-cutlass-dsl==4.7.1' >> /tmp/constraints.txt && \
+    echo 'nvidia-cutlass-dsl==4.8.0' >> /tmp/constraints.txt && \
     echo 'apache-tvm-ffi==0.1.11' >> /tmp/constraints.txt && \
     echo 'quack-kernels==0.6.5' >> /tmp/constraints.txt && \
     echo 'opentelemetry-api==1.40.0' >> /tmp/constraints.txt && \
@@ -345,24 +328,22 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     echo 'opentelemetry-semantic-conventions==0.61b0' >> /tmp/constraints.txt && \
     echo 'opentelemetry-exporter-prometheus==0.61b0' >> /tmp/constraints.txt
 
-# Install published FlashInfer packages as upstream vLLM does.
-RUN CUDA_MAJOR="${CUDA_VERSION%%.*}" && \
-    python3 -m pip install --no-cache-dir --only-binary=:all: \
-      "flashinfer-python[cu${CUDA_MAJOR}]==${FLASHINFER_VERSION}" \
-      "flashinfer-cubin==${FLASHINFER_VERSION}" \
-      --extra-index-url https://flashinfer.ai/whl/ \
-      -c /tmp/constraints.txt && \
+# Install upstream runtime requirements before the vLLM wheel to cache this layer.
+RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/requirements,target=/tmp/vllm-requirements \
+    cp -r /tmp/vllm-requirements /tmp/requirements && \
+    if [ "${CUDA_VERSION%%.*}" = "12" ]; then \
+      sed -i 's/^nvidia-cutlass-dsl\[cu13\]/nvidia-cutlass-dsl/' /tmp/requirements/cuda.txt; \
+      sed -i 's/^humming-kernels\[cu13\]/humming-kernels[cu12]/' /tmp/requirements/cuda.txt; \
+    fi && \
+    python3 -m pip install --no-cache-dir -r /tmp/requirements/cuda.txt -c /tmp/constraints.txt && \
+    rm -rf /tmp/requirements && \
     python3 -m pip uninstall -y pynvml && \
     python3 -m pip install --no-cache-dir nvidia-ml-py
 
-# The CUDA-specific shim installs its exact provider dependencies.
-RUN CUDA_LABEL="cu$(echo "${CUDA_VERSION}" | cut -d. -f1,2 | tr -d '.')" && \
-    python3 -m pip install --no-cache-dir --only-binary=:all: \
-      "flashinfer-jit-cache==${FLASHINFER_VERSION}+${CUDA_LABEL}" \
-      --index-url "https://flashinfer.ai/whl/${CUDA_LABEL}" \
-      -c /tmp/constraints.txt
+# FlashInfer selects matching cubin and JIT-cache wheels, including all providers.
+RUN --mount=type=cache,target=/opt/pip/cache \
+    PIP_CACHE_DIR=/opt/pip/cache PIP_CONSTRAINT=/tmp/constraints.txt flashinfer download-kernels
 
-# Install FlashInfer first so the vLLM resolver checks the pinned release contract.
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
 
@@ -431,7 +412,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       'runai-model-streamer[s3,gcs,azure]==0.16.1' "ray[cgraph]>=2.48.0" \
-      'transformers==5.14.1' \
+      'transformers>=5.16.1,<5.20.0' \
       'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt && \
@@ -446,14 +427,14 @@ RUN --mount=type=bind,from=streamer-builder,source=/out/wheels,target=/tmp/wheel
 
 # Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
 # `nixl>=1.1.0`) pull the bundled-UCX wheel; purge those, install our wheel + the `nixl` meta
-# (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back. NIXL 1.4's
+# (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back. NIXL's
 # meta also ships a `nixl_ep` dispatcher, but our UCX/POSIX-only build intentionally omits its
 # optional EP kernels. Remove that unusable dispatcher so vLLM does not discover and import it.
 RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
     python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
-    python3 -m pip install --no-cache-dir --no-deps nixl==1.4.1 && \
+    python3 -m pip install --no-cache-dir --no-deps nixl==1.5.0 && \
     # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
     # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
     sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
@@ -477,7 +458,6 @@ RUN printf 'export LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:$LD_LIBRARY_PATH\n' > /e
 RUN python3 - <<'PY'
 from importlib import metadata
 from inspect import Parameter, signature
-import os
 
 from packaging.requirements import Requirement
 from packaging.version import Version
@@ -496,7 +476,7 @@ assert flashinfer_requirement.specifier.contains(installed_python, prereleases=T
     f"vLLM requires {flashinfer_requirement}, but flashinfer-python {installed_python} "
     "is installed"
 )
-expected_flashinfer = Version(os.environ["FLASHINFER_VERSION"])
+expected_flashinfer = Version(installed_python)
 for distribution in ("flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"):
     installed = metadata.version(distribution)
     assert Version(installed).public == expected_flashinfer.public, (
