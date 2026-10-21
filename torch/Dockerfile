@@ -21,7 +21,7 @@ ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-a
 ARG SCCACHE_VERSION="0.16.0"
 ARG SCCACHE_BUILD="00f795b"
 
-ARG UV_VERSION="0.11.16"
+ARG UV_VERSION="0.13.4"
 
 ARG TRANSLOCATE_VERSION="0.1.0"
 
