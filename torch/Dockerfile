@@ -23,6 +23,8 @@ ARG SCCACHE_BUILD="00f795b"
 
 ARG UV_VERSION="0.11.16"
 
+ARG TRANSLOCATE_VERSION="0.1.0"
+
 ARG CMAKE_VERSION="3.31.12"
 
 ARG LLVM_VERSION="22"
@@ -896,3 +898,6 @@ RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
     fi
 
 COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/
+
+ARG TRANSLOCATE_VERSION
+RUN python3 -m pip install "translocate==${TRANSLOCATE_VERSION}"
