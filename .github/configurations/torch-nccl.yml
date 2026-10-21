@@ -2,16 +2,16 @@ cuda: [ 12.9.2, 13.2.2 ]
 os: [ ubuntu22.04, ubuntu24.04 ]
 abi: [ 1 ]
 include:
-  - torch: 2.14.0
-    vision: 0.29.0
+  - torch: 2.14.1
+    vision: 0.29.1
     audio: 2.11.0
     nccl: 2.32.3-1
     nccl-tests-hash: '46ac0de'
   - cuda: 13.3.1
     os: ubuntu26.04
     abi: 1
-    torch: 2.14.0
-    vision: 0.29.0
+    torch: 2.14.1
+    vision: 0.29.1
     audio: 2.11.0
     nccl: 2.32.3-1
     nccl-tests-hash: '46ac0de'
