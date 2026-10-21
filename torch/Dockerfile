@@ -656,6 +656,10 @@ ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 # the real nvcc, which takes precedence over CUDACXX. The later
 # -DCMAKE_CUDA_COMPILER here overrides it with the nvcc wrapper.
 ENV NVTE_CMAKE_EXTRA_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF -DCMAKE_CUDA_COMPILER=/build/nvcc-wrapper.py'
+# NCCL EP is built only on nccl-tests bases with CUDA 13 or newer.
+# It needs the NCCL device API headers at build time and the same NCCL
+# with headers at runtime, which only the nccl-tests images provide,
+# and its documentation lists CUDA 13 as a requirement.
 
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -672,6 +676,10 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     case "${CUDA_VERSION}" in 12.[0123456].*) \
       export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
     esac && \
+    if [ ! -d /opt/nccl-tests ] || [ "${CUDA_VERSION%%.*}" -lt 13 ]; then \
+      export NVTE_WITH_NCCL_EP=0; \
+    fi && \
+    echo "NVTE_WITH_NCCL_EP: ${NVTE_WITH_NCCL_EP:-1}" && \
     /build/build-wheel.sh TransformerEngine
 
 FROM builder-base AS flash-attn-builder-base
