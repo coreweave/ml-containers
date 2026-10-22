@@ -8,11 +8,12 @@ ARG DEEPSPEED_KERNELS_CUDA_ARCH_LIST="80;86;89;90"
 ARG XFORMERS_VERSION="0.0.35"
 ARG BUILD_MAX_JOBS=""
 ARG SCCACHE_VERSION="0.16.0"
-ARG SCCACHE_BUILD="00f795b"
+ARG SCCACHE_BUILD="485cfa5"
 ARG CMAKE_VERSION="3.31.12"
 ARG LLVM_VERSION="22"
 
-FROM alpine/curl:8.17.0 AS sccache-downloader
+FROM alpine/curl:8.22.0 AS sccache-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 ARG SCCACHE_VERSION
 ARG SCCACHE_BUILD
 RUN ARCH=$(uname -m) && \
@@ -26,7 +27,8 @@ RUN ARCH=$(uname -m) && \
     } | tar xz --strip-components=1 -C /opt/ "${DIST}/sccache" && \
     chmod 755 /opt/sccache
 
-FROM alpine/curl:8.17.0 AS cmake-downloader
+FROM alpine/curl:8.22.0 AS cmake-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 ARG CMAKE_VERSION
 RUN ARCH="$(uname -m)" && \
     case "$ARCH" in \
@@ -41,7 +43,8 @@ RUN ARCH="$(uname -m)" && \
     tar -C /opt/cmake --strip-components=1 -xzf /tmp/cmake.tar.gz "${DIST}/bin" "${DIST}/share" && \
     rm /tmp/cmake.tar.gz
 
-FROM alpine/git:2.36.3 as xformers-downloader
+FROM alpine/git:2.54.0 as xformers-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 WORKDIR /git
 ARG XFORMERS_VERSION
 RUN git clone --filter=blob:none --depth 1 --recurse-submodules --shallow-submodules \
@@ -49,7 +52,8 @@ RUN git clone --filter=blob:none --depth 1 --recurse-submodules --shallow-submod
       https://github.com/facebookresearch/xformers && \
     rm -rf xformers/.git
 
-FROM alpine/git:2.36.3 as deepspeed-downloader
+FROM alpine/git:2.54.0 as deepspeed-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 WORKDIR /git
 ARG DEEPSPEED_VERSION
 RUN git clone --filter=blob:none --depth 1 \
@@ -58,7 +62,8 @@ RUN git clone --filter=blob:none --depth 1 \
     rm -rf deepspeed/.git && \
     sed -i -E 's@(-std=|/std:)c\+\+17@\1c++20@g' deepspeed/op_builder/*.py
 
-FROM alpine/git:2.36.3 as apex-downloader
+FROM alpine/git:2.54.0 as apex-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 WORKDIR /git
 ARG APEX_COMMIT
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
@@ -69,7 +74,8 @@ RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
       --depth 1 --filter=blob:none && \
     find -type d -name docs -prune -exec rm -r '{}' ';'
 
-FROM alpine/git:2.36.3 as ds-kernels-downloader
+FROM alpine/git:2.54.0 as ds-kernels-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 WORKDIR /git
 ARG DEEPSPEED_KERNELS_COMMIT
 RUN git clone --filter=blob:none --depth 1 --no-single-branch --no-checkout \
@@ -391,3 +397,6 @@ RUN --mount=type=bind,from=apex-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
 RUN --mount=type=bind,from=xformers-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir /tmp/wheels/*.whl
+
+RUN --mount=type=bind,from=torch-common,source=verify-python-trust.py,target=/tmp/verify-python-trust.py \
+    python3 /tmp/verify-python-trust.py

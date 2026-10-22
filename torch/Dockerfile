@@ -19,7 +19,7 @@ ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
 
 ARG SCCACHE_VERSION="0.16.0"
-ARG SCCACHE_BUILD="00f795b"
+ARG SCCACHE_BUILD="485cfa5"
 
 ARG UV_VERSION="0.13.4"
 
@@ -31,7 +31,8 @@ ARG LLVM_VERSION="22"
 
 # region Downloads
 
-FROM alpine/curl:8.17.0 AS sccache-downloader
+FROM alpine/curl:8.22.0 AS sccache-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 ARG SCCACHE_VERSION
 ARG SCCACHE_BUILD
 RUN ARCH=$(uname -m) && \
@@ -45,14 +46,16 @@ RUN ARCH=$(uname -m) && \
     } | tar xz --strip-components=1 -C /opt/ "${DIST}/sccache" && \
     chmod 755 /opt/sccache
 
-FROM alpine/curl:8.17.0 AS uv-downloader
+FROM alpine/curl:8.22.0 AS uv-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 ARG UV_VERSION
 RUN ARCH=$(uname -m) && \
     curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz" \
     | tar xz --strip-components=1 -C /opt/ \
       "uv-${ARCH}-unknown-linux-gnu/uv" "uv-${ARCH}-unknown-linux-gnu/uvx"
 
-FROM alpine/curl:8.17.0 AS cmake-downloader
+FROM alpine/curl:8.22.0 AS cmake-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 ARG CMAKE_VERSION
 RUN ARCH="$(uname -m)" && \
     case "$ARCH" in \
@@ -72,7 +75,7 @@ RUN ARCH="$(uname -m)" && \
 FROM scratch AS conf
 # Avoid auto-downloading Python versions other than the container's Python,
 # and turn off the default package cache
-COPY <<-"EOT" /opt/uv.toml
+COPY <<-"EOT" /etc/uv/uv.toml
 	python-downloads = "never"
 	no-cache = true
 
@@ -92,7 +95,8 @@ EOT
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
-FROM alpine/git:2.40.1 AS downloader-base
+FROM alpine/git:2.54.0 AS downloader-base
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 WORKDIR /git
 RUN git config --global advice.detachedHead false
 
@@ -192,10 +196,11 @@ RUN if [ "${BUILD_TRITON}" = '1' ]; then \
       mkdir triton; \
     fi
 
-FROM alpine/curl:8.7.1 AS aocl-downloader
+FROM alpine/curl:8.22.0 AS aocl-downloader
 WORKDIR /tmp/install
 
-RUN apk add --no-cache bash
+RUN apk add --no-cache bash && \
+    apk upgrade --no-cache ca-certificates ca-certificates-bundle
 
 ARG AOCL_BASE
 ARG AOCL_VER
@@ -242,24 +247,26 @@ COPY --link --from=conf / /
 # and thus do not inherently need to be pushed into venv isolation.
 RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
     if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
-      PACKAGES='libncurses5 python3-pip python3-distutils'; \
+      PACKAGES='libncurses5 python3-distutils'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
-      $PACKAGES python3 git apt-utils ssh ca-certificates \
+      $PACKAGES python3 git apt-utils ssh ca-certificates wget \
       /tmp/libomp5-cw.deb libpng-dev libjpeg-dev pkg-config \
       build-essential ninja-build && \
     apt-get clean && \
     rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
-    if ! command -v pip3 >/dev/null 2>&1; then \
-      wget -qO- 'https://bootstrap.pypa.io/get-pip.py' | /usr/bin/python3; \
-    fi && \
-    /usr/bin/python3 -m pip install --upgrade pip 'setuptools<82' wheel packaging build && \
+    wget -qO- 'https://bootstrap.pypa.io/get-pip.py' \
+    | /usr/bin/python3 - --no-setuptools --no-wheel 'pip>=26.2.2' 'certifi>=2026.10.19' && \
+    /usr/bin/python3 -m pip install --upgrade 'setuptools<82' wheel packaging build && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip "$(command -v pip3)" 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
+
+RUN --mount=type=bind,from=torch-common,source=verify-python-trust.py,target=/tmp/verify-python-trust.py \
+    python3 /tmp/verify-python-trust.py
 
 COPY --link --from=torch-common --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 
@@ -452,13 +459,18 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     if [ "$BUILD_TRITON" = '1' ]; then \
-      python3 -m pip install pybind11 lit && \
-      export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
       if [ -f 'triton/python/setup.py' ]; then \
-        /build/build-wheel.sh triton/python; \
+        TRITON_SRC='triton/python'; \
       else \
-        /build/build-wheel.sh triton; \
+        TRITON_SRC='triton'; \
       fi && \
+      python3 -m pip install pybind11 lit && \
+      NANOBIND_REQ=$(sed -n -E 's@^ *requires *= *\[.*"(nanobind[^"]*)".*]@\1@p' "${TRITON_SRC}/pyproject.toml") && \
+      if [ -n "${NANOBIND_REQ}" ]; then \
+        python3 -m pip install "${NANOBIND_REQ}"; \
+      fi && \
+      export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
+      /build/build-wheel.sh "${TRITON_SRC}" && \
       python3 -m pip install dist/*.whl; \
     fi
 
@@ -780,7 +792,7 @@ COPY --link --from=conf / /
 # and thus do not inherently need to be pushed into venv isolation.
 RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
     if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
-      PACKAGES='libncurses5 python3-pip python3-distutils'; \
+      PACKAGES='libncurses5 python3-distutils'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
@@ -791,10 +803,9 @@ RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=
       rsync htop wget unzip tini && \
     apt-get clean && \
     rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
-    if ! command -v pip3 >/dev/null 2>&1; then \
-      wget -qO- 'https://bootstrap.pypa.io/get-pip.py' | /usr/bin/python3; \
-    fi && \
-    /usr/bin/python3 -m pip install --upgrade pip 'setuptools<82' && \
+    wget -qO- 'https://bootstrap.pypa.io/get-pip.py' \
+    | /usr/bin/python3 - --no-setuptools --no-wheel 'pip>=26.2.2' 'certifi>=2026.10.19' && \
+    /usr/bin/python3 -m pip install --upgrade 'setuptools<82' && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip "$(command -v pip3)" 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
@@ -909,3 +920,6 @@ COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/
 
 ARG TRANSLOCATE_VERSION
 RUN python3 -m pip install "translocate==${TRANSLOCATE_VERSION}"
+
+RUN --mount=type=bind,from=torch-common,source=verify-python-trust.py,target=/tmp/verify-python-trust.py \
+    python3 /tmp/verify-python-trust.py
