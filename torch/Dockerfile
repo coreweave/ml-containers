@@ -890,8 +890,14 @@ RUN CUDA_MAJOR_VERSION="$(echo "${CUDA_VERSION}" | cut -d. -f1)" && \
 
 WORKDIR /usr/src/app
 
+COPY --link --chmod=555 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
+
 # Install custom PyTorch wheels.
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
+    if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
+      /opt/coreweave/bin/distro-pkg-divert --list-removed python3-typing-extensions \
+      | python3 -m pip install -r /dev/stdin; \
+    fi && \
     python3 -m pip install -U numpy packaging && \
     python3 -m pip install -U ./*.whl
 
@@ -909,12 +915,6 @@ RUN if [ -z "${BUILD_FLASH_ATTN_4_VERSION}" ]; then exit 0; fi && \
         "${EXTRA}" "${BUILD_FLASH_ATTN_4_VERSION}"; \
     )" && \
     python3 -m pip install "${FA4_PACKAGE}"
-
-COPY --link --chmod=555 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
-RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
-      /opt/coreweave/bin/distro-pkg-divert --list-removed python3-typing-extensions \
-      | python3 -m pip install -r /dev/stdin; \
-    fi
 
 COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/
 
