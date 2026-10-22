@@ -91,7 +91,7 @@ jobs:
     uses: ./.github/workflows/read-configuration.yml
     with:
       path: ./.github/configurations/torch-base.yml
-      filter: 'del(.include) | .exclude |= . + [{"abi": "0"}]'
+      filter: 'del(.include[] | (.torch, .vision, .audio)) | .include |= map(select(length > 0)) | .exclude |= . + [{"abi": "0"}]'
   get-nccl-config:
     name: Get torch:nccl Config
     uses: ./.github/workflows/read-configuration.yml
@@ -112,8 +112,8 @@ jobs:
     with:
       image-name: nightly-torch
       tag: ${{ format('base-{0}-cuda{1}-{2}-{3}', needs.get-nightly-info.outputs.date, matrix.cuda, matrix.os, needs.get-nightly-info.outputs.version-string) }}
-      builder-base-image: nvidia/cuda:${{ matrix.cuda }}-devel-${{ matrix.os }}
-      base-image: nvidia/cuda:${{ matrix.cuda }}-base-${{ matrix.os }}
+      builder-base-image: ${{ matrix.builder-base-image || format('nvidia/cuda:{0}-devel-{1}', matrix.cuda, matrix.os) }}
+      base-image: ${{ matrix.base-image || format('nvidia/cuda:{0}-base-{1}', matrix.cuda, matrix.os) }}
       torch-version: ${{ needs.get-nightly-info.outputs.pytorch-commit }}
       torchvision-version: ${{ needs.get-nightly-info.outputs.torchvision-commit }}
       torchaudio-version: ${{ needs.get-nightly-info.outputs.torchaudio-commit }}
