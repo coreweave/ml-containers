@@ -247,7 +247,7 @@ COPY --link --from=conf / /
 # and thus do not inherently need to be pushed into venv isolation.
 RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
     if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
-      PACKAGES='libncurses5 python3-distutils'; \
+      PACKAGES='libncurses5 python3-distutils python3-dev'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
@@ -792,7 +792,7 @@ COPY --link --from=conf / /
 # and thus do not inherently need to be pushed into venv isolation.
 RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
     if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
-      PACKAGES='libncurses5 python3-distutils'; \
+      PACKAGES='libncurses5 python3-distutils python3-dev'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
