@@ -150,6 +150,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
 
 
 FROM builder-base AS vllm-builder
+# The MiniMax-M3 fused KV insert kernel's bf16x2 -> e4m3x2 cvt needs CUDA 13.1+
+# ptxas; on older toolkits it falls back to its exact f32 -> e4m3x2 path.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw \
     --mount=type=bind,from=vllm-rust-builder,source=/out,target=/opt/rust-artifacts \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -165,6 +167,12 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
       grep -qE 'CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;10\.3;11\.0;' CMakeLists.txt \
       || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
     } && \
+    MM3_KERNEL='csrc/fused_minimax_m3_qknorm_rope_kv_insert_kernel.cu' && \
+    if [ -f "$MM3_KERNEL" ] && grep -q 'cvt.rn.satfinite.e4m3x2.bf16x2' "$MM3_KERNEL"; then \
+      sed -i -E 's@^( *)#define VLLM_CTX_KV_BF16X2_TO_E4M3X2$@\1#if __CUDACC_VER_MAJOR__ > 13 || (__CUDACC_VER_MAJOR__ == 13 \&\& __CUDACC_VER_MINOR__ >= 1)\n\1#define VLLM_CTX_KV_BF16X2_TO_E4M3X2\n\1#endif@' "$MM3_KERNEL" && \
+      grep -q '__CUDACC_VER_MINOR__ >= 1)' "$MM3_KERNEL" \
+      || { echo 'Failed to gate e4m3x2.bf16x2 on CUDA 13.1' >&2; exit 1; }; \
+    fi && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
     python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' \
       grpcio-tools 'setuptools-rust>=1.9.0' && \
