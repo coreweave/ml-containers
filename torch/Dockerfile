@@ -2,13 +2,13 @@
 ARG BUILDER_BASE_IMAGE="nvidia/cuda:13.2.0-devel-ubuntu22.04"
 ARG FINAL_BASE_IMAGE="nvidia/cuda:13.2.0-base-ubuntu22.04"
 
-ARG BUILD_TORCH_VERSION="2.14.0"
-ARG BUILD_TORCH_VISION_VERSION="0.29.0"
+ARG BUILD_TORCH_VERSION="2.14.1"
+ARG BUILD_TORCH_VISION_VERSION="0.29.1"
 ARG BUILD_TORCH_AUDIO_VERSION="2.11.0"
-ARG BUILD_TRANSFORMERENGINE_VERSION="2.12"
-ARG BUILD_FLASH_ATTN_VERSION="2.8.3"
+ARG BUILD_TRANSFORMERENGINE_VERSION="2.20.2"
+ARG BUILD_FLASH_ATTN_VERSION="2.8.3.post2"
 ARG BUILD_FLASH_ATTN_3_VERSION="15270e66dc88d70d08f6ba6003eb17e7307149b0"
-ARG BUILD_FLASH_ATTN_4_VERSION="2409214a03797b168f648ea30df1adbc09ce658a"
+ARG BUILD_FLASH_ATTN_4_VERSION="e7a6402a9ff099de5eb628ce207a88a3f0aa5378"
 ARG BUILD_TRITON_VERSION=""
 ARG BUILD_TRITON="1"
 ARG BUILD_TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0+PTX"
@@ -19,9 +19,11 @@ ARG AOCL_VER="4.2.0"
 ARG AOCL_URL="https://download.amd.com/developer/eula/aocl/aocl-4-2/aocl-linux-aocc-4.2.0.tar.gz"
 
 ARG SCCACHE_VERSION="0.16.0"
-ARG SCCACHE_BUILD="00f795b"
+ARG SCCACHE_BUILD="485cfa5"
 
-ARG UV_VERSION="0.11.16"
+ARG UV_VERSION="0.13.4"
+
+ARG TRANSLOCATE_VERSION="0.1.0"
 
 ARG CMAKE_VERSION="3.31.12"
 
@@ -29,7 +31,8 @@ ARG LLVM_VERSION="22"
 
 # region Downloads
 
-FROM alpine/curl:8.17.0 AS sccache-downloader
+FROM alpine/curl:8.22.0 AS sccache-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 ARG SCCACHE_VERSION
 ARG SCCACHE_BUILD
 RUN ARCH=$(uname -m) && \
@@ -43,14 +46,16 @@ RUN ARCH=$(uname -m) && \
     } | tar xz --strip-components=1 -C /opt/ "${DIST}/sccache" && \
     chmod 755 /opt/sccache
 
-FROM alpine/curl:8.17.0 AS uv-downloader
+FROM alpine/curl:8.22.0 AS uv-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 ARG UV_VERSION
 RUN ARCH=$(uname -m) && \
     curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz" \
     | tar xz --strip-components=1 -C /opt/ \
       "uv-${ARCH}-unknown-linux-gnu/uv" "uv-${ARCH}-unknown-linux-gnu/uvx"
 
-FROM alpine/curl:8.17.0 AS cmake-downloader
+FROM alpine/curl:8.22.0 AS cmake-downloader
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 ARG CMAKE_VERSION
 RUN ARCH="$(uname -m)" && \
     case "$ARCH" in \
@@ -70,7 +75,7 @@ RUN ARCH="$(uname -m)" && \
 FROM scratch AS conf
 # Avoid auto-downloading Python versions other than the container's Python,
 # and turn off the default package cache
-COPY <<-"EOT" /opt/uv.toml
+COPY <<-"EOT" /etc/uv/uv.toml
 	python-downloads = "never"
 	no-cache = true
 
@@ -90,7 +95,8 @@ EOT
 
 # Clone PyTorch repositories independently from all other build steps
 # for cache-friendliness and parallelization
-FROM alpine/git:2.40.1 AS downloader-base
+FROM alpine/git:2.54.0 AS downloader-base
+RUN apk upgrade --no-cache ca-certificates ca-certificates-bundle
 WORKDIR /git
 RUN git config --global advice.detachedHead false
 
@@ -153,16 +159,14 @@ RUN if grep -qF '#include <float.h>' \
 FROM downloader-base AS transformerengine-downloader
 ARG BUILD_TRANSFORMERENGINE_VERSION
 RUN ./clone.sh NVIDIA/TransformerEngine TransformerEngine "${BUILD_TRANSFORMERENGINE_VERSION}"
-# Make TE compatible with both the FA3 beta and the official
-# flash-attn-3 3.0.0 wheels. See te-fa3-api-compat.patch for details.
-COPY te-fa3-api-compat.patch /git/te-fa3-api-compat.patch
-RUN git -C TransformerEngine apply -v --stat --apply /git/te-fa3-api-compat.patch
 
 FROM downloader-base AS flash-attn-downloader
 ARG BUILD_FLASH_ATTN_VERSION
-# Cherry-pick a patch for FA2 to coexist with FA4, cf. flash-attention#2331
+# Let FA2 coexist with FA4, cf. flash-attention#2331.
+# See flash-attn-fa4-coexistence.patch for details.
+COPY flash-attn-fa4-coexistence.patch /git/flash-attn-fa4-coexistence.patch
 RUN ./clone.sh Dao-AILab/flash-attention flash-attention "${BUILD_FLASH_ATTN_VERSION}" && \
-    git -C flash-attention cherry-pick -n 4219765dfdd8913bfe26134f748dd5ffcedd3c39 && \
+    git -C flash-attention apply -v --stat --apply /git/flash-attn-fa4-coexistence.patch && \
     sed -i -E 's@(-std=|/std:)c\+\+17@\1c++20@g' flash-attention/setup.py
 
 FROM downloader-base AS flash-attn-3-downloader
@@ -192,10 +196,11 @@ RUN if [ "${BUILD_TRITON}" = '1' ]; then \
       mkdir triton; \
     fi
 
-FROM alpine/curl:8.7.1 AS aocl-downloader
+FROM alpine/curl:8.22.0 AS aocl-downloader
 WORKDIR /tmp/install
 
-RUN apk add --no-cache bash
+RUN apk add --no-cache bash && \
+    apk upgrade --no-cache ca-certificates ca-certificates-bundle
 
 ARG AOCL_BASE
 ARG AOCL_VER
@@ -242,24 +247,26 @@ COPY --link --from=conf / /
 # and thus do not inherently need to be pushed into venv isolation.
 RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
     if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
-      PACKAGES='libncurses5 python3-pip python3-distutils'; \
+      PACKAGES='libncurses5 python3-distutils python3-dev'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
     apt-get -qq update && apt-get -qq install -y \
-      $PACKAGES python3 git apt-utils ssh ca-certificates \
+      $PACKAGES python3 git apt-utils ssh ca-certificates wget \
       /tmp/libomp5-cw.deb libpng-dev libjpeg-dev pkg-config \
       build-essential ninja-build && \
     apt-get clean && \
     rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
-    if ! command -v pip3 >/dev/null 2>&1; then \
-      wget -qO- 'https://bootstrap.pypa.io/get-pip.py' | /usr/bin/python3; \
-    fi && \
-    /usr/bin/python3 -m pip install --upgrade pip 'setuptools<82' wheel packaging build && \
+    wget -qO- 'https://bootstrap.pypa.io/get-pip.py' \
+    | /usr/bin/python3 - --no-setuptools --no-wheel 'pip>=26.2.2' 'certifi>=2026.10.19' && \
+    /usr/bin/python3 -m pip install --upgrade 'setuptools<82' wheel packaging build && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip "$(command -v pip3)" 1 && \
     ln -s libomp.so.5 "/usr/lib/$(gcc -print-multiarch)/libomp.so" && \
     ldconfig
+
+RUN --mount=type=bind,from=torch-common,source=verify-python-trust.py,target=/tmp/verify-python-trust.py \
+    python3 /tmp/verify-python-trust.py
 
 COPY --link --from=torch-common --chmod=755 install_cudnn.sh /tmp/install_cudnn.sh
 
@@ -452,13 +459,18 @@ RUN --mount=type=bind,from=triton-downloader,source=/git/triton,target=triton/,r
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     if [ "$BUILD_TRITON" = '1' ]; then \
-      python3 -m pip install pybind11 lit && \
-      export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
       if [ -f 'triton/python/setup.py' ]; then \
-        /build/build-wheel.sh triton/python; \
+        TRITON_SRC='triton/python'; \
       else \
-        /build/build-wheel.sh triton; \
+        TRITON_SRC='triton'; \
       fi && \
+      python3 -m pip install pybind11 lit && \
+      NANOBIND_REQ=$(sed -n -E 's@^ *requires *= *\[.*"(nanobind[^"]*)".*]@\1@p' "${TRITON_SRC}/pyproject.toml") && \
+      if [ -n "${NANOBIND_REQ}" ]; then \
+        python3 -m pip install "${NANOBIND_REQ}"; \
+      fi && \
+      export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
+      /build/build-wheel.sh "${TRITON_SRC}" && \
       python3 -m pip install dist/*.whl; \
     fi
 
@@ -647,11 +659,19 @@ RUN --mount=type=bind,from=torchaudio-downloader,source=/git/audio,target=audio/
 
 FROM builder-base AS transformerengine-builder
 RUN rm ./dist/*
+RUN python3 -m pip install 'nvidia-cudnn-frontend>=1.29.0'
 
 # Build TransformerEngine
 ARG BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
 ENV NVTE_CUDA_ARCHS=$BUILD_TRANSFORMERENGINE_CUDA_ARCH_LIST
-ENV NVTE_CMAKE_EXTRA_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF'
+# TransformerEngine passes CMake its own -DCMAKE_CUDA_COMPILER pointing at
+# the real nvcc, which takes precedence over CUDACXX. The later
+# -DCMAKE_CUDA_COMPILER here overrides it with the nvcc wrapper.
+ENV NVTE_CMAKE_EXTRA_ARGS='-DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF -DCMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS=OFF -DCMAKE_CUDA_COMPILER=/build/nvcc-wrapper.py'
+# NCCL EP is built only on nccl-tests bases with CUDA 13 or newer.
+# It needs the NCCL device API headers at build time and the same NCCL
+# with headers at runtime, which only the nccl-tests images provide,
+# and its documentation lists CUDA 13 as a requirement.
 
 RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerEngine,target=TransformerEngine/,rw \
     --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -668,6 +688,10 @@ RUN --mount=type=bind,from=transformerengine-downloader,source=/git/TransformerE
     case "${CUDA_VERSION}" in 12.[0123456].*) \
       export NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS%;100*}" ;; \
     esac && \
+    if [ ! -d /opt/nccl-tests ] || [ "${CUDA_VERSION%%.*}" -lt 13 ]; then \
+      export NVTE_WITH_NCCL_EP=0; \
+    fi && \
+    echo "NVTE_WITH_NCCL_EP: ${NVTE_WITH_NCCL_EP:-1}" && \
     /build/build-wheel.sh TransformerEngine
 
 FROM builder-base AS flash-attn-builder-base
@@ -768,7 +792,7 @@ COPY --link --from=conf / /
 # and thus do not inherently need to be pushed into venv isolation.
 RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=/tmp/libomp5-cw.deb \
     if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
-      PACKAGES='libncurses5 python3-pip python3-distutils'; \
+      PACKAGES='libncurses5 python3-distutils python3-dev'; \
     else \
       PACKAGES='libncurses6 python3-dev'; \
     fi && \
@@ -779,10 +803,9 @@ RUN --mount=type=bind,from=libomp-builder,source=/libomp-replacement.deb,target=
       rsync htop wget unzip tini && \
     apt-get clean && \
     rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
-    if ! command -v pip3 >/dev/null 2>&1; then \
-      wget -qO- 'https://bootstrap.pypa.io/get-pip.py' | /usr/bin/python3; \
-    fi && \
-    /usr/bin/python3 -m pip install --upgrade pip 'setuptools<82' && \
+    wget -qO- 'https://bootstrap.pypa.io/get-pip.py' \
+    | /usr/bin/python3 - --no-setuptools --no-wheel 'pip>=26.2.2' 'certifi>=2026.10.19' && \
+    /usr/bin/python3 -m pip install --upgrade 'setuptools<82' && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     update-alternatives --install /usr/bin/pip pip "$(command -v pip3)" 1 && \
     update-alternatives --install /usr/bin/vim vim /usr/bin/vim.tiny 1 && \
@@ -867,8 +890,14 @@ RUN CUDA_MAJOR_VERSION="$(echo "${CUDA_VERSION}" | cut -d. -f1)" && \
 
 WORKDIR /usr/src/app
 
+COPY --link --chmod=555 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
+
 # Install custom PyTorch wheels.
 RUN --mount=type=bind,from=builder,source=/build/dist,target=. \
+    if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
+      /opt/coreweave/bin/distro-pkg-divert --list-removed python3-typing-extensions \
+      | python3 -m pip install -r /dev/stdin; \
+    fi && \
     python3 -m pip install -U numpy packaging && \
     python3 -m pip install -U ./*.whl
 
@@ -887,63 +916,10 @@ RUN if [ -z "${BUILD_FLASH_ATTN_4_VERSION}" ]; then exit 0; fi && \
     )" && \
     python3 -m pip install "${FA4_PACKAGE}"
 
-# Make a symlink to flash-attn v3 where TransformerEngine expects it,
-# and modify the installation record so that pip uninstall knows how to
-# fully remove it.
-RUN <<-"EOT" python3
-	#!/bin/env python3
-	from base64 import urlsafe_b64encode as b64
-	from hashlib import sha256
-	from importlib import metadata
-	from pathlib import Path
-	from py_compile import compile
-
-	try:
-	    dist = metadata.distribution("flash-attn-3")
-	    record_pattern = "flash?attn?3-*.dist-info/RECORD"
-	except metadata.PackageNotFoundError:
-	    dist = metadata.distribution("flashattn-hopper")
-	    record_pattern = "flashattn?hopper-*.dist-info/RECORD"
-	p = dist.locate_file("flash_attn_interface.py")
-	print("flash_attn_interface:", p)
-	root = p.parent
-
-	if not p.exists():
-	    raise SystemExit("flash_attn_interface not found")
-	if not p.is_file():
-	    raise SystemExit("flash_attn_interface path is not a file")
-
-	d = root / "flash_attn_3"
-	d.mkdir(mode=0o755, parents=False, exist_ok=True)
-
-	new = d / p.name
-	if new.exists():
-	    raise SystemExit(f'"{new}" already exists')
-	new.symlink_to(p)
-	print(f"Created new symlink at {new}")
-
-	compiled = Path(compile(new))
-
-
-	def record_entry(path: Path) -> str:
-	    content = path.read_bytes()
-	    digest = b64(sha256(content).digest()).rstrip(b"=").decode()
-	    package_path = path.relative_to(root).as_posix()
-	    return f"{package_path},sha256={digest},{len(content):d}\r\n"
-
-
-	for f in dist.files:
-	    if f.match(record_pattern):
-	        with f.locate().open("a", encoding="utf-8", newline="") as record:
-	            for added in (new, compiled):
-	                record.write(record_entry(added))
-	        break
-EOT
-
-COPY --link --chmod=555 distro-pkg-divert.py /opt/coreweave/bin/distro-pkg-divert
-RUN if dpkg -s python3-typing-extensions >/dev/null 2>&1; then \
-      /opt/coreweave/bin/distro-pkg-divert --list-removed python3-typing-extensions \
-      | python3 -m pip install -r /dev/stdin; \
-    fi
-
 COPY --link --from=uv-downloader /opt/uv /opt/uvx /usr/local/bin/
+
+ARG TRANSLOCATE_VERSION
+RUN python3 -m pip install "translocate==${TRANSLOCATE_VERSION}"
+
+RUN --mount=type=bind,from=torch-common,source=verify-python-trust.py,target=/tmp/verify-python-trust.py \
+    python3 /tmp/verify-python-trust.py
