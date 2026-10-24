@@ -26,13 +26,13 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 
-SGLANG_SOURCE = "e00930c5489053f26d86b179cee0d087f846acbb"
+SGLANG_SOURCE = "baa9befa381511cd4d56f83980951e5a45fffc6d"
 PROFILES = {
     "baseline": {
-        "source": "69ff11fc4954396d98326656dc85debd2223f637",
-        "flashinfer-python": "0.6.18",
-        "nvidia-cutlass-dsl": "4.6.2",
-        "quack-kernels": "0.6.4",
+        "source": "0b46115d238d29ea2e92c6b9b2cb077d40fbc352",
+        "flashinfer-python": "0.7.1",
+        "nvidia-cutlass-dsl": "4.8.0",
+        "quack-kernels": "0.6.5",
     },
 }
 FIXED = {"flash-attn-4": "4.0.0b19", "apache-tvm-ffi": "0.1.11"}
@@ -434,27 +434,37 @@ def inspect_wheel(path):
         return result
 
 
-def validate_wheel_set(profile, rows, source, cuda_local=None):
+def validate_wheel_set(profile, rows, source, cuda_local=None, targets=("sm103a",)):
     require(len(rows) == len({row["name"] for row in rows}), "Duplicate wheel distributions")
     by_name = {row["name"]: row for row in rows}
     required = {"sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"}
     require(required <= set(by_name), f"Missing built distributions: {required - set(by_name)}")
+    shim = by_name["flashinfer-jit-cache"]
+    dependencies = {canonicalize_name(req.name): req for value in shim["requires"]
+                    if (req := Requirement(value)).name.startswith("flashinfer-jit-cache-")}
+    providers = set(dependencies)
+    require({f"flashinfer-jit-cache-{target}" for target in targets} <= providers,
+            "Missing required GPU provider in published shim")
+    required |= providers
+    require(required <= set(by_name), f"Missing built distributions: {required - set(by_name)}")
     fi_rows = [row for row in rows if row["name"].startswith("flashinfer-")]
     require({row["name"] for row in fi_rows} == {n for n in required if n.startswith("flashinfer-")},
             "Unexpected FlashInfer distribution in wheelhouse")
-    versions = {row["version"] for row in fi_rows}
-    require(len(versions) == 1, "FlashInfer package versions/local CUDA labels differ")
-    version = versions.pop()
+    version = shim["version"]
     require(Version(version).public == PROFILES[profile]["flashinfer-python"], "Wrong FI public version")
     require(re.fullmatch(r"cu13\d+", Version(version).local or ""), "Missing exact CUDA13 local label")
     if cuda_local is not None:
-        require(Version(version).local == cuda_local, "FI wheel CUDA label differs from active nvcc")
+        require(Version(version).local == cuda_local, "FI wheel CUDA label differs from selected provider toolkit")
+    require(all(exact_version(req) == version for req in dependencies.values()),
+            "Shim provider version mismatch")
     for row in fi_rows:
+        expected = Version(version).public if row["name"] in ("flashinfer-python", "flashinfer-cubin") else version
+        require(row["version"] == expected, "FlashInfer package versions/local CUDA labels differ")
         build = row["build_metadata"]
-        require(build.get("__version__") == version, "Wheel build metadata/version mismatch")
+        require(build.get("__version__") == row["version"], "Wheel build metadata/version mismatch")
         require(build.get("__git_version__", build.get("__git_commit__")) == source,
                 "FlashInfer wheel source mismatch")
-    critical = by_name["flashinfer-jit-cache"]
+    critical = by_name["flashinfer-jit-cache-sm103a"]
     require(set(critical["key_modules"]) == set(KEY_MODULES), "Missing GLM SM103 key AOT modules")
     return critical
 
@@ -479,6 +489,14 @@ def newly_resolved_native(snapshot, versions):
             if controlled_package(name) and name not in constrained}
 
 
+def flashinfer_cuda_label(profile, toolkit_label):
+    # Published FI 0.7.1 has no cu132 artifacts. This is the sole mixed-toolkit
+    # selection; all providers must still carry the same exact cu130 version.
+    if (PROFILES[profile]["flashinfer-python"], toolkit_label) == ("0.7.1", "cu132"):
+        return "cu130"
+    return toolkit_label
+
+
 def wheels(args):
     source_contract(args.profile, args.sglang_source, args.flashinfer_source)
     snapshot = json.loads(Path(args.snapshot).read_text())
@@ -488,13 +506,13 @@ def wheels(args):
     nvcc_version = subprocess.check_output([str(Path(args.cuobjdump).with_name("nvcc")), "--version"], text=True)
     release = re.search(r"release\s+(\d+)\.(\d+),", nvcc_version)
     require(release is not None and release[1] == "13", "Expected CUDA13 nvcc release")
-    cuda_local = "cu" + release[1] + release[2]
+    cuda_local = flashinfer_cuda_label(args.profile, "cu" + release[1] + release[2])
     evidence = source_evidence(args.sglang_source)
     require(evidence == snapshot["sglang_source_evidence"], "SGLang sources changed during build")
     require(torch_abi() == snapshot["torch_abi"], "Torch ABI changed during build")
     paths = sorted(Path(args.wheel_dir).glob("*.whl"))
     rows = [inspect_wheel(path) for path in paths]
-    critical = validate_wheel_set(args.profile, rows, PROFILES[args.profile]["source"], cuda_local)
+    critical = validate_wheel_set(args.profile, rows, PROFILES[args.profile]["source"], cuda_local, targets)
     reports = {}
     path = Path(args.wheel_dir) / critical["filename"]
     reports["sm103a"] = inspect_baseline_device_code(path, critical, args.cuobjdump)

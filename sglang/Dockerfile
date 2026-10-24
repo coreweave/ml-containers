@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:8c5de3e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:b903737-nccl-cuda13.2.1-ubuntu24.04-nccl2.32.3-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1"
 ARG BUILDER_IMAGE="${BASE_IMAGE}"
 ARG SCCACHE_VERSION="0.14.0"
 
@@ -47,7 +47,7 @@ case "${SGLANG_PACKAGE_PROFILE}" in
     git clone --filter=blob:none --no-checkout https://github.com/flashinfer-ai/flashinfer /build/flashinfer
     git -C /build/flashinfer checkout "${FLASHINFER_COMMIT}"
     test "$(git -C /build/flashinfer rev-parse HEAD)" = "${FLASHINFER_COMMIT}"
-    git -C /build/flashinfer submodule update --init --recursive --jobs 8
+    # Only metadata is needed; published wheels contain the native kernels.
     ;;
   *) exit 1 ;;
 esac
@@ -73,6 +73,10 @@ sed -Ei \
   -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
   -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
   python/pyproject.toml
+# The AOT wheel is compiled without build isolation against the base Torch.
+# Keep both its build requirement and runtime metadata tied to that version.
+sed -Ei "s@\"torch==[0-9]+\.[0-9]+\.[0-9]+\"@\"torch==${TORCH_VERSION}\"@" \
+  python/sglang/kernels/aot/pyproject.toml
 SOURCE
 
 FROM builder-base AS package-contract
@@ -105,25 +109,29 @@ else
 fi
 CONTRACT
 
-FROM builder-base AS flashinfer-builder
-ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
-ARG TARGETPLATFORM
+FROM builder-base AS flashinfer-build-base
 ARG FLASHINFER_COMMIT
+ARG FLASHINFER_VERSION=0.7.1
 ARG SGLANG_PACKAGE_PROFILE=legacy
-COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/
-# Only content-stable dependency inputs cross the helper validation boundary.
+# Metadata-derived constraints also protect the SGLang compiler environment.
 COPY --link --from=package-contract /contract/constraints.txt /contract/build-requirements.txt /wheels/
 COPY build-flashinfer.bash /build/
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && \
-    ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}" && \
-    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH_LIST="9.0 10.0+PTX"; fi && \
-    bash /build/build-flashinfer.bash -a "${ARCH_LIST}"
+RUN bash /build/build-flashinfer.bash -p dependencies
+
+FROM flashinfer-build-base AS flashinfer-python
+RUN bash /build/build-flashinfer.bash -p python
+
+# Download the large cubin wheel independently of the CUDA-specific providers.
+FROM flashinfer-build-base AS flashinfer-cubin
+RUN mkdir /cubin-wheels && bash /build/build-flashinfer.bash -p cubin -o /cubin-wheels
+
+FROM flashinfer-python AS flashinfer-builder
+RUN bash /build/build-flashinfer.bash -p cache
+COPY --link --from=flashinfer-cubin /cubin-wheels/ /wheels/
+COPY --link --from=flashinfer-cubin /build-logs/ /build-logs/
 
 FROM flashinfer-builder AS builder
+COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/
 ARG SGLANG_COMMIT
 ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 ARG TARGETPLATFORM

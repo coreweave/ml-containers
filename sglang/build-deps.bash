@@ -7,8 +7,10 @@ _PIP_INSTALL() {
 }
 
 # Install build dependencies explicitly because wheel builds disable isolation.
-_PIP_INSTALL -U pip 'setuptools<82' wheel build ninja \
+_PIP_INSTALL -U pip 'setuptools<82' wheel build ninja 'cmake==3.31.10' \
   'scikit-build-core>=0.10' 'setuptools-scm>=8.0' 'setuptools-rust>=1.11'
+# The plain Torch runtime does not provide the kernel build toolchain.
+cmake --version
 
 # protobuf-compiler: needed by tonic-build (via prost-build) when compiling the
 # sglang-grpc Rust crate.
