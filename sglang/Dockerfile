@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:14744fc-base-cuda13.2.2-ubuntu24.04-torch2.14.1-vision0.29.1-audio2.11.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:14744fc-nccl-cuda13.2.2-ubuntu24.04-nccl2.32.3-1-torch2.14.1-vision0.29.1-audio2.11.0-abi1"
 ARG BUILDER_IMAGE="${BASE_IMAGE}"
 ARG SCCACHE_VERSION="0.14.0"
 
@@ -157,8 +157,7 @@ LABEL com.coreweave.sglang.source-ref="${SGLANG_COMMIT}" \
 RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends -y \
       libnvshmem3-cuda-13 \
-      libssl-dev g++ \
-      "libnccl-dev=$(dpkg-query -W -f='${Version}' libnccl2)" && \
+      libssl-dev && \
     NCCL_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" && \
     NVSHMEM_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/nvshmem/13" && \
     mkdir -p /opt/nccl && \

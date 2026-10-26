@@ -14,22 +14,10 @@ cmake --version
 
 # protobuf-compiler: needed by tonic-build (via prost-build) when compiling the
 # sglang-grpc Rust crate.
-# The plain CUDA-base Torch image has runtime libraries and nvcc, but not
-# the development libraries inherited from the previous NCCL devel image.
-CUDA_PACKAGE_VERSION="$(echo "${CUDA_VERSION}" | cut -d. -f1,2 | tr . -)"
+# CUDA development tools, C++ compilers, and NCCL headers come from the
+# NCCL devel base; only the SGLang-specific system build dependency is added.
 apt-get -qq update && apt-get -q install --no-install-recommends -y \
-  protobuf-compiler build-essential \
-  "libcublas-dev-${CUDA_PACKAGE_VERSION}" \
-  "libcurand-dev-${CUDA_PACKAGE_VERSION}" \
-  "libcusparse-dev-${CUDA_PACKAGE_VERSION}" \
-  "libcusolver-dev-${CUDA_PACKAGE_VERSION}" \
-  "cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION}" \
-  "cuda-cupti-dev-${CUDA_PACKAGE_VERSION}" \
-  "cuda-cuobjdump-${CUDA_PACKAGE_VERSION}" \
-  "libnccl-dev=$(dpkg-query -W -f='${Version}' libnccl2)"
-
-# The wheel audit inspects SM103 device code; fail before compilation if absent.
-/usr/local/cuda/bin/cuobjdump --version
+  protobuf-compiler
 
 # rustup only; --default-toolchain none defers to rust-toolchain.toml on first cargo run.
 curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup.rs \

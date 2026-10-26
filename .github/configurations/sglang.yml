@@ -3,6 +3,6 @@ include:
   - sglang-commit: 'baa9befa381511cd4d56f83980951e5a45fffc6d'
     flashinfer-commit: '0b46115d238d29ea2e92c6b9b2cb077d40fbc352'
     package-profile: baseline
-    base-image: 'ghcr.io/coreweave/ml-containers/torch:14744fc-base-cuda13.2.2-ubuntu24.04-torch2.14.1-vision0.29.1-audio2.11.0-abi1'
+    base-image: 'ghcr.io/coreweave/ml-containers/torch:14744fc-nccl-cuda13.2.2-ubuntu24.04-nccl2.32.3-1-torch2.14.1-vision0.29.1-audio2.11.0-abi1'
     # renovate-release-tag: datasource=github-releases depName=sgl-project/sglang versioning=pep440
     tag: 'v0.5.22-cuda13.2.2-torch2.14.1'
