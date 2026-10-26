@@ -75,6 +75,7 @@ for req in requirements:
         (provider.jit_cache_dir / module / f"{module}.so").is_file()
         for module in provider.modules
     ), req.name
+import cutlass.cute as cute
 import quack.activation
 from sglang.kernels.ops.attention.flash_attn.cute import utils as sglang_cute_utils
 
@@ -82,7 +83,9 @@ assert callable(flash_attn_func)
 assert callable(trtllm_batch_decode_with_kv_cache_mla)
 assert callable(trtllm_fp4_block_scale_moe)
 assert callable(sglang_cute_utils.ex2_emulation_2)
-assert callable(quack.activation.sub_packed_f32x2)
+# SGLang 0.5.22 uses the packed subtraction API from CUTLASS, not Quack.
+assert callable(cute.arch.sub_packed_f32x2)
+assert callable(quack.activation.sigmoid)
 assert not torch.cuda.is_initialized()
 print('FlashAttention, FlashInfer and SGLang CuTe API import checks passed; no GPU kernels executed')
 PY
