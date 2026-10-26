@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:b903737-nccl-cuda13.2.1-ubuntu24.04-nccl2.32.3-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:14744fc-base-cuda13.2.2-ubuntu24.04-torch2.14.1-vision0.29.1-audio2.11.0-abi1"
 ARG BUILDER_IMAGE="${BASE_IMAGE}"
 ARG SCCACHE_VERSION="0.14.0"
 
@@ -66,17 +66,8 @@ if [ "${SGLANG_PACKAGE_PROFILE}" != legacy ]; then
   test "$(git rev-parse HEAD)" = "${SGLANG_COMMIT}"
   git submodule update --init --recursive --jobs 8
 fi
-TORCH_VERSION="$(python3 -c 'import torch; print(torch.__version__.partition("+")[0])')"
-sed -Ei \
-  -e "s@\"torch==[0-9]+\.[0-9]+\.[0-9]+\"@\"torch>=${TORCH_VERSION}\"@" \
-  -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.11.0"@' \
-  -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
-  -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
-  python/pyproject.toml
-# The AOT wheel is compiled without build isolation against the base Torch.
-# Keep both its build requirement and runtime metadata tied to that version.
-sed -Ei "s@\"torch==[0-9]+\.[0-9]+\.[0-9]+\"@\"torch==${TORCH_VERSION}\"@" \
-  python/sglang/kernels/aot/pyproject.toml
+# Preserve upstream Torch pins: the base now supplies the required 2.14.1.
+
 SOURCE
 
 FROM builder-base AS package-contract
@@ -166,7 +157,8 @@ LABEL com.coreweave.sglang.source-ref="${SGLANG_COMMIT}" \
 RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends -y \
       libnvshmem3-cuda-13 \
-      libssl-dev && \
+      libssl-dev g++ \
+      "libnccl-dev=$(dpkg-query -W -f='${Version}' libnccl2)" && \
     NCCL_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" && \
     NVSHMEM_LIB_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/nvshmem/13" && \
     mkdir -p /opt/nccl && \

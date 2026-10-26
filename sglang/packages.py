@@ -35,7 +35,7 @@ PROFILES = {
         "quack-kernels": "0.6.5",
     },
 }
-FIXED = {"flash-attn-4": "4.0.0b19", "apache-tvm-ffi": "0.1.11"}
+FIXED = {"flash-attn-4": "4.0.0b36", "apache-tvm-ffi": "0.1.11"}
 PROTOCOL_PINS = {
     "protobuf": "6.33.6",
     "grpcio": "1.84.0",
