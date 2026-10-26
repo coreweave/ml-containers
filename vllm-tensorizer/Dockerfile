@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:greg-torch-2.14-8e0c526-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.28.0-audio2.11.0-abi1@sha256:9e829eae146b599671ae9dda822a56210411f7d2cd0304701aa2166667a1e37b"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:greg-torch-2.14-8e0c526-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.28.0-audio2.11.0-abi1@sha256:9e829eae146b599671ae9dda822a56210411f7d2cd0304701aa2166667a1e37b"
 ARG SCCACHE_VERSION="0.14.0"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -118,7 +118,7 @@ WORKDIR /git
 # Match _DEEPGEMM_UPSTREAM_TAG in vLLM's cmake/external_projects/deepgemm.cmake
 # at VLLM_COMMIT (vllm-project/DeepGEMM); a stale wheel drifts from the JIT
 # interface vLLM was built against and breaks FP8 MoE GEMMs at serve time.
-ARG DEEPGEMM_COMMIT='1e1842a833699298f7afc02eefb2ed168fff6938'
+ARG DEEPGEMM_COMMIT='0820030756945b2daec208e8e8255268360f337d'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
@@ -193,6 +193,10 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
+    # Torch 2.14 requires C++20; LMCache v0.4.7 still specifies C++17.
+    grep -q -- '-std=c++17' setup.py && \
+    sed -i 's/-std=c++17/-std=c++20/g' setup.py && \
+    ! grep -q -- '-std=c++17' setup.py && \
     /opt/build.sh
 
 
@@ -331,6 +335,9 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 # Install upstream runtime requirements before the vLLM wheel to cache this layer.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/requirements,target=/tmp/vllm-requirements \
     cp -r /tmp/vllm-requirements /tmp/requirements && \
+    # Match the existing-Torch source build above. Retain the base's compiled
+    # Torch/vision/audio set rather than replacing it with incompatible wheels.
+    sed -Ei '/^(torch|torchaudio|torchvision) *==/d' /tmp/requirements/cuda.txt && \
     if [ "${CUDA_VERSION%%.*}" = "12" ]; then \
       sed -i 's/^nvidia-cutlass-dsl\[cu13\]/nvidia-cutlass-dsl/' /tmp/requirements/cuda.txt; \
       sed -i 's/^humming-kernels\[cu13\]/humming-kernels[cu12]/' /tmp/requirements/cuda.txt; \
