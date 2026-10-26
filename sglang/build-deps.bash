@@ -25,7 +25,11 @@ apt-get -qq update && apt-get -q install --no-install-recommends -y \
   "libcusolver-dev-${CUDA_PACKAGE_VERSION}" \
   "cuda-nvrtc-dev-${CUDA_PACKAGE_VERSION}" \
   "cuda-cupti-dev-${CUDA_PACKAGE_VERSION}" \
+  "cuda-cuobjdump-${CUDA_PACKAGE_VERSION}" \
   "libnccl-dev=$(dpkg-query -W -f='${Version}' libnccl2)"
+
+# The wheel audit inspects SM103 device code; fail before compilation if absent.
+/usr/local/cuda/bin/cuobjdump --version
 
 # rustup only; --default-toolchain none defers to rust-toolchain.toml on first cargo run.
 curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup.rs \
