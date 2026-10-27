@@ -129,7 +129,10 @@ RUN apt-get -qq update && apt-get -qq install -y \
 # Update compiler (GCC) and linker (LLD) versions
 # gfortran-13 is just for compiler_wrapper.f95
 ARG LLVM_VERSION
-RUN if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
+RUN CODENAME="$(lsb_release -cs)" && \
+    wget -qO - 'https://apt.llvm.org/llvm-snapshot.gpg.key' > /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
+    apt-add-repository -n "deb https://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VERSION main" && \
+    if [ "$(. /etc/os-release && echo "$VERSION_ID")" = '22.04' ]; then \
       add-apt-repository -n ppa:ubuntu-toolchain-r/test; \
     fi && \
     apt-get -qq update && apt-get -qq install --no-install-recommends -y \
