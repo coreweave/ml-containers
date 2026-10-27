@@ -43,7 +43,6 @@ if [ "$PHASE" = all ] || [ "$PHASE" = cubin ]; then
     --extra-index-url https://flashinfer.ai/whl/ "flashinfer-cubin==${FLASHINFER_VERSION}"
 fi
 if [ "$PHASE" = all ] || [ "$PHASE" = cache ]; then
-  # Resolve the shim's exact provider dependencies for this CPU architecture.
   _RUN flashinfer-jit-cache python3 -m pip download --only-binary=:all: \
     --dest "$WHEEL_DIR" --constraint /wheels/constraints.txt \
     --index-url "https://flashinfer.ai/whl/cu${CUDA_RELEASE}" \

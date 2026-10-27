@@ -83,7 +83,6 @@ assert callable(flash_attn_func)
 assert callable(trtllm_batch_decode_with_kv_cache_mla)
 assert callable(trtllm_fp4_block_scale_moe)
 assert callable(sglang_cute_utils.ex2_emulation_2)
-# SGLang 0.5.22 uses the packed subtraction API from CUTLASS, not Quack.
 assert callable(cute.arch.sub_packed_f32x2)
 assert callable(quack.activation.sigmoid)
 assert not torch.cuda.is_initialized()

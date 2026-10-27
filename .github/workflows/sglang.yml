@@ -30,4 +30,5 @@ jobs:
         BASE_IMAGE=${{ matrix.base-image }}
         SGLANG_COMMIT=${{ matrix.sglang-commit }}
         FLASHINFER_COMMIT=${{ matrix.flashinfer-commit }}
+        FLASHINFER_VERSION=${{ matrix.flashinfer-version }}
         SGLANG_PACKAGE_PROFILE=${{ matrix.package-profile || 'legacy' }}

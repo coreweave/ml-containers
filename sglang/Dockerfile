@@ -102,7 +102,7 @@ CONTRACT
 
 FROM builder-base AS flashinfer-build-base
 ARG FLASHINFER_COMMIT
-ARG FLASHINFER_VERSION=0.7.1
+ARG FLASHINFER_VERSION
 ARG SGLANG_PACKAGE_PROFILE=legacy
 # Metadata-derived constraints also protect the SGLang compiler environment.
 COPY --link --from=package-contract /contract/constraints.txt /contract/build-requirements.txt /wheels/
