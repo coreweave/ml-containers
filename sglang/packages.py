@@ -29,8 +29,7 @@ from packaging.version import Version
 SGLANG_SOURCE = "baa9befa381511cd4d56f83980951e5a45fffc6d"
 PROFILES = {
     "baseline": {
-        "source": "0b46115d238d29ea2e92c6b9b2cb077d40fbc352",
-        "flashinfer-python": "0.7.1",
+        "flashinfer-python": os.environ.get("FLASHINFER_VERSION"),
         "nvidia-cutlass-dsl": "4.8.0",
         "quack-kernels": "0.6.5",
     },
@@ -133,9 +132,9 @@ def installed(strict_names=(), *, evidence=None):
     return result
 
 
-def revision(source):
+def revision(source, ref="HEAD"):
     return subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=source, text=True
+        ["git", "rev-parse", ref], cwd=source, text=True
     ).strip()
 
 
@@ -161,14 +160,14 @@ def exact_version(req):
 
 def source_contract(profile, sg_source, fi_source):
     policy = PROFILES[profile]
+    require(bool(policy["flashinfer-python"]), "FLASHINFER_VERSION must be configured")
     require(revision(sg_source) == SGLANG_SOURCE, "Unreviewed SGLang source")
-    require(revision(fi_source) == policy["source"], "Wrong FlashInfer source/profile")
+    tag = f"refs/tags/v{policy['flashinfer-python']}^{{commit}}"
+    require(revision(fi_source) == revision(fi_source, tag), "Wrong FlashInfer source/tag")
     require((Path(fi_source) / "version.txt").read_text().strip() == policy["flashinfer-python"],
             "FlashInfer source version does not match profile")
     requirements = source_requirements(sg_source)
     for name, version in {**policy, **FIXED}.items():
-        if name == "source":
-            continue
         require(name in requirements, f"Missing SGLang requirement: {name}")
         if name in policy or name == "apache-tvm-ffi":
             require(exact_version(requirements[name]) == version,
@@ -253,7 +252,7 @@ def constraints(args):
     Path(args.requirements).write_text("\n".join(dict.fromkeys(build)) + "\n")
     write_json(args.snapshot, {
         "schema": "sglang-package-constraints/v1", "profile": args.profile,
-        "sources": {"sglang": SGLANG_SOURCE, "flashinfer": PROFILES[args.profile]["source"]},
+        "sources": {"sglang": SGLANG_SOURCE, "flashinfer": revision(args.flashinfer_source)},
         "before": before, "selected_versions": selected, "preserved_versions": preserved,
         "distribution_selection_before": selection,
         "optional_versions": dsl_sibling_constraints(selected),
@@ -490,11 +489,13 @@ def newly_resolved_native(snapshot, versions):
 
 
 def flashinfer_cuda_label(profile, toolkit_label):
-    # Published FI 0.7.1 has no cu132 artifacts. This is the sole mixed-toolkit
-    # selection; all providers must still carry the same exact cu130 version.
-    if (PROFILES[profile]["flashinfer-python"], toolkit_label) == ("0.7.1", "cu132"):
-        return "cu130"
-    return toolkit_label
+    label = os.environ.get("FLASHINFER_CUDA_LABEL", "")
+    require(re.fullmatch(r"cu13\d+", label) is not None,
+            "FLASHINFER_CUDA_LABEL must select a CUDA13 wheel build")
+    require(re.fullmatch(r"cu13\d+", toolkit_label) is not None
+            and int(label[2:]) <= int(toolkit_label[2:]),
+            "FlashInfer wheel toolkit must not be newer than the active toolkit")
+    return label
 
 
 def wheels(args):
@@ -512,7 +513,9 @@ def wheels(args):
     require(torch_abi() == snapshot["torch_abi"], "Torch ABI changed during build")
     paths = sorted(Path(args.wheel_dir).glob("*.whl"))
     rows = [inspect_wheel(path) for path in paths]
-    critical = validate_wheel_set(args.profile, rows, PROFILES[args.profile]["source"], cuda_local, targets)
+    fi_commit = revision(args.flashinfer_source)
+    require(fi_commit == snapshot["sources"]["flashinfer"], "FlashInfer source changed during build")
+    critical = validate_wheel_set(args.profile, rows, fi_commit, cuda_local, targets)
     reports = {}
     path = Path(args.wheel_dir) / critical["filename"]
     reports["sm103a"] = inspect_baseline_device_code(path, critical, args.cuobjdump)

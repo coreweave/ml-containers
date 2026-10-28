@@ -33,20 +33,19 @@ RUN python3 /opt/build_progress.py --label build-dependencies --log-path /build-
     bash /build/build-deps.bash
 
 FROM builder-base AS flashinfer-source
-ARG FLASHINFER_COMMIT
+ARG FLASHINFER_VERSION
 ARG SGLANG_PACKAGE_PROFILE=legacy
 RUN <<'SOURCE'
 set -e
 case "${SGLANG_PACKAGE_PROFILE}" in
   legacy)
-    [ -z "${FLASHINFER_COMMIT:-}" ]
+    [ -z "${FLASHINFER_VERSION:-}" ]
     mkdir /build/flashinfer
     ;;
   baseline)
-    test -n "${FLASHINFER_COMMIT}"
+    test -n "${FLASHINFER_VERSION}"
     git clone --filter=blob:none --no-checkout https://github.com/flashinfer-ai/flashinfer /build/flashinfer
-    git -C /build/flashinfer checkout "${FLASHINFER_COMMIT}"
-    test "$(git -C /build/flashinfer rev-parse HEAD)" = "${FLASHINFER_COMMIT}"
+    git -C /build/flashinfer checkout --detach "refs/tags/v${FLASHINFER_VERSION}"
     # Only metadata is needed; published wheels contain the native kernels.
     ;;
   *) exit 1 ;;
@@ -71,6 +70,8 @@ fi
 SOURCE
 
 FROM builder-base AS package-contract
+ARG FLASHINFER_VERSION
+ARG FLASHINFER_CUDA_LABEL
 ARG SGLANG_PACKAGE_PROFILE=legacy
 COPY --link --from=sglang-source /build/sglang/ /build/sglang/
 COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/
@@ -101,8 +102,8 @@ fi
 CONTRACT
 
 FROM builder-base AS flashinfer-build-base
-ARG FLASHINFER_COMMIT
 ARG FLASHINFER_VERSION
+ARG FLASHINFER_CUDA_LABEL
 ARG SGLANG_PACKAGE_PROFILE=legacy
 # Metadata-derived constraints also protect the SGLang compiler environment.
 COPY --link --from=package-contract /contract/constraints.txt /contract/build-requirements.txt /wheels/
@@ -146,10 +147,10 @@ COPY --from=package-contract /build-logs/ /contract/
 
 FROM ${BASE_IMAGE}
 ARG SGLANG_COMMIT
-ARG FLASHINFER_COMMIT
+ARG FLASHINFER_VERSION
 ARG SGLANG_PACKAGE_PROFILE=legacy
 LABEL com.coreweave.sglang.source-ref="${SGLANG_COMMIT}" \
-      com.coreweave.sglang.flashinfer-ref="${FLASHINFER_COMMIT}" \
+      com.coreweave.sglang.flashinfer-version="${FLASHINFER_VERSION}" \
       com.coreweave.sglang.package-profile="${SGLANG_PACKAGE_PROFILE}"
 # The CUDA 13 sgl-deep-ep wheel links against NVSHMEM but does not bundle it.
 # SGLang JIT-compiles its HiCache native hash extension on first use, which

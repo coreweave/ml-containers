@@ -20,6 +20,10 @@ from packaging.requirements import Requirement
 
 import packages as p
 
+# Example release used by synthetic wheel/source fixtures, not build configuration.
+p.PROFILES["baseline"]["flashinfer-python"] = "0.7.1"
+FLASHINFER_SOURCE = "a" * 40
+
 
 def requirements(profile="baseline"):
     selected = p.PROFILES[profile]
@@ -51,7 +55,7 @@ def wheel_rows(profile="baseline"):
                "bytes": 123, "sha256": "a" * 64, "requires": [], "key_modules": {}}
         if name.startswith("flashinfer-"):
             row["version"] = p.PROFILES[profile]["flashinfer-python"] if name in ("flashinfer-python", "flashinfer-cubin") else version
-            row["build_metadata"] = {"__version__": row["version"], "__git_version__": p.PROFILES[profile]["source"]}
+            row["build_metadata"] = {"__version__": row["version"], "__git_version__": FLASHINFER_SOURCE}
         rows.append(row)
     rows[4]["requires"] = [f"flashinfer-jit-cache-sm103a=={version}"]
     critical = rows[-1]
@@ -167,8 +171,20 @@ class ConstraintTests(unittest.TestCase):
         pins = p.make_constraints(requirements(), base())[2]
         self.assertTrue(all("[" not in name for name in pins))
 
+    def test_source_tag_follows_configured_version(self):
+        for version in ("0.7.1", "0.7.2"):
+            with tempfile.TemporaryDirectory() as directory, \
+                 patch.dict(p.PROFILES["baseline"], {"flashinfer-python": version}):
+                source = Path(directory)
+                (source / "version.txt").write_text(version)
+                with patch.object(p, "revision", side_effect=[p.SGLANG_SOURCE, FLASHINFER_SOURCE,
+                                                              FLASHINFER_SOURCE]) as revision, \
+                     patch.object(p, "source_requirements", return_value=requirements()):
+                    p.source_contract("baseline", Path("sg"), source)
+                revision.assert_called_with(source, f"refs/tags/v{version}^{{commit}}")
+
     def test_wrong_source_pair_rejected(self):
-        with patch.object(p, "revision", side_effect=[p.SGLANG_SOURCE, "f" * 40]):
+        with patch.object(p, "revision", side_effect=[p.SGLANG_SOURCE, "f" * 40, FLASHINFER_SOURCE]):
             with self.assertRaisesRegex(ValueError, "Wrong FlashInfer source"):
                 p.source_contract("baseline", Path("sg"), Path("fi"))
 
@@ -254,7 +270,7 @@ class ProtocolTests(unittest.TestCase):
 
 class WheelSetTests(unittest.TestCase):
     def check(self, rows, profile="baseline"):
-        return p.validate_wheel_set(profile, rows, p.PROFILES[profile]["source"])
+        return p.validate_wheel_set(profile, rows, FLASHINFER_SOURCE)
 
     def test_baseline_complete_set(self):
         self.assertEqual(self.check(wheel_rows("baseline"), "baseline")["name"], "flashinfer-jit-cache-sm103a")
@@ -273,7 +289,7 @@ class WheelSetTests(unittest.TestCase):
 
     def test_requested_provider_must_be_built(self):
         with self.assertRaisesRegex(ValueError, "Missing required GPU provider"):
-            p.validate_wheel_set("baseline", wheel_rows(), p.PROFILES["baseline"]["source"],
+            p.validate_wheel_set("baseline", wheel_rows(), FLASHINFER_SOURCE,
                                  targets=("sm90a", "sm103a"))
 
     def test_missing_jit_cache_fails(self):
@@ -295,12 +311,17 @@ class WheelSetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "versions/local CUDA"):
             self.check(rows)
 
-    def test_published_cuda_selection_is_limited_to_reviewed_pair(self):
-        self.assertEqual(p.flashinfer_cuda_label("baseline", "cu132"), "cu130")
-        for label in ("cu130", "cu129", "cu134"):
-            self.assertEqual(p.flashinfer_cuda_label("baseline", label), label)
-        with patch.dict(p.PROFILES["baseline"], {"flashinfer-python": "0.7.2"}):
+    def test_published_cuda_selection_uses_configuration(self):
+        with patch.dict(os.environ, {"FLASHINFER_CUDA_LABEL": "cu130"}):
+            self.assertEqual(p.flashinfer_cuda_label("baseline", "cu132"), "cu130")
+        with patch.dict(os.environ, {"FLASHINFER_CUDA_LABEL": "cu132"}):
             self.assertEqual(p.flashinfer_cuda_label("baseline", "cu132"), "cu132")
+            with self.assertRaisesRegex(ValueError, "newer"):
+                p.flashinfer_cuda_label("baseline", "cu130")
+        for label in ("", "cu129", "bad"):
+            with patch.dict(os.environ, {"FLASHINFER_CUDA_LABEL": label}):
+                with self.assertRaisesRegex(ValueError, "must select"):
+                    p.flashinfer_cuda_label("baseline", "cu132")
 
     def test_uniform_wrong_local_cuda_label_rejected(self):
         rows = wheel_rows("baseline")
@@ -309,7 +330,7 @@ class WheelSetTests(unittest.TestCase):
                 row["version"] = "0.7.1+cu130"
                 row["build_metadata"]["__version__"] = row["version"]
         with self.assertRaisesRegex(ValueError, "differs from selected provider toolkit"):
-            p.validate_wheel_set("baseline", rows, p.PROFILES["baseline"]["source"], "cu132")
+            p.validate_wheel_set("baseline", rows, FLASHINFER_SOURCE, "cu132")
 
     def test_wrong_source_fails(self):
         rows = wheel_rows(); rows[2]["build_metadata"]["__git_version__"] = "e" * 40

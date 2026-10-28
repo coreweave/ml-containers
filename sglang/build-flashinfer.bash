@@ -3,8 +3,8 @@
 set -eo pipefail
 export DEBIAN_FRONTEND=noninteractive
 case "${SGLANG_PACKAGE_PROFILE:-legacy}" in
-  legacy) [ -z "${FLASHINFER_COMMIT:-}" ]; exit ;;
-  baseline) : "${FLASHINFER_COMMIT:?}" "${FLASHINFER_VERSION:?}" ;;
+  legacy) [ -z "${FLASHINFER_VERSION:-}" ]; exit ;;
+  baseline) : "${FLASHINFER_VERSION:?}" "${FLASHINFER_CUDA_LABEL:?}" ;;
   *) exit 1 ;;
 esac
 PHASE=all
@@ -25,13 +25,6 @@ if [ "$PHASE" = all ] || [ "$PHASE" = dependencies ]; then
   _RUN flashinfer-dependencies python3 -m pip install --no-cache-dir --constraint=/wheels/constraints.txt -r /wheels/build-requirements.txt
   [ "$PHASE" != dependencies ] || exit 0
 fi
-CUDA_RELEASE="$(/usr/local/cuda/bin/nvcc --version | sed -nE 's/.*release ([0-9]+)\.([0-9]+),.*/\1\2/p')"
-[ -n "$CUDA_RELEASE" ]
-# FlashInfer 0.7.1 publishes cu130, not cu132. Keep the newer base toolkit
-# while using the older CUDA 13 provider binaries; packages.py audits this pair.
-if [ "${FLASHINFER_VERSION}:${CUDA_RELEASE}" = '0.7.1:132' ]; then
-  CUDA_RELEASE=130
-fi
 if [ "$PHASE" = all ] || [ "$PHASE" = python ]; then
   _RUN flashinfer-python python3 -m pip download --only-binary=:all: --no-deps \
     --dest "$WHEEL_DIR" --constraint /wheels/constraints.txt \
@@ -45,8 +38,8 @@ fi
 if [ "$PHASE" = all ] || [ "$PHASE" = cache ]; then
   _RUN flashinfer-jit-cache python3 -m pip download --only-binary=:all: \
     --dest "$WHEEL_DIR" --constraint /wheels/constraints.txt \
-    --index-url "https://flashinfer.ai/whl/cu${CUDA_RELEASE}" \
-    "flashinfer-jit-cache==${FLASHINFER_VERSION}+cu${CUDA_RELEASE}"
+    --index-url "https://flashinfer.ai/whl/${FLASHINFER_CUDA_LABEL}" \
+    "flashinfer-jit-cache==${FLASHINFER_VERSION}+${FLASHINFER_CUDA_LABEL}"
   TARGETS='8.0 8.9 9.0a 10.0a 10.3a'
   [ "$(uname -m)" != aarch64 ] || TARGETS='9.0a 10.0a 10.3a'
   printf '%s\n' "$TARGETS" > /wheels/flashinfer-architectures.txt

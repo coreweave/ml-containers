@@ -104,7 +104,7 @@ class StageTests(unittest.TestCase):
 
 
 class PhaseTests(unittest.TestCase):
-    def run_phase(self, script, profile, arch='aarch64', failed='', fi_pin='a' * 40, phase=None):
+    def run_phase(self, script, profile, arch='aarch64', failed='', fi_version='0.7.1', phase=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ('build/flashinfer', 'build/sglang/python/sglang/kernels/aot', 'build/sglang/rust',
@@ -137,8 +137,8 @@ if label==os.getenv('FAIL_PHASE'):sys.exit(7)
                 source = source.replace(before, after)
             target = root / 'phase.bash';target.write_text(source)
             env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
-                       SGLANG_PACKAGE_PROFILE=profile, FLASHINFER_COMMIT=fi_pin,
-                       TRACE=str(root / 'trace.jsonl'), FAIL_PHASE=failed, FLASHINFER_VERSION='0.7.1')
+                       SGLANG_PACKAGE_PROFILE=profile,
+                       TRACE=str(root / 'trace.jsonl'), FAIL_PHASE=failed, FLASHINFER_VERSION=fi_version, FLASHINFER_CUDA_LABEL='cu130')
             for name in ('MAX_JOBS', 'FLASHINFER_NVCC_THREADS'):
                 env.pop(name, None)
             command = ['bash', str(target)]
@@ -187,7 +187,7 @@ if label==os.getenv('FAIL_PHASE'):sys.exit(7)
         self.assertEqual(rows, [])
 
     def test_legacy_skips_flashinfer_and_rejects_unexpected_pin(self):
-        result, rows, _ = self.run_phase('build-flashinfer.bash', 'legacy', fi_pin='')
+        result, rows, _ = self.run_phase('build-flashinfer.bash', 'legacy', fi_version='')
         self.assertEqual(result.returncode, 0, result.stderr);self.assertEqual(rows, [])
         result, rows, _ = self.run_phase('build-flashinfer.bash', 'legacy')
         self.assertNotEqual(result.returncode, 0);self.assertEqual(rows, [])
