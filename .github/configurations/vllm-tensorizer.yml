@@ -1,6 +1,6 @@
 include:
-  # vLLM v0.32.0 release tag.
-  - vllm-commit: '5df63a7203cdb9328d824a27b682e77c7b9928be'
-    lmcache-commit: 'v0.4.7'
-    builder-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'
-    final-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1'
+  # vLLM v0.33 release candidate.
+  - vllm-commit: '61cbf542986283d715b54013fc62cbaa8c29c98a'
+    lmcache-commit: 'v0.5.6'
+    builder-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:greg-torch-2.14-aee80a5-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.28.0-audio2.11.0-abi1'
+    final-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:greg-torch-2.14-aee80a5-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.28.0-audio2.11.0-abi1'
