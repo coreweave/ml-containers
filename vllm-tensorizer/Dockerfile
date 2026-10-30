@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
-ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
-ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:c7a1b60-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
+ARG BUILDER_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:greg-torch-2.14-aee80a5-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.28.0-audio2.11.0-abi1"
+ARG FINAL_BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:greg-torch-2.14-aee80a5-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.28.0-audio2.11.0-abi1"
 ARG SCCACHE_VERSION="0.14.0"
 
 FROM alpine/curl:8.17.0 AS sccache-downloader
@@ -32,7 +32,7 @@ WORKDIR /wheels
 WORKDIR /workspace
 
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
-    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /opt/constraints.txt
+    /tmp/frozen/freeze.sh torch torchaudio xformers > /opt/constraints.txt
 
 COPY --link --from=common --chmod=755 nvcc-wrapper.py /opt/nvcc-wrapper.py
 ENV PYTORCH_NVCC='/opt/nvcc-wrapper.py' \
@@ -118,7 +118,7 @@ WORKDIR /git
 # Match _DEEPGEMM_UPSTREAM_TAG in vLLM's cmake/external_projects/deepgemm.cmake
 # at VLLM_COMMIT (vllm-project/DeepGEMM); a stale wheel drifts from the JIT
 # interface vLLM was built against and breaks FP8 MoE GEMMs at serve time.
-ARG DEEPGEMM_COMMIT='1e1842a833699298f7afc02eefb2ed168fff6938'
+ARG DEEPGEMM_COMMIT='0820030756945b2daec208e8e8255268360f337d'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
@@ -166,9 +166,9 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
       || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
     } && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
-    python3 -m pip install --no-cache-dir py-cpuinfo 'cmake>=3.26.1,<4' \
-      grpcio-tools 'setuptools-rust>=1.9.0' && \
     python3 tools/use_existing_torch.py --prefix && \
+    python3 -m pip install --no-cache-dir -r requirements/build/cuda.txt \
+      py-cpuinfo grpcio-tools && \
     install -D -m755 /opt/rust-artifacts/vllm-rs vllm/vllm-rs && \
     LIBRARY_PATH="/usr/local/cuda/lib64:${LIBRARY_PATH:+:$LIBRARY_PATH}" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
@@ -187,12 +187,10 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     . /opt/arch_flags.sh && \
-    python3 -m pip install --no-cache-dir \
-    'setuptools>=78.1.1,<81.0.0' \
-    'setuptools_scm>=8' && \
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
+    python3 -m pip install --no-cache-dir -r requirements/build.txt && \
     /opt/build.sh
 
 
@@ -308,12 +306,12 @@ RUN apt-get -qq update && \
 # Remove inherited FA4, whose CUTLASS DSL/TVM FFI pins conflict with vLLM's.
 RUN python3 -m pip uninstall -y flash-attn-4
 
-# Match vLLM 0.32's CUTLASS DSL, TVM FFI, and QuACK requirements.
-# LMCache v0.4.7 caps opentelemetry-api at 1.40.0. Pin the matching
+# Match vLLM 0.33's CUTLASS DSL, TVM FFI, and QuACK requirements.
+# LMCache v0.5.6 caps opentelemetry-api at 1.40.0. Pin the matching
 # OpenTelemetry release family before installing vLLM so a newer exporter does
 # not remain installed after LMCache downgrades the SDK.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
-    /tmp/frozen/freeze.sh torch torchaudio torchvision xformers > /tmp/constraints.txt && \
+    /tmp/frozen/freeze.sh torch torchaudio xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
     echo 'nvidia-cutlass-dsl==4.8.0' >> /tmp/constraints.txt && \
     echo 'apache-tvm-ffi==0.1.11' >> /tmp/constraints.txt && \
@@ -331,6 +329,7 @@ RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
 # Install upstream runtime requirements before the vLLM wheel to cache this layer.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/requirements,target=/tmp/vllm-requirements \
     cp -r /tmp/vllm-requirements /tmp/requirements && \
+    sed -Ei '/^[[:space:]]*(torch|torchaudio)[[:space:]]*==/d' /tmp/requirements/cuda.txt && \
     if [ "${CUDA_VERSION%%.*}" = "12" ]; then \
       sed -i 's/^nvidia-cutlass-dsl\[cu13\]/nvidia-cutlass-dsl/' /tmp/requirements/cuda.txt; \
       sed -i 's/^humming-kernels\[cu13\]/humming-kernels[cu12]/' /tmp/requirements/cuda.txt; \
@@ -412,13 +411,13 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
       'runai-model-streamer[s3,gcs,azure]==0.16.1' "ray[cgraph]>=2.48.0" \
-      'transformers>=5.16.1,<5.20.0' \
+      'transformers>=5.16.1,<5.21.0' \
       'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt && \
     if [ "$(echo $CUDA_VERSION | cut -d. -f1)" -eq "13" ]; then \
       python3 -m pip uninstall -y cupy-cuda12x && \
-      python3 -m pip install --no-cache-dir --force-reinstall --no-deps cupy-cuda13x; \
+      python3 -m pip install --no-cache-dir --force-reinstall --no-deps 'cupy-cuda13x!=14.1.0'; \
     fi
 
 # Keep the cloud dependencies above; replace the four streamer packages together.
