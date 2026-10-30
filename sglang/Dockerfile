@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch-extras:8c5de3e-nccl-cuda13.2.1-ubuntu24.04-nccl2.30.4-1-torch2.13.0-vision0.28.0-audio2.11.0-abi1"
+ARG BASE_IMAGE="ghcr.io/coreweave/ml-containers/torch:14744fc-nccl-cuda13.2.2-ubuntu24.04-nccl2.32.3-1-torch2.14.1-vision0.29.1-audio2.11.0-abi1"
 ARG BUILDER_IMAGE="${BASE_IMAGE}"
 ARG SCCACHE_VERSION="0.14.0"
 
@@ -33,21 +33,20 @@ RUN python3 /opt/build_progress.py --label build-dependencies --log-path /build-
     bash /build/build-deps.bash
 
 FROM builder-base AS flashinfer-source
-ARG FLASHINFER_COMMIT
+ARG FLASHINFER_VERSION
 ARG SGLANG_PACKAGE_PROFILE=legacy
 RUN <<'SOURCE'
 set -e
 case "${SGLANG_PACKAGE_PROFILE}" in
   legacy)
-    [ -z "${FLASHINFER_COMMIT:-}" ]
+    [ -z "${FLASHINFER_VERSION:-}" ]
     mkdir /build/flashinfer
     ;;
   baseline)
-    test -n "${FLASHINFER_COMMIT}"
+    test -n "${FLASHINFER_VERSION}"
     git clone --filter=blob:none --no-checkout https://github.com/flashinfer-ai/flashinfer /build/flashinfer
-    git -C /build/flashinfer checkout "${FLASHINFER_COMMIT}"
-    test "$(git -C /build/flashinfer rev-parse HEAD)" = "${FLASHINFER_COMMIT}"
-    git -C /build/flashinfer submodule update --init --recursive --jobs 8
+    git -C /build/flashinfer checkout --detach "refs/tags/v${FLASHINFER_VERSION}"
+    # Only metadata is needed; published wheels contain the native kernels.
     ;;
   *) exit 1 ;;
 esac
@@ -66,16 +65,13 @@ if [ "${SGLANG_PACKAGE_PROFILE}" != legacy ]; then
   test "$(git rev-parse HEAD)" = "${SGLANG_COMMIT}"
   git submodule update --init --recursive --jobs 8
 fi
-TORCH_VERSION="$(python3 -c 'import torch; print(torch.__version__.partition("+")[0])')"
-sed -Ei \
-  -e "s@\"torch==[0-9]+\.[0-9]+\.[0-9]+\"@\"torch>=${TORCH_VERSION}\"@" \
-  -e 's@"torchaudio==[0-9]+\.[0-9]+\.[0-9]+"@"torchaudio>=2.11.0"@' \
-  -e 's@"torchao==[0-9]+\.[0-9]+\.[0-9]+"@"torchao>=0.17.0"@' \
-  -e 's@"torchcodec==[0-9]+\.[0-9]+\.[0-9]+@"torchcodec@' \
-  python/pyproject.toml
+# Preserve upstream Torch pins: the base now supplies the required 2.14.1.
+
 SOURCE
 
 FROM builder-base AS package-contract
+ARG FLASHINFER_VERSION
+ARG FLASHINFER_CUDA_LABEL
 ARG SGLANG_PACKAGE_PROFILE=legacy
 COPY --link --from=sglang-source /build/sglang/ /build/sglang/
 COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/
@@ -105,25 +101,29 @@ else
 fi
 CONTRACT
 
-FROM builder-base AS flashinfer-builder
-ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
-ARG TARGETPLATFORM
-ARG FLASHINFER_COMMIT
+FROM builder-base AS flashinfer-build-base
+ARG FLASHINFER_VERSION
+ARG FLASHINFER_CUDA_LABEL
 ARG SGLANG_PACKAGE_PROFILE=legacy
-COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/
-# Only content-stable dependency inputs cross the helper validation boundary.
+# Metadata-derived constraints also protect the SGLang compiler environment.
 COPY --link --from=package-contract /contract/constraints.txt /contract/build-requirements.txt /wheels/
 COPY build-flashinfer.bash /build/
-RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
-    --mount=type=tmpfs,target=/sccache \
-    --mount=type=tmpfs,target=/tmp \
-    . /opt/sccache-start.sh && \
-    ARCH_LIST="${BUILD_TORCH_CUDA_ARCH_LIST}" && \
-    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH_LIST="9.0 10.0+PTX"; fi && \
-    bash /build/build-flashinfer.bash -a "${ARCH_LIST}"
+RUN bash /build/build-flashinfer.bash -p dependencies
+
+FROM flashinfer-build-base AS flashinfer-python
+RUN bash /build/build-flashinfer.bash -p python
+
+# Download the large cubin wheel independently of the CUDA-specific providers.
+FROM flashinfer-build-base AS flashinfer-cubin
+RUN mkdir /cubin-wheels && bash /build/build-flashinfer.bash -p cubin -o /cubin-wheels
+
+FROM flashinfer-python AS flashinfer-builder
+RUN bash /build/build-flashinfer.bash -p cache
+COPY --link --from=flashinfer-cubin /cubin-wheels/ /wheels/
+COPY --link --from=flashinfer-cubin /build-logs/ /build-logs/
 
 FROM flashinfer-builder AS builder
+COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/
 ARG SGLANG_COMMIT
 ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 ARG TARGETPLATFORM
@@ -147,10 +147,10 @@ COPY --from=package-contract /build-logs/ /contract/
 
 FROM ${BASE_IMAGE}
 ARG SGLANG_COMMIT
-ARG FLASHINFER_COMMIT
+ARG FLASHINFER_VERSION
 ARG SGLANG_PACKAGE_PROFILE=legacy
 LABEL com.coreweave.sglang.source-ref="${SGLANG_COMMIT}" \
-      com.coreweave.sglang.flashinfer-ref="${FLASHINFER_COMMIT}" \
+      com.coreweave.sglang.flashinfer-version="${FLASHINFER_VERSION}" \
       com.coreweave.sglang.package-profile="${SGLANG_PACKAGE_PROFILE}"
 # The CUDA 13 sgl-deep-ep wheel links against NVSHMEM but does not bundle it.
 # SGLang JIT-compiles its HiCache native hash extension on first use, which

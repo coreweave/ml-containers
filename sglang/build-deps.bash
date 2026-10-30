@@ -7,11 +7,15 @@ _PIP_INSTALL() {
 }
 
 # Install build dependencies explicitly because wheel builds disable isolation.
-_PIP_INSTALL -U pip 'setuptools<82' wheel build ninja \
+_PIP_INSTALL -U pip 'setuptools<82' wheel build ninja 'cmake==3.31.10' \
   'scikit-build-core>=0.10' 'setuptools-scm>=8.0' 'setuptools-rust>=1.11'
+# CMake is explicit rather than inherited from torch-extras dependencies.
+cmake --version
 
 # protobuf-compiler: needed by tonic-build (via prost-build) when compiling the
 # sglang-grpc Rust crate.
+# CUDA development tools, C++ compilers, and NCCL headers come from the
+# NCCL devel base; only the SGLang-specific system build dependency is added.
 apt-get -qq update && apt-get -q install --no-install-recommends -y \
   protobuf-compiler
 

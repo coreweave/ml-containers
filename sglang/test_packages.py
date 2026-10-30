@@ -20,6 +20,10 @@ from packaging.requirements import Requirement
 
 import packages as p
 
+# Example release used by synthetic wheel/source fixtures, not build configuration.
+p.PROFILES["baseline"]["flashinfer-python"] = "0.7.1"
+FLASHINFER_SOURCE = "a" * 40
+
 
 def requirements(profile="baseline"):
     selected = p.PROFILES[profile]
@@ -44,15 +48,17 @@ def base():
 
 def wheel_rows(profile="baseline"):
     version = p.PROFILES[profile]["flashinfer-python"] + "+cu132"
-    names = ["sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"]
+    names = ["sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache", "flashinfer-jit-cache-sm103a"]
     rows = []
     for name in names:
         row = {"name": name, "version": version, "filename": name + ".whl",
                "bytes": 123, "sha256": "a" * 64, "requires": [], "key_modules": {}}
         if name.startswith("flashinfer-"):
-            row["build_metadata"] = {"__version__": version, "__git_version__": p.PROFILES[profile]["source"]}
+            row["version"] = p.PROFILES[profile]["flashinfer-python"] if name in ("flashinfer-python", "flashinfer-cubin") else version
+            row["build_metadata"] = {"__version__": row["version"], "__git_version__": FLASHINFER_SOURCE}
         rows.append(row)
-    critical = rows[4]
+    rows[4]["requires"] = [f"flashinfer-jit-cache-sm103a=={version}"]
+    critical = rows[-1]
     critical["key_modules"] = {mod: {"path": mod + ".so", "sha256": "b" * 64, "bytes": 4}
                                for mod in p.KEY_MODULES}
     return rows
@@ -142,7 +148,7 @@ class DistributionSelectionTests(unittest.TestCase):
 class ConstraintTests(unittest.TestCase):
     def test_source_owned_selected_and_inherited_native(self):
         selected, preserved, pins = p.make_constraints(requirements(), base())
-        self.assertEqual(pins["nvidia-cutlass-dsl"], "4.6.2")
+        self.assertEqual(pins["nvidia-cutlass-dsl"], "4.8.0")
         self.assertEqual(preserved["nixl-cu13"], "1.4.0")
         self.assertEqual(preserved["triton"], "3.7.1+git5d6048aa")
         self.assertNotIn("torch", selected)
@@ -165,8 +171,20 @@ class ConstraintTests(unittest.TestCase):
         pins = p.make_constraints(requirements(), base())[2]
         self.assertTrue(all("[" not in name for name in pins))
 
+    def test_source_tag_follows_configured_version(self):
+        for version in ("0.7.1", "0.7.2"):
+            with tempfile.TemporaryDirectory() as directory, \
+                 patch.dict(p.PROFILES["baseline"], {"flashinfer-python": version}):
+                source = Path(directory)
+                (source / "version.txt").write_text(version)
+                with patch.object(p, "revision", side_effect=[p.SGLANG_SOURCE, FLASHINFER_SOURCE,
+                                                              FLASHINFER_SOURCE]) as revision, \
+                     patch.object(p, "source_requirements", return_value=requirements()):
+                    p.source_contract("baseline", Path("sg"), source)
+                revision.assert_called_with(source, f"refs/tags/v{version}^{{commit}}")
+
     def test_wrong_source_pair_rejected(self):
-        with patch.object(p, "revision", side_effect=[p.SGLANG_SOURCE, "f" * 40]):
+        with patch.object(p, "revision", side_effect=[p.SGLANG_SOURCE, "f" * 40, FLASHINFER_SOURCE]):
             with self.assertRaisesRegex(ValueError, "Wrong FlashInfer source"):
                 p.source_contract("baseline", Path("sg"), Path("fi"))
 
@@ -252,10 +270,27 @@ class ProtocolTests(unittest.TestCase):
 
 class WheelSetTests(unittest.TestCase):
     def check(self, rows, profile="baseline"):
-        return p.validate_wheel_set(profile, rows, p.PROFILES[profile]["source"])
+        return p.validate_wheel_set(profile, rows, FLASHINFER_SOURCE)
 
     def test_baseline_complete_set(self):
-        self.assertEqual(self.check(wheel_rows("baseline"), "baseline")["name"], "flashinfer-jit-cache")
+        self.assertEqual(self.check(wheel_rows("baseline"), "baseline")["name"], "flashinfer-jit-cache-sm103a")
+
+    def test_shim_cannot_reference_unbuilt_provider(self):
+        rows = wheel_rows()
+        rows[4]["requires"].append("flashinfer-jit-cache-sm90a==0.7.1+cu132")
+        with self.assertRaisesRegex(ValueError, "Missing built"):
+            self.check(rows)
+
+    def test_shim_cannot_resolve_different_provider_version(self):
+        rows = wheel_rows()
+        rows[4]["requires"] = ["flashinfer-jit-cache-sm103a==0.7.1"]
+        with self.assertRaisesRegex(ValueError, "provider version"):
+            self.check(rows)
+
+    def test_requested_provider_must_be_built(self):
+        with self.assertRaisesRegex(ValueError, "Missing required GPU provider"):
+            p.validate_wheel_set("baseline", wheel_rows(), FLASHINFER_SOURCE,
+                                 targets=("sm90a", "sm103a"))
 
     def test_missing_jit_cache_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing built"):
@@ -272,18 +307,30 @@ class WheelSetTests(unittest.TestCase):
             self.check(rows)
 
     def test_wrong_local_cuda_version_fails(self):
-        rows = wheel_rows(); rows[-1]["version"] = "0.6.18+cu130"
+        rows = wheel_rows(); rows[-1]["version"] = "0.7.1+cu130"
         with self.assertRaisesRegex(ValueError, "versions/local CUDA"):
             self.check(rows)
+
+    def test_published_cuda_selection_uses_configuration(self):
+        with patch.dict(os.environ, {"FLASHINFER_CUDA_LABEL": "cu130"}):
+            self.assertEqual(p.flashinfer_cuda_label("baseline", "cu132"), "cu130")
+        with patch.dict(os.environ, {"FLASHINFER_CUDA_LABEL": "cu132"}):
+            self.assertEqual(p.flashinfer_cuda_label("baseline", "cu132"), "cu132")
+            with self.assertRaisesRegex(ValueError, "newer"):
+                p.flashinfer_cuda_label("baseline", "cu130")
+        for label in ("", "cu129", "bad"):
+            with patch.dict(os.environ, {"FLASHINFER_CUDA_LABEL": label}):
+                with self.assertRaisesRegex(ValueError, "must select"):
+                    p.flashinfer_cuda_label("baseline", "cu132")
 
     def test_uniform_wrong_local_cuda_label_rejected(self):
         rows = wheel_rows("baseline")
         for row in rows:
             if row["name"].startswith("flashinfer-"):
-                row["version"] = "0.6.18+cu130"
+                row["version"] = "0.7.1+cu130"
                 row["build_metadata"]["__version__"] = row["version"]
-        with self.assertRaisesRegex(ValueError, "differs from active nvcc"):
-            p.validate_wheel_set("baseline", rows, p.PROFILES["baseline"]["source"], "cu132")
+        with self.assertRaisesRegex(ValueError, "differs from selected provider toolkit"):
+            p.validate_wheel_set("baseline", rows, FLASHINFER_SOURCE, "cu132")
 
     def test_wrong_source_fails(self):
         rows = wheel_rows(); rows[2]["build_metadata"]["__git_version__"] = "e" * 40
@@ -333,9 +380,9 @@ class ArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             wheel = Path(directory) / "fixture.whl"
             with zipfile.ZipFile(wheel, "w") as archive:
-                archive.writestr("f.dist-info/METADATA", "Name: flashinfer-jit-cache\nVersion: 0.6.18+cu132\n")
+                archive.writestr("f.dist-info/METADATA", "Name: flashinfer-jit-cache\nVersion: 0.7.1+cu132\n")
                 prefix = "f.data/purelib/flashinfer_jit_cache/"
-                archive.writestr(prefix + "_build_meta.py", "__version__='0.6.18+cu132'\n__git_version__='abc'\n")
+                archive.writestr(prefix + "_build_meta.py", "__version__='0.7.1+cu132'\n__git_version__='abc'\n")
                 for module in p.KEY_MODULES:
                     archive.writestr(prefix + f"cached_ops/{module}/{module}.so", b"\x7fELFtest")
             row = p.inspect_wheel(wheel)
@@ -367,7 +414,7 @@ class RuntimeLoaderInstallTests(unittest.TestCase):
                               env=os.environ | {"SGLANG_PACKAGE_PROFILE": profile}, capture_output=True, timeout=30)
 
     def test_profile_requests_only_sglang_extra_and_legacy_unchanged(self):
-        wheels = ["/wheels/flashinfer_python-0.6.18+cu132-py3-none-any.whl",
+        wheels = ["/wheels/flashinfer_python-0.7.1+cu132-py3-none-any.whl",
                   "/wheels/sglang-0.5.21-py3-none-any.whl", "/wheels/sglang_kernel-0.4.7-py3-none-any.whl"]
         for profile in ("legacy", "baseline"):
             with self.subTest(profile=profile):
@@ -379,7 +426,7 @@ class RuntimeLoaderInstallTests(unittest.TestCase):
                 self.assertEqual(result.stdout.decode().rstrip("\0").split("\0"), expected)
 
     def test_missing_or_ambiguous_sglang_rejected_before_pip(self):
-        for wheels in (["/wheels/flashinfer_python-0.6.18-py3-none-any.whl"],
+        for wheels in (["/wheels/flashinfer_python-0.7.1-py3-none-any.whl"],
                        ["/wheels/sglang-0.5.21-py3-none-any.whl", "/wheels/sglang-0.5.17-py3-none-any.whl"]):
             with self.subTest(wheels=wheels):
                 result = self.requests("baseline", wheels)
@@ -534,11 +581,11 @@ class InstalledTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); payload = root / "module.so"; payload.write_bytes(b"\x7fELFbytes")
             info = {"preserved_versions": {}, "selected_versions": {}, "torch_abi": {"cuda": "13.2"},
-                    "wheels": [{"name": "flashinfer-jit-cache", "version": "0.6.18+cu132",
+                    "wheels": [{"name": "flashinfer-jit-cache", "version": "0.7.1+cu132",
                                 "key_modules": {"test": {"path": "module.so", "bytes": payload.stat().st_size,
                                                           "sha256": p.sha256(payload)}}}]}
             dist = SimpleNamespace(locate_file=lambda path: root / path)
-            with patch.object(p, "installed", return_value={"flashinfer-jit-cache": "0.6.18+cu132"}), \
+            with patch.object(p, "installed", return_value={"flashinfer-jit-cache": "0.7.1+cu132"}), \
                  patch.object(p, "torch_abi", return_value=info["torch_abi"]), \
                  patch.object(p.metadata, "distribution", return_value=dist):
                 p.audit_installed(info)

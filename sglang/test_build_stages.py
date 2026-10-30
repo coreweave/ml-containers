@@ -21,16 +21,25 @@ def stages():
 
 class StageTests(unittest.TestCase):
     def test_flashinfer_inputs_exclude_validation_code_and_sglang_source(self):
-        stage = stages()['flashinfer-builder']
-        self.assertTrue(stage.startswith('FROM builder-base AS flashinfer-builder'))
+        stage = stages()['flashinfer-build-base']
+        self.assertTrue(stage.startswith('FROM builder-base AS flashinfer-build-base'))
         self.assertNotIn('SGLANG_COMMIT', stage)
         for name in ('packages.py', 'test_', 'packages-before.json', '--from=sglang-source'):
             self.assertNotIn(name, stage)
         self.assertIn('COPY --link --from=package-contract /contract/constraints.txt /contract/build-requirements.txt /wheels/', stage)
-        self.assertIn('COPY --link --from=flashinfer-source /build/flashinfer/ /build/flashinfer/', stage)
+        self.assertNotIn('--from=flashinfer-source', stage)
         for name in ('builder-base', 'flashinfer-source'):
             self.assertNotIn('SGLANG_COMMIT', stages()[name])
             self.assertNotIn('packages.py', stages()[name])
+
+    def test_downloads_have_independent_cache_boundaries(self):
+        rows = stages()
+        self.assertTrue(rows['flashinfer-cubin'].startswith('FROM flashinfer-build-base AS'))
+        self.assertTrue(rows['flashinfer-python'].startswith('FROM flashinfer-build-base AS'))
+        self.assertTrue(rows['flashinfer-builder'].startswith('FROM flashinfer-python AS'))
+        self.assertIn('--from=flashinfer-cubin /cubin-wheels/ /wheels/', rows['flashinfer-builder'])
+        self.assertFalse(any(name.startswith('flashinfer-provider-') for name in rows))
+        self.assertNotIn('submodule update', rows['flashinfer-source'])
 
     def test_sglang_inherits_compiler_dependency_environment_and_current_audit(self):
         stage = stages()['builder']
@@ -95,7 +104,7 @@ class StageTests(unittest.TestCase):
 
 
 class PhaseTests(unittest.TestCase):
-    def run_phase(self, script, profile, arch='aarch64', failed='', fi_pin='a' * 40):
+    def run_phase(self, script, profile, arch='aarch64', failed='', fi_version='0.7.1', phase=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ('build/flashinfer', 'build/sglang/python/sglang/kernels/aot', 'build/sglang/rust',
@@ -111,6 +120,7 @@ label=args[args.index('--label')+1]
 command=args[args.index('--')+1:]
 row={'label':label,'argv':command,'environment':{k:os.getenv(k) for k in (
  'FLASHINFER_CUDA_ARCH_LIST','FLASHINFER_LOCAL_VERSION',
+ 'FLASHINFER_JIT_CACHE_PROVIDER_ARCH','FLASHINFER_JIT_CACHE_PROVIDER_ARCHS',
  'FLASHINFER_BUILD_NO_PIP','BUILD_NIXL_EP','MAX_JOBS','FLASHINFER_NVCC_THREADS',
  'TORCH_CUDA_ARCH_LIST','CMAKE_BUILD_PARALLEL_LEVEL','DEBIAN_FRONTEND','PATH')}}
 with open(os.environ['TRACE'],'a') as f:f.write(json.dumps(row)+'\\n')
@@ -127,41 +137,57 @@ if label==os.getenv('FAIL_PHASE'):sys.exit(7)
                 source = source.replace(before, after)
             target = root / 'phase.bash';target.write_text(source)
             env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
-                       SGLANG_PACKAGE_PROFILE=profile, FLASHINFER_COMMIT=fi_pin,
-                       TRACE=str(root / 'trace.jsonl'), FAIL_PHASE=failed)
+                       SGLANG_PACKAGE_PROFILE=profile,
+                       TRACE=str(root / 'trace.jsonl'), FAIL_PHASE=failed, FLASHINFER_VERSION=fi_version, FLASHINFER_CUDA_LABEL='cu130')
             for name in ('MAX_JOBS', 'FLASHINFER_NVCC_THREADS'):
                 env.pop(name, None)
-            result = subprocess.run(['bash', str(target), '-a', '9.0 10.0+PTX'], env=env,
+            command = ['bash', str(target)]
+            if script != 'build-flashinfer.bash':
+                command += ['-a', '9.0 10.0+PTX']
+            if phase is not None:
+                command += ['-p', phase]
+            result = subprocess.run(command, env=env,
                                     cwd=root, capture_output=True, text=True, timeout=10)
             trace = [json.loads(line) for line in (root / 'trace.jsonl').read_text().splitlines()] if (root / 'trace.jsonl').exists() else []
             architecture = (root / 'wheels/flashinfer-architectures.txt').read_text().strip()
             return result, trace, architecture
 
-    def test_baseline_keeps_complete_architectures_and_flags(self):
-        for arch, targets in [('aarch64', '9.0a 10.0a 10.3a'), ('x86_64', '8.0 8.6 8.9 9.0a 10.0a 10.3a')]:
-            with self.subTest(arch=arch):
-                result, rows, actual = self.run_phase('build-flashinfer.bash', 'baseline', arch)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(actual, targets)
-                self.assertEqual(rows[0]['label'], 'flashinfer-dependencies')
-                self.assertEqual(rows[0]['environment']['TORCH_CUDA_ARCH_LIST'], '9.0 10.0+PTX')
-                self.assertEqual(rows[0]['environment']['DEBIAN_FRONTEND'], 'noninteractive')
-                self.assertTrue(rows[0]['environment']['PATH'].startswith('/root/.cargo/bin:'))
-                for row in rows[1:]:
-                    e = row['environment']
-                    self.assertEqual((e['FLASHINFER_BUILD_NO_PIP'], e['BUILD_NIXL_EP']), ('1', '0'))
-                    self.assertEqual((e['MAX_JOBS'], e['FLASHINFER_NVCC_THREADS'], e['FLASHINFER_LOCAL_VERSION']), ('8', '4', 'cu132'))
-                self.assertEqual([r['label'] for r in rows[1:]], ['flashinfer-python', 'flashinfer-cubin', 'flashinfer-jit-cache'])
+    def test_downloads_use_binary_wheels_and_resolve_provider_dependencies(self):
+        for arch in ('aarch64', 'x86_64'):
+            result, rows, actual = self.run_phase('build-flashinfer.bash', 'baseline', arch)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual([r['label'] for r in rows],
+                             ['flashinfer-dependencies', 'flashinfer-python', 'flashinfer-cubin', 'flashinfer-jit-cache'])
+            for row in rows[1:]:
+                self.assertIn('download', row['argv'])
+                self.assertIn('--only-binary=:all:', row['argv'])
+            self.assertIn('--no-deps', rows[1]['argv'])
+            self.assertIn('--no-deps', rows[2]['argv'])
+            self.assertNotIn('--no-deps', rows[3]['argv'])
+            self.assertIn('flashinfer-jit-cache==0.7.1+cu130', rows[3]['argv'])
+            self.assertIn('https://flashinfer.ai/whl/cu130', rows[3]['argv'])
+            self.assertIn('10.3a', actual)
 
-    def test_failed_flashinfer_phase_stops_later_phases(self):
-        for phase in ('flashinfer-dependencies', 'flashinfer-python', 'flashinfer-cubin'):
-            with self.subTest(phase=phase):
-                result, rows, _ = self.run_phase('build-flashinfer.bash', 'baseline', failed=phase)
-                self.assertEqual(result.returncode, 7, result.stderr)
-                self.assertEqual(rows[-1]['label'], phase)
+    def test_separate_download_phases_do_not_repeat_dependencies(self):
+        for phase, expected in [('dependencies', 'flashinfer-dependencies'), ('python', 'flashinfer-python'),
+                                ('cubin', 'flashinfer-cubin'), ('cache', 'flashinfer-jit-cache')]:
+            result, rows, _ = self.run_phase('build-flashinfer.bash', 'baseline', phase=phase)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual([r['label'] for r in rows], [expected])
+
+    def test_failed_download_prevents_following_phases(self):
+        for phase in ('flashinfer-dependencies', 'flashinfer-python', 'flashinfer-cubin', 'flashinfer-jit-cache'):
+            result, rows, _ = self.run_phase('build-flashinfer.bash', 'baseline', failed=phase)
+            self.assertEqual(result.returncode, 7)
+            self.assertEqual(rows[-1]['label'], phase)
+
+    def test_unknown_phase_is_rejected(self):
+        result, rows, _ = self.run_phase('build-flashinfer.bash', 'baseline', phase='unknown')
+        self.assertEqual(result.returncode, 92)
+        self.assertEqual(rows, [])
 
     def test_legacy_skips_flashinfer_and_rejects_unexpected_pin(self):
-        result, rows, _ = self.run_phase('build-flashinfer.bash', 'legacy', fi_pin='')
+        result, rows, _ = self.run_phase('build-flashinfer.bash', 'legacy', fi_version='')
         self.assertEqual(result.returncode, 0, result.stderr);self.assertEqual(rows, [])
         result, rows, _ = self.run_phase('build-flashinfer.bash', 'legacy')
         self.assertNotEqual(result.returncode, 0);self.assertEqual(rows, [])

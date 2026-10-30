@@ -57,6 +57,25 @@ import torch
 from flash_attn.cute import flash_attn_func
 from flashinfer.decode import trtllm_batch_decode_with_kv_cache_mla
 from flashinfer.fused_moe import trtllm_fp4_block_scale_moe
+from flashinfer_jit_cache import get_jit_cache_providers
+from importlib import metadata
+from packaging.requirements import Requirement
+
+# Match vLLM's published-wheel gate: the shim must discover every provider
+# it installed, with matching versions and all advertised kernels present.
+requirements = [Requirement(value) for value in metadata.requires("flashinfer-jit-cache") or ()]
+providers = {provider.distribution: provider for provider in get_jit_cache_providers()}
+assert requirements and set(providers) == {req.name for req in requirements}
+for req in requirements:
+    provider = providers[req.name]
+    installed = metadata.version(req.name)
+    assert req.specifier.contains(installed, prereleases=True), req
+    assert provider.version == installed == metadata.version("flashinfer-jit-cache")
+    assert provider.modules and all(
+        (provider.jit_cache_dir / module / f"{module}.so").is_file()
+        for module in provider.modules
+    ), req.name
+import cutlass.cute as cute
 import quack.activation
 from sglang.kernels.ops.attention.flash_attn.cute import utils as sglang_cute_utils
 
@@ -64,7 +83,8 @@ assert callable(flash_attn_func)
 assert callable(trtllm_batch_decode_with_kv_cache_mla)
 assert callable(trtllm_fp4_block_scale_moe)
 assert callable(sglang_cute_utils.ex2_emulation_2)
-assert callable(quack.activation.sub_packed_f32x2)
+assert callable(cute.arch.sub_packed_f32x2)
+assert callable(quack.activation.sigmoid)
 assert not torch.cuda.is_initialized()
 print('FlashAttention, FlashInfer and SGLang CuTe API import checks passed; no GPU kernels executed')
 PY
