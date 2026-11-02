@@ -1,14 +1,10 @@
 cuda: [ 12.9.2, 13.2.2 ]
-os: [ ubuntu22.04, ubuntu24.04 ]
+os: [ ubuntu24.04 ]
 abi: [ 1 ]
 include:
-  - torch: 2.14.1
-    vision: 0.29.1
-    audio: 2.11.0
-  - cuda: 13.2.2
-    os: ubuntu22.04
-    builder-base-image: ghcr.io/coreweave/ml-containers/cuda:19759b8-13.2.2-devel-ubuntu22.04
-    base-image: ghcr.io/coreweave/ml-containers/cuda:19759b8-13.2.2-base-ubuntu22.04
+  - torch: 2.15.0
+    vision: 0.29.2
+    audio: 2.11.1
   - cuda: 13.2.2
     os: ubuntu24.04
     builder-base-image: ghcr.io/coreweave/ml-containers/cuda:19759b8-13.2.2-devel-ubuntu24.04
@@ -16,6 +12,6 @@ include:
   - cuda: 13.3.1
     os: ubuntu26.04
     abi: 1
-    torch: 2.14.1
-    vision: 0.29.1
-    audio: 2.11.0
+    torch: 2.15.0
+    vision: 0.29.2
+    audio: 2.11.1
