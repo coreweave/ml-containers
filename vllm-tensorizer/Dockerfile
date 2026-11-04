@@ -80,10 +80,12 @@ RUN printf '%s\n' \
 FROM alpine/git:2.36.3 AS vllm-downloader
 WORKDIR /git
 ARG VLLM_COMMIT
+# Pinned PR commits may not be reachable through the cloned branches.
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/vllm && \
     cd vllm && \
-    git checkout "${VLLM_COMMIT}" && \
+    git fetch origin "${VLLM_COMMIT}" && \
+    git checkout --detach FETCH_HEAD && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
 
@@ -329,8 +331,10 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/requirements,target=
     python3 -m pip install --no-cache-dir nvidia-ml-py
 
 # FlashInfer selects matching cubin and JIT-cache wheels, including all providers.
+# Development builds publish their matching kernels on the nightly index.
 RUN --mount=type=cache,target=/opt/pip/cache \
-    PIP_CACHE_DIR=/opt/pip/cache PIP_CONSTRAINT=/tmp/constraints.txt flashinfer download-kernels
+    NIGHTLY=$(python3 -c "from importlib.metadata import version; from packaging.version import Version; print('--nightly' if Version(version('flashinfer-python')).is_devrelease else '')") && \
+    PIP_CACHE_DIR=/opt/pip/cache PIP_CONSTRAINT=/tmp/constraints.txt flashinfer download-kernels ${NIGHTLY}
 
 RUN --mount=type=bind,from=vllm-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip install --no-cache-dir "$(printf '%s[tensorizer,audio]' /tmp/wheels/*.whl)" -c /tmp/constraints.txt
