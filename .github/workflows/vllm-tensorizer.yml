@@ -15,6 +15,7 @@ jobs:
       filter: |
         .include |= map(. + {
           "tag-suffix": (
+            .variant + "-" +
             .["vllm-commit"] + "-" +
             (.["builder-base-image"] | match("cuda[0-9.]+").string) + "-" +
             (.["builder-base-image"] | match("ubuntu[0-9.]+").string)
