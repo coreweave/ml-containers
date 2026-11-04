@@ -251,17 +251,37 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/tools/ep_kernels,tar
 
 # Build a NIXL wheel linked against HPC-X's multi-threaded UCX (/opt/hpcx/ucx/mt). The PyPI
 # nixl-cuNN wheels bundle their own UCX, which clashes with this image's HPC-X UCX and can't
-# register GPU memory. UCX+POSIX are the only plugins needed; CUDA arch stays at NIXL's default
+# register GPU memory. Include OBJ for vLLM's S3-compatible KV offload tier;
+# CUDA arch stays at NIXL's default
 # (sm_80+) to keep the wheel multi-arch.
 FROM builder-base AS nixl-builder
 RUN apt-get -qq update && \
     apt-get -q install --no-install-recommends --no-upgrade -y \
-      build-essential pkg-config git && \
+      build-essential pkg-config git libasio-dev libcurl4-openssl-dev libssl-dev uuid-dev zlib1g-dev && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
 ARG NIXL_TAG='v1.5.0'
 ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
+
+# OBJ requires both AWS S3 clients. Keep the SDK in a private prefix so its
+# runtime libraries can be copied without shipping build tools or SDK headers.
+ARG AWS_SDK_CPP_TAG='1.11.581'
+RUN --mount=type=tmpfs,target=/tmp \
+    git clone --depth 1 --recurse-submodules --shallow-submodules \
+      --branch "${AWS_SDK_CPP_TAG}" https://github.com/aws/aws-sdk-cpp.git /tmp/aws-sdk-cpp && \
+    cmake -S /tmp/aws-sdk-cpp -B /tmp/aws-sdk-build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/opt/nixl-aws-sdk \
+      -DCMAKE_INSTALL_LIBDIR=lib \
+      -DBUILD_ONLY="s3;s3-crt" \
+      -DBUILD_SHARED_LIBS=ON \
+      -DENABLE_TESTING=OFF \
+      -DAUTORUN_UNIT_TESTS=OFF && \
+    cmake --build /tmp/aws-sdk-build --parallel 8 && \
+    cmake --install /tmp/aws-sdk-build && \
+    printf '/opt/nixl-aws-sdk/lib\n' > /etc/ld.so.conf.d/nixl-aws-sdk.conf && \
+    ldconfig
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
@@ -269,6 +289,10 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     [ -d "${NIXL_UCX_HOME}" ] && \
+    # Check the SDK headers before starting the NIXL wheel build. Meson's AWS
+    # CMake dependency discovery can omit includes for this private prefix.
+    printf '#include <aws/core/utils/threading/Executor.h>\n#include <aws/s3/S3Client.h>\n#include <aws/s3-crt/S3CrtClient.h>\n' \
+      | c++ -std=c++20 -I/opt/nixl-aws-sdk/include -x c++ -fsyntax-only - && \
     git clone --depth 1 --branch "${NIXL_TAG}" https://github.com/ai-dynamo/nixl /tmp/nixl && \
     # Rename the dist to nixl-cu<major> matching this image's CUDA (NIXL hardcodes nixl-cu12), so the
     # `nixl` meta's nixl-cu<major> pin is met by our build and no prebuilt (bundled-UCX) wheel is pulled.
@@ -276,7 +300,9 @@ RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     sed -i -E "s/^name = \"nixl-cu[0-9]+\"/name = \"nixl-cu${CUDA_MAJOR}\"/" /tmp/nixl/pyproject.toml && \
     python3 -m pip wheel --no-cache-dir --no-build-isolation --no-deps /tmp/nixl -w /wheels \
       -C setup-args="-Ducx_path=${NIXL_UCX_HOME}" \
-      -C setup-args="-Denable_plugins=UCX,POSIX" && \
+      -C setup-args="-Dcmake_prefix_path=/opt/nixl-aws-sdk" \
+      -C setup-args="-Dcpp_args=-I/opt/nixl-aws-sdk/include" \
+      -C setup-args="-Denable_plugins=UCX,POSIX,OBJ" && \
     rm -rf /tmp/nixl
 
 FROM ${FINAL_BASE_IMAGE} AS base
@@ -288,7 +314,7 @@ WORKDIR /workspace
 
 RUN apt-get -qq update && \
     apt-get install -y --no-install-recommends \
-      curl libsodium23 libnuma-dev libdw-dev && \
+      curl libsodium23 libnuma-dev libdw-dev libuuid1 zlib1g && \
     apt-get purge -y python3-jwt && \
     apt-get clean
 
@@ -412,8 +438,11 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
 # Swap the PyPI nixl for our MT-UCX build. Runs last because earlier installs (e.g. LMCache's
 # `nixl>=1.1.0`) pull the bundled-UCX wheel; purge those, install our wheel + the `nixl` meta
 # (the pure-python CUDA dispatcher) --no-deps so no bundled-UCX wheel comes back. NIXL's
-# meta also ships a `nixl_ep` dispatcher, but our UCX/POSIX-only build intentionally omits its
+# meta also ships a `nixl_ep` dispatcher, but our UCX/POSIX/OBJ build intentionally omits its
 # optional EP kernels. Remove that unusable dispatcher so vLLM does not discover and import it.
+COPY --from=nixl-builder /opt/nixl-aws-sdk/lib/ /opt/nixl-aws-sdk/lib/
+RUN printf '/opt/nixl-aws-sdk/lib\n' > /etc/ld.so.conf.d/nixl-aws-sdk.conf && ldconfig
+
 RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
@@ -429,6 +458,11 @@ RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
       { echo "NIXL UCX plugin not linked to HPC-X MT UCX:"; LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" ldd "$P"; exit 1; } && \
     LD_LIBRARY_PATH="/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}" python3 -c \
       "from importlib import util; from importlib.metadata import version; import nixl; assert version('nixl') == version('nixl-cu${CUDA_VERSION%%.*}'); assert util.find_spec('nixl_ep') is None; assert util.find_spec('nixl_ep_cu${CUDA_VERSION%%.*}') is None; print('matching NIXL dispatcher/backend import OK; optional NIXL EP dispatcher/backend absent')"
+
+# Fail the image build if OBJ was skipped or any of its runtime dependencies
+# are missing. Loading the plugin needs no GPU, bucket credentials, or network.
+RUN python3 -c \
+    "import ctypes, pathlib, sysconfig; plugins = list(pathlib.Path(sysconfig.get_paths()['purelib']).rglob('libplugin_OBJ.so')); assert plugins, 'NIXL OBJ plugin missing'; [ctypes.CDLL(str(p)) for p in plugins]; print('NIXL OBJ plugin and runtime dependencies load OK')"
 
 # Prepend MT UCX so its libucp wins over the base image's non-MT /opt/hpcx/ucx/lib.
 ENV LD_LIBRARY_PATH=/opt/hpcx/ucx/mt/lib:${LD_LIBRARY_PATH}
