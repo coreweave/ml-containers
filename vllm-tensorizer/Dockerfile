@@ -88,6 +88,16 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout --detach FETCH_HEAD && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
+# Source patches for compiled code (csrc, cmake pins) that can't be applied
+# downstream to the installed wheel. Scoped per commit: only
+# vllm-patches/<VLLM_COMMIT>/*.patch applies, in sorted order.
+COPY vllm-patches/ /patches/
+RUN if [ -d "/patches/${VLLM_COMMIT}" ]; then \
+      for patch in "/patches/${VLLM_COMMIT}"/*.patch; do \
+        echo "Applying ${patch}" && \
+        git -C vllm apply --whitespace=nowarn "$patch" || exit 1; \
+      done; \
+    fi
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
