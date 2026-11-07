@@ -1,9 +1,9 @@
 include:
-  # renovate-release: datasource=github-releases depName=sgl-project/sglang currentValue=v0.5.22 versioning=pep440
-  - sglang-commit: 'baa9befa381511cd4d56f83980951e5a45fffc6d'
+  # renovate-release: datasource=github-releases depName=sgl-project/sglang currentValue=v0.5.23 versioning=pep440
+  - sglang-commit: '297e54fd105e974cdf401e5b4d20253a22c16f90'
     flashinfer-version: '0.7.1'
     flashinfer-cuda-label: 'cu130'
     package-profile: baseline
     base-image: 'ghcr.io/coreweave/ml-containers/torch:14744fc-nccl-cuda13.2.2-ubuntu24.04-nccl2.32.3-1-torch2.14.1-vision0.29.1-audio2.11.0-abi1'
     # renovate-release-tag: datasource=github-releases depName=sgl-project/sglang versioning=pep440
-    tag: 'v0.5.22-cuda13.2.2-torch2.14.1'
+    tag: 'v0.5.23-cuda13.2.2-torch2.14.1'
