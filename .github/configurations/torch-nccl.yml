@@ -1,20 +1,25 @@
-cuda: [ 12.9.2, 13.2.2 ]
-os: [ ubuntu24.04 ]
+cuda: [ 12.9.2, 13.2.2, 13.5.0 ]
+os: [ ubuntu24.04, ubuntu26.04 ]
 abi: [ 1 ]
+exclude:
+  - cuda: 12.9.2
+    os: ubuntu26.04
+  - cuda: 13.2.2
+    os: ubuntu26.04
 include:
   - torch: 2.15.0
     vision: 0.29.2
     audio: 2.11.1
-    nccl: 2.32.3-1
-    nccl-tests-hash: '9b0129b'
+    nccl: 2.32.6-1
+    nccl-tests-hash: '329d653'
   - cuda: 13.3.1
     os: ubuntu26.04
     abi: 1
     torch: 2.15.0
     vision: 0.29.2
     audio: 2.11.1
-    nccl: 2.32.3-1
-    nccl-tests-hash: '9b0129b'
+    nccl: 2.32.6-1
+    nccl-tests-hash: '329d653'
   - cuda: 13.0.3
     os: ubuntu24.04
     abi: 1
