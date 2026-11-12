@@ -18,7 +18,7 @@ jobs:
   get-nightly-info:
     name:
       Get Nightly Info
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     defaults:
       run:
         shell: bash

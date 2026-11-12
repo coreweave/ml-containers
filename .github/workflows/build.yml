@@ -47,7 +47,7 @@ on:
 jobs:
   prepare:
     name: Prepare
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     env:
       DOCKER_METADATA_SHORT_SHA_LENGTH: 7
     defaults:
@@ -178,7 +178,7 @@ jobs:
   merge:
     name: Merge Manifests
     needs: [prepare, build]
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     defaults:
       run:
         shell: bash
