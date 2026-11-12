@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   renovate:
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     env:
       LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
       RENOVATE_AUTODISCOVER: true

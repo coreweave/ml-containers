@@ -17,7 +17,7 @@ on:
 jobs:
   read-file:
     name: Read Configuration File
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     defaults:
       run:
         shell: bash
