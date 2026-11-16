@@ -20,6 +20,10 @@ on:
       - ".github/workflows/torch.yml"
 
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   get-config:
     name: Get torch:base Config

@@ -44,6 +44,10 @@ on:
         description: "The resulting image version"
         value: ${{ jobs.merge.outputs.version }}
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   prepare:
     name: Prepare
@@ -110,8 +114,8 @@ jobs:
             jq -nc --arg p "$PLATFORMS" '
               {
                 include: [
-                  {platform: "linux/amd64", runner: "ml-amd", arch: "amd64"},
-                  {platform: "linux/arm64", runner: "ml-arm", arch: "arm64"}
+                  {platform: "linux/amd64", runner: "cw-static-pub-x64-4c", arch: "amd64"},
+                  {platform: "linux/arm64", runner: "cw-static-pub-arm-4c", arch: "arm64"}
                 ] | map(select(.platform as $plat | $p | contains($plat)))
               }'
           )
@@ -126,7 +130,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 960
+    # GitHub-hosted runners cap jobs at 6 hours.
+    timeout-minutes: 360
     defaults:
       run:
         shell: bash

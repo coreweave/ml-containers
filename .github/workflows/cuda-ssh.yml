@@ -6,6 +6,10 @@ on:
       - ".github/workflows/cuda-ssh.yml"
 
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     strategy:

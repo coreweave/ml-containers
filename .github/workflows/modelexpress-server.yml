@@ -5,6 +5,10 @@ on:
       - ".github/workflows/modelexpress-server.yml"
       - ".github/configurations/modelexpress-server.yml"
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   get-config:
     name: Get modelexpress-server config

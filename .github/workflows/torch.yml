@@ -73,6 +73,10 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     name: Build torch
