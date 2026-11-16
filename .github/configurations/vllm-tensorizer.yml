@@ -1,9 +1,9 @@
 include:
-  # vLLM v0.33 release, plus the MiniMax-M3.1 kernel backport in
-  # vllm-tensorizer/vllm-patches/<vllm-commit>/.
-  - variant: vllm033
-    vllm-commit: '4ba787ec9959e566d3b587a796dff07673324da5'
-    deepgemm-commit: '0820030756945b2daec208e8e8255268360f337d'
+  # Pinned head of vllm-project/vllm releases/v0.34.0.
+  - variant: vllm034
+    vllm-commit: '62d4bc3c7e33b1b6c906e233e6af2d3506c482ca'
+    deepgemm-commit: '82ca617e5879d0efb0aba5b91b1c81852588af6f'
+    deepep-commit: 'a56d6156febcd9976e55adc85b5155bfac9f28f8'
     lmcache-commit: 'v0.5.6'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:8a0478d-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
     final-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:8a0478d-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
@@ -11,6 +11,7 @@ include:
   - variant: kimi-k31
     vllm-commit: '9d6ac73f3dc6a81a9c0b50fa602238f5244fd757'
     deepgemm-commit: '5cdb145704ec4672ecf4b61441599521ce635df6'
+    deepep-commit: 'd4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb'
     lmcache-commit: 'v0.5.6'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:8a0478d-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
     final-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:8a0478d-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
