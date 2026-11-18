@@ -148,8 +148,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Compute cache key
         id: cache
+        env:
+          CACHE_EPOCH: 0
         run: |
-          KEY="${{ matrix.arch }}-${{ inputs.image-name }}"
+          KEY="e${CACHE_EPOCH}-${{ matrix.arch }}-${{ inputs.image-name }}"
           [ -z "${{ inputs.cache-key }}" ] || KEY="${KEY}-${{ inputs.cache-key }}"
           echo "ref=${{ needs.prepare.outputs.registry }}/buildcache:${KEY}" >> "$GITHUB_OUTPUT"
       - name: Build and push by digest
