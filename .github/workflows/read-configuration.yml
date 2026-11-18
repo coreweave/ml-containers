@@ -14,10 +14,13 @@ on:
         description: "The retrieved configuration, as JSON"
         value: ${{ jobs.read-file.outputs.config }}
 
+permissions:
+  contents: read
+
 jobs:
   read-file:
     name: Read Configuration File
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     defaults:
       run:
         shell: bash

@@ -47,11 +47,15 @@ on:
       - ".github/workflows/torch-extras.yml"
 
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   get-required-bases:
     name: Get Latest Required Base Images
     if: inputs.skip-bases-check != true
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     defaults:
       run:
         shell: bash
