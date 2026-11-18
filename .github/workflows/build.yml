@@ -44,6 +44,10 @@ on:
         description: "The resulting image version"
         value: ${{ jobs.merge.outputs.version }}
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   prepare:
     name: Prepare
