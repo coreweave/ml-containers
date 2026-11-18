@@ -24,6 +24,13 @@ if [ -e "${SCCACHE_SERVER_UDS}" ]; then
   return 1
 fi
 
+# Build without sccache when no object storage credentials were provided.
+if [ -z "${AWS_ACCESS_KEY_ID-}${AWS_SECRET_ACCESS_KEY-}" ]; then
+  unset SCCACHE_SERVER_UDS
+  echo 'sccache-start: no object storage credentials provided, building without sccache' >&2
+  return 0
+fi
+
 : "${AWS_ACCESS_KEY_ID:?} ${AWS_SECRET_ACCESS_KEY:?}"
 
 # Start the server with credentials from the environment,
