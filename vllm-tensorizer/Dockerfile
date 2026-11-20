@@ -41,11 +41,12 @@ ENV PYTORCH_NVCC='/opt/nvcc-wrapper.py' \
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache*.sh /opt/
+RUN echo "#!/bin/bash" > /opt/sccache-start.sh
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1vllm-tensorizer@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
-ENV CC=/opt/sccache-cc.sh \
-    CXX=/opt/sccache-c++.sh
+# ENV CC=/opt/sccache-cc.sh \
+#     CXX=/opt/sccache-c++.sh
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 ARG TARGETPLATFORM
