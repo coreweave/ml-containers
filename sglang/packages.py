@@ -26,7 +26,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 
-SGLANG_SOURCE = "baa9befa381511cd4d56f83980951e5a45fffc6d"
+SGLANG_SOURCE = "297e54fd105e974cdf401e5b4d20253a22c16f90"
 PROFILES = {
     "baseline": {
         "flashinfer-python": os.environ.get("FLASHINFER_VERSION"),
@@ -41,8 +41,11 @@ PROTOCOL_PINS = {
     "grpcio-health-checking": "1.81.1",
     "grpcio-reflection": "1.81.1",
 }
+# Base packages FlashInfer's requirements may raise above what the base installed
+# (the base only floors nvidia-cudnn-frontend); pip resolves these instead of the base pin.
+BASE_RAISABLE = {"nvidia-cudnn-frontend"}
 BUILD_SELECTED = {
-    "nvidia-cutlass-dsl", "quack-kernels", "apache-tvm-ffi", "cuda-tile",
+    "nvidia-cutlass-dsl", "quack-kernels", "apache-tvm-ffi",
 }
 NATIVE_PREFIXES = (
     "torch", "triton", "nvidia-", "cuda-", "nccl", "nixl", "nvshmem",
@@ -202,7 +205,8 @@ def make_constraints(requirements, before):
     selected["flashinfer-jit-cache"] = selected["flashinfer-python"]
     optional = dsl_sibling_constraints(selected)
     preserved = {name: version for name, version in before.items()
-                 if controlled_package(name) and name not in selected and name not in optional}
+                 if controlled_package(name) and name not in selected and name not in optional
+                 and name not in BASE_RAISABLE}
     for name in ("torch", "torchvision", "torchaudio", "triton"):
         require(name in before, f"Required base native package missing: {name}")
         if name in requirements:
