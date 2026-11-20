@@ -54,7 +54,7 @@ if [ "${SGLANG_PACKAGE_PROFILE:-legacy}" != legacy ]; then
     --output /opt/sglang/build-info.json
   CUDA_VISIBLE_DEVICES='' timeout 120s python3 - <<'PY'
 import torch
-from flash_attn.cute import flash_attn_func
+from sglang.kernels.ops.attention.flash_attn.cute import flash_attn_func
 from flashinfer.decode import trtllm_batch_decode_with_kv_cache_mla
 from flashinfer.fused_moe import trtllm_fp4_block_scale_moe
 from flashinfer_jit_cache import get_jit_cache_providers

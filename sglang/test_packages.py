@@ -32,8 +32,6 @@ def requirements(profile="baseline"):
         "nvidia-cutlass-dsl": f"nvidia-cutlass-dsl[cu13]=={selected['nvidia-cutlass-dsl']}",
         "quack-kernels": f"quack-kernels=={selected['quack-kernels']}",
         "apache-tvm-ffi": "apache-tvm-ffi==0.1.11",
-        "flash-attn-4": "flash-attn-4>=4.0.0b18",
-        "cuda-tile": "cuda-tile==1.6.0rc5",
         "torch": "torch>=2.13.0",
         "torchaudio": "torchaudio>=2.11.0",
     }

@@ -26,7 +26,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 
-SGLANG_SOURCE = "baa9befa381511cd4d56f83980951e5a45fffc6d"
+SGLANG_SOURCE = "5b478f175b188ee0298decdab1df2f2981d7dcc1"
 PROFILES = {
     "baseline": {
         "flashinfer-python": os.environ.get("FLASHINFER_VERSION"),
@@ -34,7 +34,7 @@ PROFILES = {
         "quack-kernels": "0.6.5",
     },
 }
-FIXED = {"flash-attn-4": "4.0.0b36", "apache-tvm-ffi": "0.1.11"}
+FIXED = {"apache-tvm-ffi": "0.1.11"}
 PROTOCOL_PINS = {
     "protobuf": "6.33.6",
     "grpcio": "1.84.0",
@@ -42,7 +42,7 @@ PROTOCOL_PINS = {
     "grpcio-reflection": "1.81.1",
 }
 BUILD_SELECTED = {
-    "nvidia-cutlass-dsl", "quack-kernels", "apache-tvm-ffi", "cuda-tile",
+    "nvidia-cutlass-dsl", "quack-kernels", "apache-tvm-ffi",
 }
 NATIVE_PREFIXES = (
     "torch", "triton", "nvidia-", "cuda-", "nccl", "nixl", "nvshmem",
@@ -232,7 +232,6 @@ def constraints(args):
     lines = [f"{name}=={version}" for name, version in sorted(pins.items())]
     Path(args.output).write_text("\n".join(lines) + "\n")
     build = [str(reqs[name]) for name in sorted(BUILD_SELECTED)]
-    build.append(f"flash-attn-4=={FIXED['flash-attn-4']}")
     build.extend(str(reqs[name]) for name in sorted(LOADER_NAMES & reqs.keys()))
     sg_document = tomllib.loads((Path(args.sglang_source) / "python/pyproject.toml").read_text())
     runai = sg_document["project"]["optional-dependencies"]["runai"]
