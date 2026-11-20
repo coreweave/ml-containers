@@ -560,6 +560,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     export USE_CCACHE=OFF && \
+    export CMAKE_ARGS='-DCMAKE_C_COMPILER_LAUNCHER= -DCMAKE_CXX_COMPILER_LAUNCHER=' && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
