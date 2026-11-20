@@ -1,0 +1,15 @@
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Commit to build'
+        required: true
+
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with: 
+      image-name: llm-finetuner
+      folder: llm-finetuner
+      build-args: "COMMIT=${{ inputs.commit }}"
