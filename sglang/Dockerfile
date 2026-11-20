@@ -15,6 +15,9 @@ FROM ${BUILDER_IMAGE} AS builder-base
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache*.sh /opt/
+# Build cache credentials are unavailable, so replace the cache server start script with a no-op.
+# Without a server socket, the compiler wrappers run the compiler directly.
+RUN echo '#!/bin/bash' > /opt/sccache-start.sh
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1sglang@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml \
