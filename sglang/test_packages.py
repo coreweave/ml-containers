@@ -151,6 +151,12 @@ class ConstraintTests(unittest.TestCase):
         self.assertEqual(preserved["triton"], "3.7.1+git5d6048aa")
         self.assertNotIn("torch", selected)
 
+    def test_base_cudnn_frontend_is_left_for_flashinfer_to_raise(self):
+        value = base() | {"nvidia-cudnn-frontend": "1.30.0"}
+        selected, preserved, pins = p.make_constraints(requirements(), value)
+        self.assertNotIn("nvidia-cudnn-frontend", pins)
+        self.assertEqual(preserved["nccl4py"], "0.5.0")
+
     def test_missing_native_base_fails(self):
         value = base(); value.pop("triton")
         with self.assertRaisesRegex(ValueError, "missing: triton"):
