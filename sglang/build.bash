@@ -27,8 +27,10 @@ cd python/sglang/kernels/aot
 # CMAKE_POLICY_VERSION_MINIMUM=3.5 silences the cmake 4.x breakage on any
 # FetchContent sub-project (e.g. dlpack inside mscclpp) that still declares
 # cmake_minimum_required(VERSION < 3.5).
-_CMAKE_PARALLEL=32
-_COMPILE_THREADS=16
+# The shared amd64 builder died (rpc EOF) several times in a row at 32 jobs and 16
+# compiler threads, so both architectures use bounded settings.
+_CMAKE_PARALLEL=16
+_COMPILE_THREADS=4
 # Bound both job-level and nvcc-internal parallelism: the previous ARM settings
 # (20 jobs, 10 compiler threads) OOM-killed the builder on SGLang v0.5.21.
 [ "$(uname -m)" != 'aarch64' ] || { _CMAKE_PARALLEL=8; _COMPILE_THREADS=4; }
