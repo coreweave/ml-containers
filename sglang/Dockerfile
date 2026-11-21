@@ -95,7 +95,7 @@ NVCC_THREADS=16
 [ "$(uname -m)" != 'aarch64' ] || NVCC_THREADS=8
 python3 /opt/build_progress.py --label flash-kda --log-path /build-logs/flash-kda.log -- \
   env FLASH_KDA_CUDA_ARCHS="${FLASHKDA_CUDA_ARCHS}" \
-      FLASH_KDA_VERSION_SUFFIX="+${FLASHKDA_COMMIT:0:12}" \
+      FLASH_KDA_VERSION_SUFFIX="+$(printf '%.12s' "${FLASHKDA_COMMIT}")" \
       NVCC_THREADS="${NVCC_THREADS}" \
   python3 -m pip wheel --no-build-isolation --no-deps -v -w /flashkda-wheels .
 FLASHKDA
