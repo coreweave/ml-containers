@@ -83,8 +83,8 @@ RUN <<'FLASHKDA'
 set -e
 mkdir /flashkda-wheels
 mkdir -p /build-logs
-: > /build-logs/flash-kda.log
-[ "${SGLANG_PACKAGE_PROFILE}" != legacy ] || exit 0
+# The legacy profile builds nothing but still hands an (empty) log to build-logs.
+if [ "${SGLANG_PACKAGE_PROFILE}" = legacy ]; then : > /build-logs/flash-kda.log; exit 0; fi
 test -n "${FLASHKDA_COMMIT}"
 git clone --filter=blob:none --no-checkout https://github.com/MoonshotAI/FlashKDA /build/flashkda
 cd /build/flashkda
