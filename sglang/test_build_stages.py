@@ -49,6 +49,19 @@ class StageTests(unittest.TestCase):
         self.assertIn('packages.py wheels', (SOURCE / 'build.bash').read_text())
         self.assertIn('packages.py audit', (SOURCE / 'install.bash').read_text())
 
+    def test_flashkda_wheel_is_built_beside_flashinfer_and_audited_with_it(self):
+        rows = stages()
+        stage = rows['flashkda-wheel']
+        self.assertTrue(stage.startswith('FROM builder-base AS flashkda-wheel'))
+        self.assertIn('git submodule update --init --recursive cutlass', stage)
+        self.assertIn('test "$(git rev-parse HEAD)" = "${FLASHKDA_COMMIT}"', stage)
+        self.assertIn('FLASH_KDA_CUDA_ARCHS', stage)
+        self.assertNotIn('SGLANG_COMMIT', stage)
+        self.assertIn('--from=flashkda-wheel /flashkda-wheels/ /wheels/', rows['builder'])
+        install = (SOURCE / 'install.bash').read_text()
+        self.assertIn('import flash_kda', install)
+        self.assertIn('_load_flash_kda', install)
+
     def test_all_profiles_gate_logger_and_stage_tests(self):
         stage = stages()['package-contract']
         self.assertLess(stage.index('unittest -v test_build_progress test_build_stages'),

@@ -32,8 +32,6 @@ def requirements(profile="baseline"):
         "nvidia-cutlass-dsl": f"nvidia-cutlass-dsl[cu13]=={selected['nvidia-cutlass-dsl']}",
         "quack-kernels": f"quack-kernels=={selected['quack-kernels']}",
         "apache-tvm-ffi": "apache-tvm-ffi==0.1.11",
-        "flash-attn-4": "flash-attn-4>=4.0.0b18",
-        "cuda-tile": "cuda-tile==1.6.0rc5",
         "torch": "torch>=2.13.0",
         "torchaudio": "torchaudio>=2.11.0",
     }
@@ -48,11 +46,16 @@ def base():
 
 def wheel_rows(profile="baseline"):
     version = p.PROFILES[profile]["flashinfer-python"] + "+cu132"
-    names = ["sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache", "flashinfer-jit-cache-sm103a"]
+    names = ["sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache", "flash-kda",
+             "flashinfer-jit-cache-sm103a"]
     rows = []
     for name in names:
         row = {"name": name, "version": version, "filename": name + ".whl",
                "bytes": 123, "sha256": "a" * 64, "requires": [], "key_modules": {}}
+        if name == "flash-kda":
+            row["version"] = "0.0.1+" + p.FLASHKDA_SOURCE[:12]
+            row["key_modules"] = {"flash_kda_C": {"path": "flash_kda_C.so", "wheel_path": "flash_kda_C.so",
+                                                  "sha256": "c" * 64, "bytes": 4}}
         if name.startswith("flashinfer-"):
             row["version"] = p.PROFILES[profile]["flashinfer-python"] if name in ("flashinfer-python", "flashinfer-cubin") else version
             row["build_metadata"] = {"__version__": row["version"], "__git_version__": FLASHINFER_SOURCE}
@@ -152,6 +155,12 @@ class ConstraintTests(unittest.TestCase):
         self.assertEqual(preserved["nixl-cu13"], "1.4.0")
         self.assertEqual(preserved["triton"], "3.7.1+git5d6048aa")
         self.assertNotIn("torch", selected)
+
+    def test_base_cudnn_frontend_is_left_for_flashinfer_to_raise(self):
+        value = base() | {"nvidia-cudnn-frontend": "1.30.0"}
+        selected, preserved, pins = p.make_constraints(requirements(), value)
+        self.assertNotIn("nvidia-cudnn-frontend", pins)
+        self.assertEqual(preserved["nccl4py"], "0.5.0")
 
     def test_missing_native_base_fails(self):
         value = base(); value.pop("triton")
@@ -292,6 +301,23 @@ class WheelSetTests(unittest.TestCase):
             p.validate_wheel_set("baseline", wheel_rows(), FLASHINFER_SOURCE,
                                  targets=("sm90a", "sm103a"))
 
+    def test_flashkda_wheel_is_required_and_pinned(self):
+        rows = [row for row in wheel_rows() if row["name"] != "flash-kda"]
+        with self.assertRaisesRegex(ValueError, "Missing built"):
+            self.check(rows)
+        rows = wheel_rows(); rows[5]["version"] = "0.0.1+" + "0" * 12
+        with self.assertRaisesRegex(ValueError, "pinned source revision"):
+            self.check(rows)
+        rows = wheel_rows(); rows[5]["version"] = "0.0.1"
+        with self.assertRaisesRegex(ValueError, "pinned source revision"):
+            self.check(rows)
+        rows = wheel_rows(); rows[5]["key_modules"] = {}
+        with self.assertRaisesRegex(ValueError, "native module"):
+            self.check(rows)
+
+    def test_flashkda_is_a_controlled_native_package(self):
+        self.assertTrue(p.controlled_package("flash-kda"))
+
     def test_missing_jit_cache_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing built"):
             self.check(wheel_rows()[:-1])
@@ -389,6 +415,44 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(set(row["key_modules"]), set(p.KEY_MODULES))
             self.assertTrue(all(value["path"].startswith("flashinfer_jit_cache/")
                                 for value in row["key_modules"].values()))
+
+    def flashkda_wheel(self, directory, members):
+        wheel = Path(directory) / "flash_kda.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr("flash_kda.dist-info/METADATA", "Name: flash_kda\nVersion: 0.0.1+" + p.FLASHKDA_SOURCE[:12] + "\n")
+            for name, payload in members.items():
+                archive.writestr(name, payload)
+        return wheel
+
+    def test_flashkda_wheel_inspection_records_native_module(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = self.flashkda_wheel(directory, {"flash_kda/__init__.py": b"", "flash_kda_C.cpython-312-x86_64-linux-gnu.so": b"\x7fELFx"})
+            row = p.inspect_wheel(wheel)
+            self.assertEqual(row["name"], "flash-kda")
+            self.assertEqual(row["key_modules"]["flash_kda_C"]["path"], "flash_kda_C.cpython-312-x86_64-linux-gnu.so")
+
+    def test_flashkda_wheel_without_native_module_or_with_wrong_payload_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "exactly one"):
+                p.inspect_wheel(self.flashkda_wheel(directory, {"flash_kda/__init__.py": b""}))
+            with self.assertRaisesRegex(ValueError, "not ELF"):
+                p.inspect_wheel(self.flashkda_wheel(directory, {"flash_kda_C.so": b"text"}))
+
+    def test_flashkda_device_code_requires_hopper_and_blackwell(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = self.flashkda_wheel(directory, {"flash_kda_C.so": b"\x7fELFx"})
+            row = p.inspect_wheel(wheel)
+            for listing, ok in (("ELF file 1: x.sm_90a.cubin\nELF file 2: x.sm_100a.cubin\nELF file 3: x.sm_103a.cubin\n", True),
+                                ("ELF file 1: x.sm_90a.cubin\nELF file 2: x.sm_100a.cubin\n", False)):
+                tool = Path(directory) / "cuobjdump"
+                tool.write_text("#!/bin/sh\ncat <<'EOF'\n" + listing + "EOF\n")
+                tool.chmod(0o755)
+                if ok:
+                    report = p.inspect_flashkda_device_code(wheel, row, tool)
+                    self.assertEqual(report["cuda_architectures"], ["sm100a", "sm103a", "sm90a"])
+                else:
+                    with self.assertRaisesRegex(ValueError, "required device code"):
+                        p.inspect_flashkda_device_code(wheel, row, tool)
 
     def test_nonliteral_metadata_is_never_executed(self):
         with tempfile.TemporaryDirectory() as directory:
