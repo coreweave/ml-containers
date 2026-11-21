@@ -72,6 +72,34 @@ fi
 
 SOURCE
 
+# FlashKDA's fused prefill kernel for SGLang's flashkda linear-attention backend.
+# Native device code is built for Hopper and both Blackwell variants. The build
+# needs no GPU because the architectures are listed explicitly.
+FROM builder-base AS flashkda-wheel
+ARG FLASHKDA_COMMIT
+ARG FLASHKDA_CUDA_ARCHS='90a,100a,103a'
+ARG SGLANG_PACKAGE_PROFILE=legacy
+RUN <<'FLASHKDA'
+set -e
+mkdir /flashkda-wheels
+mkdir -p /build-logs
+: > /build-logs/flash-kda.log
+[ "${SGLANG_PACKAGE_PROFILE}" != legacy ] || exit 0
+test -n "${FLASHKDA_COMMIT}"
+git clone --filter=blob:none --no-checkout https://github.com/MoonshotAI/FlashKDA /build/flashkda
+cd /build/flashkda
+git checkout --detach "${FLASHKDA_COMMIT}"
+test "$(git rev-parse HEAD)" = "${FLASHKDA_COMMIT}"
+git submodule update --init --recursive cutlass
+NVCC_THREADS=16
+[ "$(uname -m)" != 'aarch64' ] || NVCC_THREADS=8
+python3 /opt/build_progress.py --label flash-kda --log-path /build-logs/flash-kda.log -- \
+  env FLASH_KDA_CUDA_ARCHS="${FLASHKDA_CUDA_ARCHS}" \
+      FLASH_KDA_VERSION_SUFFIX="+${FLASHKDA_COMMIT:0:12}" \
+      NVCC_THREADS="${NVCC_THREADS}" \
+  python3 -m pip wheel --no-build-isolation --no-deps -v -w /flashkda-wheels .
+FLASHKDA
+
 FROM builder-base AS package-contract
 ARG FLASHINFER_VERSION
 ARG FLASHINFER_CUDA_LABEL
@@ -132,6 +160,7 @@ ARG BUILD_TORCH_CUDA_ARCH_LIST='8.0 8.6 8.9 9.0 10.0+PTX'
 ARG TARGETPLATFORM
 COPY --link --from=sglang-source /build/sglang/ /build/sglang/
 COPY --link --from=package-contract /contract/packages-before.json /wheels/
+COPY --link --from=flashkda-wheel /flashkda-wheels/ /wheels/
 COPY build.bash packages.py /build/
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=s3_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
@@ -146,13 +175,16 @@ COPY install.bash packages.py /wheels/
 
 FROM scratch AS build-logs
 COPY --from=builder /build-logs/ /build/
+COPY --from=flashkda-wheel /build-logs/flash-kda.log /build/
 COPY --from=package-contract /build-logs/ /contract/
 
 FROM ${BASE_IMAGE}
 ARG SGLANG_COMMIT
 ARG FLASHINFER_VERSION
+ARG FLASHKDA_COMMIT
 ARG SGLANG_PACKAGE_PROFILE=legacy
 LABEL com.coreweave.sglang.source-ref="${SGLANG_COMMIT}" \
+      com.coreweave.sglang.flashkda-commit="${FLASHKDA_COMMIT}" \
       com.coreweave.sglang.flashinfer-version="${FLASHINFER_VERSION}" \
       com.coreweave.sglang.package-profile="${SGLANG_PACKAGE_PROFILE}"
 # The CUDA 13 sgl-deep-ep wheel links against NVSHMEM but does not bundle it.

@@ -3,6 +3,8 @@ include:
   # release, so Renovate does not manage this entry.
   - sglang-commit: '5b478f175b188ee0298decdab1df2f2981d7dcc1'
     flashinfer-version: '0.7.4'
+    # MoonshotAI/FlashKDA master of 2026-11-16 (MIT). Must equal FLASHKDA_SOURCE in sglang/packages.py.
+    flashkda-commit: 'b8a96a6db49e785ba0ee103e9d87d2588ffcc4f2'
     flashinfer-cuda-label: 'cu130'
     package-profile: baseline
     base-image: 'ghcr.io/coreweave/ml-containers/torch:14744fc-nccl-cuda13.2.2-ubuntu24.04-nccl2.32.3-1-torch2.14.1-vision0.29.1-audio2.11.0-abi1'

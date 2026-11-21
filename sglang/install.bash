@@ -77,6 +77,8 @@ for req in requirements:
     ), req.name
 import cutlass.cute as cute
 import quack.activation
+import flash_kda
+import inspect
 from sglang.kernels.ops.attention.flash_attn.cute import utils as sglang_cute_utils
 
 assert callable(flash_attn_func)
@@ -85,8 +87,21 @@ assert callable(trtllm_fp4_block_scale_moe)
 assert callable(sglang_cute_utils.ex2_emulation_2)
 assert callable(cute.arch.sub_packed_f32x2)
 assert callable(quack.activation.sigmoid)
+# SGLang's flashkda prefill backend calls flash_kda.fwd with these leading
+# positional arguments and these keywords.
+fwd = list(inspect.signature(flash_kda.fwd).parameters)
+assert fwd[:10] == ['q', 'k', 'v', 'g', 'beta', 'scale', 'out', 'A_log', 'dt_bias', 'lower_bound'], fwd
+assert {'initial_state', 'final_state', 'cu_seqlens'} <= set(fwd), fwd
+assert callable(flash_kda.get_workspace_size)
 assert not torch.cuda.is_initialized()
-print('FlashAttention, FlashInfer and SGLang CuTe API import checks passed; no GPU kernels executed')
+print('FlashAttention, FlashInfer, FlashKDA and SGLang CuTe API import checks passed; no GPU kernels executed')
+PY
+  # The exact import SGLang performs on the first flashkda prefill.
+  CUDA_VISIBLE_DEVICES='' timeout 120s python3 - <<'PY'
+import flash_kda
+from sglang.srt.layers.attention.linear.kernels.kda_flashkda import _load_flash_kda
+
+assert _load_flash_kda() is flash_kda
 PY
 fi
 

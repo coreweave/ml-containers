@@ -27,6 +27,10 @@ from packaging.version import Version
 
 
 SGLANG_SOURCE = "5b478f175b188ee0298decdab1df2f2981d7dcc1"
+# MoonshotAI/FlashKDA commit built into the base; it must equal the flashkda-commit
+# configuration value, whose first 12 characters become the wheel's local version.
+FLASHKDA_SOURCE = "b8a96a6db49e785ba0ee103e9d87d2588ffcc4f2"
+FLASHKDA_ARCHITECTURES = {"90a", "100a", "103a"}
 PROFILES = {
     "baseline": {
         "flashinfer-python": os.environ.get("FLASHINFER_VERSION"),
@@ -50,7 +54,7 @@ BUILD_SELECTED = {
 NATIVE_PREFIXES = (
     "torch", "triton", "nvidia-", "cuda-", "nccl", "nixl", "nvshmem",
     "flash-attn", "sgl-", "sglang-kernel", "tilelang", "tokenspeed-",
-    "humming-kernels", "apache-tvm-ffi", "quack-kernels",
+    "humming-kernels", "apache-tvm-ffi", "quack-kernels", "flash-kda",
 )
 LOADER_NAMES = {
     "transformers", "tokenizers", "safetensors", "huggingface-hub", "hf-xet",
@@ -423,6 +427,15 @@ def inspect_wheel(path):
         if name == "flashinfer-cubin":
             result["header_subtree"] = cubin_headers(archive)
         result["key_modules"] = {}
+        if name == "flash-kda":
+            paths = [n for n in names if re.fullmatch(r"flash_kda_C[^/]*\.so", n)]
+            require(len(paths) == 1, "Expected exactly one FlashKDA native module")
+            payload = archive.read(paths[0])
+            require(payload.startswith(b"\x7fELF"), "FlashKDA native module is not ELF")
+            result["key_modules"]["flash_kda_C"] = {
+                "path": installed_path(paths[0]), "wheel_path": paths[0],
+                "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload),
+            }
         for module in KEY_MODULES:
             paths = [n for n in names if n.endswith(f"/{module}/{module}.so")]
             if paths:
@@ -439,8 +452,13 @@ def inspect_wheel(path):
 def validate_wheel_set(profile, rows, source, cuda_local=None, targets=("sm103a",)):
     require(len(rows) == len({row["name"] for row in rows}), "Duplicate wheel distributions")
     by_name = {row["name"]: row for row in rows}
-    required = {"sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache"}
+    required = {"sglang", "sglang-kernel", "flashinfer-python", "flashinfer-cubin", "flashinfer-jit-cache",
+                "flash-kda"}
     require(required <= set(by_name), f"Missing built distributions: {required - set(by_name)}")
+    flashkda = by_name["flash-kda"]
+    require(Version(flashkda["version"]).local == FLASHKDA_SOURCE[:12],
+            "FlashKDA wheel does not carry the pinned source revision")
+    require("flash_kda_C" in flashkda["key_modules"], "FlashKDA wheel lacks its native module")
     shim = by_name["flashinfer-jit-cache"]
     dependencies = {canonicalize_name(req.name): req for value in shim["requires"]
                     if (req := Requirement(value)).name.startswith("flashinfer-jit-cache-")}
@@ -483,6 +501,18 @@ def inspect_baseline_device_code(path, row, cuobjdump):
     return {"module": "fp4_quantization_103", "cuda_architectures": ["sm" + x for x in targets]}
 
 
+def inspect_flashkda_device_code(path, row, cuobjdump):
+    require(Path(cuobjdump).is_file(), "cuobjdump is required for FlashKDA architecture proof")
+    member = row["key_modules"]["flash_kda_C"]["wheel_path"]
+    with zipfile.ZipFile(path) as archive, tempfile.TemporaryDirectory() as directory:
+        target = Path(directory) / "flash_kda_C.so"
+        target.write_bytes(archive.read(member))
+        result = subprocess.run([cuobjdump, "--list-elf", str(target)], check=True, capture_output=True, text=True)
+    targets = sorted(set(re.findall(r"\bsm[_-]?(\d{2,3}[af]?)\b", result.stdout)))
+    require(FLASHKDA_ARCHITECTURES <= set(targets), "FlashKDA module lacks required device code")
+    return {"module": "flash_kda_C", "cuda_architectures": ["sm" + x for x in targets]}
+
+
 def newly_resolved_native(snapshot, versions):
     constrained = set(snapshot["selected_versions"]) | set(snapshot["preserved_versions"]) | set(snapshot["optional_versions"])
     for name, version in snapshot["preserved_versions"].items():
@@ -522,6 +552,9 @@ def wheels(args):
     reports = {}
     path = Path(args.wheel_dir) / critical["filename"]
     reports["sm103a"] = inspect_baseline_device_code(path, critical, args.cuobjdump)
+    flashkda = next(row for row in rows if row["name"] == "flash-kda")
+    reports["flash-kda"] = inspect_flashkda_device_code(
+        Path(args.wheel_dir) / flashkda["filename"], flashkda, args.cuobjdump)
     selection = {}
     strict = set(snapshot["selected_versions"]) | set(snapshot["preserved_versions"]) | set(snapshot["optional_versions"])
     added_native = newly_resolved_native(snapshot, installed(strict, evidence=selection))

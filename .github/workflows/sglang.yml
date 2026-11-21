@@ -35,4 +35,5 @@ jobs:
         SGLANG_COMMIT=${{ matrix.sglang-commit }}
         FLASHINFER_VERSION=${{ matrix.flashinfer-version }}
         FLASHINFER_CUDA_LABEL=${{ matrix.flashinfer-cuda-label }}
+        FLASHKDA_COMMIT=${{ matrix.flashkda-commit }}
         SGLANG_PACKAGE_PROFILE=${{ matrix.package-profile || 'legacy' }}
