@@ -262,10 +262,12 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
       - uses: 8BitJonny/gh-get-current-pr@2501fb7d90d212808928edebbea7f1194b592fa0  # 2.1.3
         id: PR
+        continue-on-error: true
         with:
           filterOutClosed: true
       - name: Comment
         if: steps.PR.outputs.number
+        continue-on-error: true
         uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9  # v5.0.0
         with:
           issue-number: ${{ steps.PR.outputs.number }}

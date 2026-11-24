@@ -15,9 +15,6 @@ FROM ${BUILDER_IMAGE} AS builder-base
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache*.sh /opt/
-# Build cache credentials are unavailable, so replace the cache server start script with a no-op.
-# Without a server socket, the compiler wrappers run the compiler directly.
-RUN echo '#!/bin/bash' > /opt/sccache-start.sh
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1sglang@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml \
@@ -179,3 +176,16 @@ ENV EP_NCCL_ROOT_DIR=/opt/nccl
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     cd /wheels && \
     bash install.bash
+
+RUN --mount=type=bind,source=tests,target=/video-tests <<'VIDEO'
+set -eu
+if [ "$SGLANG_PACKAGE_PROFILE" = baseline ]; then
+  # TorchCodec on amd64 loads FFmpeg 6. The arm64 wheel uses Decord.
+  if [ "$(dpkg --print-architecture)" = amd64 ]; then
+    apt-get -qq update
+    apt-get -q install -y --no-install-recommends libavdevice60
+    rm -rf /var/lib/apt/lists/*
+  fi
+  python3 /video-tests/check_video_decode.py
+fi
+VIDEO
