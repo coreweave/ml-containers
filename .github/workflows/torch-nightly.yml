@@ -114,6 +114,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.get-base-config.outputs.config) }}
     uses: ./.github/workflows/torch.yml
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
     secrets: inherit
     with:
       image-name: nightly-torch
@@ -135,6 +139,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.get-nccl-config.outputs.config) }}
     uses: ./.github/workflows/torch.yml
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
     secrets: inherit
     with:
       image-name: nightly-torch
