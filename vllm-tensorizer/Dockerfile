@@ -41,11 +41,12 @@ ENV PYTORCH_NVCC='/opt/nvcc-wrapper.py' \
 # Setup for sccache and its wrappers.
 COPY --link --from=sccache-downloader /opt/sccache /opt/sccache
 COPY --link --from=common --chmod=755 sccache*.sh /opt/
+RUN echo "#!/bin/bash" > /opt/sccache-start.sh
 COPY --link --from=common sccache.toml /etc/sccache.toml
 RUN sed -Ei 's@^(key_prefix.*)misc@\1vllm-tensorizer@' /etc/sccache.toml
 ENV SCCACHE_CONF=/etc/sccache.toml
-ENV CC=/opt/sccache-cc.sh \
-    CXX=/opt/sccache-c++.sh
+# ENV CC=/opt/sccache-cc.sh \
+#     CXX=/opt/sccache-c++.sh
 ENV TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES=1
 
 ARG TARGETPLATFORM
@@ -88,16 +89,6 @@ RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
     git checkout --detach FETCH_HEAD && \
     git submodule update --init --recursive --jobs 8 \
       --depth 1 --filter=tree:0
-# Source patches for compiled code (csrc, cmake pins) that can't be applied
-# downstream to the installed wheel. Scoped per commit: only
-# vllm-patches/<VLLM_COMMIT>/*.patch applies, in sorted order.
-COPY vllm-patches/ /patches/
-RUN if [ -d "/patches/${VLLM_COMMIT}" ]; then \
-      for patch in "/patches/${VLLM_COMMIT}"/*.patch; do \
-        echo "Applying ${patch}" && \
-        git -C vllm apply --whitespace=nowarn "$patch" || exit 1; \
-      done; \
-    fi
 
 FROM alpine/git:2.36.3 AS lmcache-downloader
 WORKDIR /git
@@ -119,7 +110,7 @@ WORKDIR /git
 # Match _DEEPGEMM_UPSTREAM_TAG in vLLM's cmake/external_projects/deepgemm.cmake
 # at VLLM_COMMIT (vllm-project/DeepGEMM); a stale wheel drifts from the JIT
 # interface vLLM was built against and breaks FP8 MoE GEMMs at serve time.
-ARG DEEPGEMM_COMMIT='0820030756945b2daec208e8e8255268360f337d'
+ARG DEEPGEMM_COMMIT='82ca617e5879d0efb0aba5b91b1c81852588af6f'
 RUN git clone --filter=tree:0 --no-single-branch --no-checkout \
       https://github.com/vllm-project/DeepGEMM && \
     cd DeepGEMM && \
@@ -162,8 +153,8 @@ RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm,target=/workspace,rw
     export NVCC_APPEND_FLAGS='-gencode=arch=compute_103a,code=sm_103a' && \
     export CMAKE_ARGS='-DCMAKE_CUDA_COMPILER=/opt/nvcc-wrapper.py' && \
     { \
-      sed -i -E 's@(CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;)(11\.0;)@\110.3;\2@' CMakeLists.txt && \
-      grep -qE 'CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;10\.3;11\.0;' CMakeLists.txt \
+      sed -i -E 's@(CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;)((10\.7;)?11\.0;)@\110.3;\2@' CMakeLists.txt && \
+      grep -qE 'CUDA_SUPPORTED_ARCHS +"[^"]*;10\.0;10\.3;(10\.7;)?11\.0;' CMakeLists.txt \
       || { echo 'Failed to apply sed patch' >&2; exit 1; }; \
     } && \
     if [ -z "$MAX_JOBS" ]; then unset MAX_JOBS; fi && \
@@ -191,6 +182,9 @@ RUN --mount=type=bind,from=lmcache-downloader,source=/git/LMCache,target=/worksp
     sed -Ei \
       '/[ "]*(torch(vision|audio)?|xformers) *[<>=~]+/d' \
     pyproject.toml requirements/*.txt && \
+    # LMCache's telemetry caps conflict with vLLM 0.34's >=1.45.1 floor.
+    sed -Ei '/^opentelemetry-(api|exporter-prometheus) /s/, *<= *[0-9.b]+//' \
+      requirements/common.txt && \
     python3 -m pip install --no-cache-dir -r requirements/build.txt && \
     /opt/build.sh
 
@@ -228,8 +222,8 @@ FROM builder-base AS deepep-builder
 # Keep in lockstep with the DEEPEP_COMMIT_HASH default in vLLM's
 # tools/ep_kernels/install_python_libraries.sh at VLLM_COMMIT: that script
 # source-patches DeepEP (e.g. csrc/kernels/backend/symmetric.hpp), so an older
-# pin whose tree lacks those files fails the build. vLLM main expects this ref.
-ARG DEEPEP_COMMIT='d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb'
+# pin whose tree lacks those files fails the build.
+ARG DEEPEP_COMMIT='a56d6156febcd9976e55adc85b5155bfac9f28f8'
 ARG NVSHMEM_VER='3.3.24'
 ENV EP_NCCL_ROOT_DIR=/opt/nccl-root
 # DeepEP requires SM 9.0+ (Hopper/Blackwell). Filter out pre-SM90 arches
@@ -272,7 +266,7 @@ RUN apt-get -qq update && \
     apt-get clean && \
     python3 -m pip install --no-cache-dir meson meson-python ninja pybind11 tomlkit patchelf
 
-ARG NIXL_TAG='v1.5.0'
+ARG NIXL_TAG='v1.5.2'
 ARG NIXL_UCX_HOME='/opt/hpcx/ucx/mt'
 
 RUN --mount=type=secret,id=s3_access_key_id,env=AWS_ACCESS_KEY_ID \
@@ -307,25 +301,13 @@ RUN apt-get -qq update && \
 # Remove inherited FA4, whose CUTLASS DSL/TVM FFI pins conflict with vLLM's.
 RUN python3 -m pip uninstall -y flash-attn-4
 
-# Match vLLM 0.33's CUTLASS DSL, TVM FFI, and QuACK requirements.
-# LMCache v0.5.6 caps opentelemetry-api at 1.40.0. Pin the matching
-# OpenTelemetry release family before installing vLLM so a newer exporter does
-# not remain installed after LMCache downgrades the SDK.
+# Match vLLM 0.34's CUTLASS DSL, TVM FFI, and QuACK requirements.
 RUN --mount=type=bind,from=freezer,target=/tmp/frozen \
     /tmp/frozen/freeze.sh torch torchaudio xformers > /tmp/constraints.txt && \
     echo 'click != 8.3.0' >> /tmp/constraints.txt && \
     echo 'nvidia-cutlass-dsl==4.8.0' >> /tmp/constraints.txt && \
     echo 'apache-tvm-ffi==0.1.11' >> /tmp/constraints.txt && \
-    echo 'quack-kernels==0.6.5' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-api==1.40.0' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-sdk==1.40.0' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-exporter-otlp==1.40.0' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-exporter-otlp-proto-common==1.40.0' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-exporter-otlp-proto-grpc==1.40.0' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-exporter-otlp-proto-http==1.40.0' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-proto==1.40.0' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-semantic-conventions==0.61b0' >> /tmp/constraints.txt && \
-    echo 'opentelemetry-exporter-prometheus==0.61b0' >> /tmp/constraints.txt
+    echo 'quack-kernels==0.6.5' >> /tmp/constraints.txt
 
 # Install upstream runtime requirements before the vLLM wheel to cache this layer.
 RUN --mount=type=bind,from=vllm-downloader,source=/git/vllm/requirements,target=/tmp/vllm-requirements \
@@ -413,8 +395,8 @@ RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     fi && \
     python3 -m pip install --no-cache-dir \
       accelerate hf_transfer 'modelscope!=1.15.0' "bitsandbytes>=${BITSANDBYTES_VER:?}" 'timm>=1.0.17' \
-      'runai-model-streamer[s3,gcs,azure]==0.17.0' "ray[cgraph]>=2.48.0" \
-      'transformers>=5.16.1,<5.21.0' \
+      'runai-model-streamer[s3,gcs,azure]>=0.17.1' "ray[cgraph]>=2.48.0" \
+      'transformers>=5.16.1,<5.23.0' \
       'llguidance>=1.7.0,<1.8.0' \
       -c /tmp/constraints.txt && \
     rm /tmp/constraints.txt && \
@@ -432,7 +414,7 @@ RUN --mount=type=bind,from=nixl-builder,source=/wheels,target=/tmp/wheels \
     python3 -m pip uninstall -y nixl nixl-cu12 nixl-cu13 2>/dev/null; \
     rm -rf /usr/local/lib/python3.12/dist-packages/nixl* /usr/local/lib/python3.12/dist-packages/.nixl* && \
     python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl && \
-    python3 -m pip install --no-cache-dir --no-deps nixl==1.5.0 && \
+    python3 -m pip install --no-cache-dir --no-deps nixl==1.5.2 && \
     # Drop the meta's nixl-cuNN deps so downstream installs (e.g. modelexpress's `nixl[cu12]`) can't
     # pull a prebuilt bundled-UCX wheel back in; our build is the only backend.
     sed -i '/^Requires-Dist: nixl-cu1[23]/d' /usr/local/lib/python3.12/dist-packages/nixl-*.dist-info/METADATA && \
