@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
-ARG BUILDER_BASE_IMAGE="nvidia/cuda:13.2.0-devel-ubuntu22.04"
-ARG FINAL_BASE_IMAGE="nvidia/cuda:13.2.0-base-ubuntu22.04"
+ARG BUILDER_BASE_IMAGE="nvidia/cuda:13.5.0-devel-ubuntu26.04"
+ARG FINAL_BASE_IMAGE="nvidia/cuda:13.5.0-base-ubuntu26.04"
 
 ARG BUILD_TORCH_VERSION="2.15.0"
 ARG BUILD_TORCH_VISION_VERSION="0.29.2"
@@ -560,6 +560,7 @@ RUN --mount=type=bind,from=pytorch-downloader,source=/git/pytorch,target=pytorch
     --mount=type=tmpfs,target=/tmp \
     . /opt/sccache-start.sh && \
     export USE_CCACHE=OFF && \
+    export CMAKE_ARGS='-DCMAKE_C_COMPILER_LAUNCHER= -DCMAKE_CXX_COMPILER_LAUNCHER=' && \
     export MAX_JOBS="${BUILD_MAX_JOBS:-$(./scale.sh "$(./effective_cpu_count.sh)" 3 32)}" && \
     echo "MAX_JOBS: ${MAX_JOBS}" && \
     export NVCC_APPEND_FLAGS="$(cat /build/nvcc.conf)" && \
