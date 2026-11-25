@@ -7,3 +7,11 @@ include:
     lmcache-commit: 'v0.5.6'
     builder-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:8a0478d-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
     final-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:8a0478d-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
+  # vLLM main, ahead of the unreleased v0.35.0 tag. Includes Inkling 2.
+  - variant: vllm035
+    vllm-commit: 'b3bad87eb137c6d2fedda152ff2d3e3df3a32952'
+    deepgemm-commit: '82ca617e5879d0efb0aba5b91b1c81852588af6f'
+    deepep-commit: 'a56d6156febcd9976e55adc85b5155bfac9f28f8'
+    lmcache-commit: 'v0.5.6'
+    builder-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:8a0478d-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
+    final-base-image: 'ghcr.io/coreweave/ml-containers/torch-extras:8a0478d-nccl-cuda13.0.3-ubuntu24.04-nccl2.30.7-1-torch2.14.0-vision0.29.0-audio2.11.0-abi1'
