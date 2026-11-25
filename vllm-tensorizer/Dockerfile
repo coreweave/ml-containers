@@ -491,6 +491,30 @@ print(
     f"{installed_python}; GLM NoPE MLA API present"
 )
 PY
+
+# cuObject client for S3-over-RDMA consumers, with the cuFile release it is
+# built against. A process loads one libcufile.so.0, so PyTorch's copy (via
+# /usr/local/cuda/lib64) is repointed at that release; cuFile's C API is
+# compatible across releases, and PyTorch uses it only for optional GPUDirect
+# Storage. The old files are removed so ldconfig cannot restore their links.
+# The packages' postinst switches the cuda alternatives to a 13.3 tree that
+# holds only cuObject and cuFile, so those entries are removed again.
+RUN set -eux; \
+    apt-get -qq update; \
+    apt-get install -y --no-install-recommends \
+      libcuobjclient-13-3=1.2.0.68-1 libcufile-13-3=1.18.1.6-1 librdmacm1; \
+    apt-get clean; \
+    update-alternatives --remove cuda /usr/local/cuda-13.3; \
+    update-alternatives --remove cuda-13 /usr/local/cuda-13.3; \
+    old="$(readlink -f /usr/local/cuda/lib64)"; new="/usr/local/cuda-13.3/targets/${old#*/targets/}"; \
+    test "${old}" != "${new}"; \
+    rm "${old}"/libcufile.so.1.* "${old}"/libcufile_rdma.so.1.*; \
+    ln -sf "${new}/libcufile.so.0" "${old}/libcufile.so.0"; \
+    ln -sf "${new}/libcufile_rdma.so.1" "${old}/libcufile_rdma.so.1"; \
+    echo "${new}" > /etc/ld.so.conf.d/cuobject.conf; \
+    ldconfig; \
+    CUFILE="${new}/libcufile.so.1.18.1" python3 -c 'import ctypes, os, torch; ctypes.CDLL("libcuobjclient.so.1"); m = {l.split()[-1] for l in open("/proc/self/maps") if "libcufile.so" in l}; assert m == {os.environ["CUFILE"]}, m'
+
 RUN python3 -m pip check
 
 EXPOSE 8080
