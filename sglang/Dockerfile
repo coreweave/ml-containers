@@ -176,3 +176,16 @@ ENV EP_NCCL_ROOT_DIR=/opt/nccl
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     cd /wheels && \
     bash install.bash
+
+RUN --mount=type=bind,source=tests,target=/video-tests <<'VIDEO'
+set -eu
+if [ "$SGLANG_PACKAGE_PROFILE" = baseline ]; then
+  # TorchCodec on amd64 loads FFmpeg 6. The arm64 wheel uses Decord.
+  if [ "$(dpkg --print-architecture)" = amd64 ]; then
+    apt-get -qq update
+    apt-get -q install -y --no-install-recommends libavdevice60
+    rm -rf /var/lib/apt/lists/*
+  fi
+  python3 /video-tests/check_video_decode.py
+fi
+VIDEO

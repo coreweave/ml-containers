@@ -33,7 +33,6 @@ def requirements(profile="baseline"):
         "quack-kernels": f"quack-kernels=={selected['quack-kernels']}",
         "apache-tvm-ffi": "apache-tvm-ffi==0.1.11",
         "flash-attn-4": "flash-attn-4>=4.0.0b18",
-        "cuda-tile": "cuda-tile==1.6.0rc5",
         "torch": "torch>=2.13.0",
         "torchaudio": "torchaudio>=2.11.0",
     }
@@ -152,6 +151,12 @@ class ConstraintTests(unittest.TestCase):
         self.assertEqual(preserved["nixl-cu13"], "1.4.0")
         self.assertEqual(preserved["triton"], "3.7.1+git5d6048aa")
         self.assertNotIn("torch", selected)
+
+    def test_base_cudnn_frontend_is_left_for_flashinfer_to_raise(self):
+        value = base() | {"nvidia-cudnn-frontend": "1.30.0"}
+        selected, preserved, pins = p.make_constraints(requirements(), value)
+        self.assertNotIn("nvidia-cudnn-frontend", pins)
+        self.assertEqual(preserved["nccl4py"], "0.5.0")
 
     def test_missing_native_base_fails(self):
         value = base(); value.pop("triton")
